@@ -210,9 +210,19 @@ Points critiques pour la conformité stricte à la spec, souvent source de misma
 | Bs bi-prediction simplifié | §8.7.2.4.5 | 6 | Deblocking incorrect en B-frames |
 | `sig_coeff_flag` context erroné | §9.3.4.2.8 | 4 | Divergence CABAC totale |
 | `cRiceParam` non adaptatif | §9.3.3.11 | 4 | Grands coefficients mal décodés |
-| Clipping inter-passe transform | §8.6.4.2 | 4 | Résidu incorrect (bit-inexact) |
+| Clipping inter-passe transform | §8.6.3 | 4 | Résidu incorrect (bit-inexact) |
 | Planar indexation incorrecte | §8.4.4.2.4 | 4 | Intra prediction fausse |
 | Transposition angular absente | §8.4.4.2.6 | 4 | Modes 2-17 incorrects |
 | TMVP incomplet | §8.5.3.2.9 | 5 | Candidat temporel absent/faux |
 | Dependent slice CABAC | §9.2 | 4 | Divergence CABAC sur slices dépendants |
 | `constrained_intra_pred_flag` | §8.4.4.2.2 | 4 | Mauvais samples de référence intra |
+| Shifts interpolation inter | §8.5.3.3.3 | 5 | Mismatch pixel sur toutes les frames inter |
+| QP delta derivation incomplet | §8.6.1 | 4 | QP incorrect par CU, résidu faux |
+| Transform skip shift incorrect | §8.6.4.2 | 4 | Résidu transform-skip bit-inexact |
+| `end_of_slice_segment_flag` absent | §7.3.8.1 | 4 | Décodeur ne sait pas quand arrêter un slice |
+| Scaling list fallback non-flat | §7.4.5 | 4 | Dequant incorrect si scaling lists actives |
+| `HandleCraAsBlaFlag` non géré | §8.1 | 5 | Crash/artifacts en random access |
+| Long-term ref pics incomplet | §8.3.2 | 5 | Échec sur bitstreams avec LT refs |
+| `cabac_init_flag` permutation | §9.2.1.1 | 4 | CABAC init tables inversées P/B |
+| AU boundary suffix SEI | §7.4.2.4.4 | 2 | Découpage incorrect des frames |
+| PCM byte alignment | §7.3.10.2 | 4 | Lecture décalée des samples PCM |

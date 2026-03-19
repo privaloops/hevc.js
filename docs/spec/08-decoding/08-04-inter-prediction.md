@@ -95,24 +95,44 @@ Pour l'interpolation 2D (xFrac != 0 ET yFrac != 0), le filtre horizontal produit
 - Le filtre vertical applique ensuite sur ces valeurs etendues
 - Le clipping final est applique apres le filtre vertical : Clip3(0, (1 << BitDepth) - 1, (result + offset) >> shift)
 
-```cpp
-// Shifts pour l'interpolation 2D :
-// Apres filtre H : pas de shift (garder la precision)
-// Apres filtre V : shift = 6 (pour 8-bit) = 14 - BitDepth + 6 - 6...
-// En fait :
-// shift_h = 0 (si suivi de filtre V) ou BitDepth - 8 (si H seulement)
-// shift_v = 6 (si precede de filtre H) ou 14 - BitDepth (si V seulement)
-// shift pour uni-pred final : pas de shift supplementaire
-// shift pour bi-pred : >> (15 - BitDepth) apres sommation
+### Shifts d'interpolation — Reference definitive (§8.5.3.3.3)
 
-// Pour 8-bit, H-only :
-// result = (sum + 0) >> 0 ... non
-// En fait la spec dit :
-// H-only ou V-only : shift1 = BitDepth - 8, rounding = (1 << (shift1 - 1)) si shift1 > 0
-// HV : H pass no shift, V pass shift = 6, pas de rounding intermediaire
+Les shifts dependent de la combinaison (H/V/HV) et du mode (uni/bi pred). Valeurs exactes :
+
+```
+Cas 1 — H-only (xFrac != 0, yFrac == 0) :
+  shift    = BitDepth - 8
+  offset   = shift > 0 ? (1 << (shift - 1)) : 0
+  resultat = Clip3(0, (1 << BitDepth) - 1, (sum + offset) >> shift)
+
+Cas 2 — V-only (xFrac == 0, yFrac != 0) :
+  shift    = 14 - BitDepth
+  offset   = 1 << (shift - 1)
+  resultat = Clip3(0, (1 << BitDepth) - 1, (sum + offset) >> shift)
+
+Cas 3 — 2D / passe H (xFrac != 0, yFrac != 0, premiere passe) :
+  shift    = BitDepth - 8
+  offset   = 0
+  resultat = (sum + offset) >> shift    // PAS de clipping
+  → valeurs intermediaires sur ~15 bits (8-bit) ou ~17 bits (10-bit)
+  → buffer int16_t pour 8-bit, int32_t pour 10-bit
+
+Cas 4 — 2D / passe V (deuxieme passe sur le buffer intermediaire) :
+  shift    = 6
+  offset   = 1 << 5 = 32
+  resultat = Clip3(0, (1 << BitDepth) - 1, (sum + offset) >> shift)
 ```
 
-**Attention** : Les shifts exacts dependent de la combinaison (H/V/HV) et de l'utilisation (uni/bi pred). Se referer exactement a §8.5.3.3.3.
+Pour la **bi-prediction**, l'interpolation produit des valeurs en precision etendue (pas de clip final dans les cas 1-4), puis :
+
+```
+Bi-pred averaging :
+  shift    = 15 - BitDepth
+  offset   = 1 << (shift - 1)
+  resultat = Clip3(0, (1 << BitDepth) - 1, (predL0 + predL1 + offset) >> shift)
+```
+
+Dans ce cas, les interpolations H-only et V-only utilisent des shifts differents pour conserver la precision etendue. Se referer a §8.5.3.3.3.1 pour les details.
 
 ## 8.5.3.3 — Chroma Sample Interpolation
 
@@ -153,12 +173,12 @@ predSamples[x][y] = Clip3(0, maxVal,
 ### Merge Mode (8.5.3.2.2)
 
 ```
-Candidats merge (dans l'ordre de priorite) :
-1. A1 (gauche-bas)
-2. B1 (haut-droite)
-3. B0 (haut-droite du bloc)
-4. A0 (bas-gauche du bloc)
-5. B2 (haut-gauche) — seulement si < 4 candidats
+Candidats merge (dans l'ordre de priorite, Figure 8-5) :
+1. A1 (left)       : (xPb-1, yPb+nPbH-1)  — bas du cote gauche du PU
+2. B1 (above)      : (xPb+nPbW-1, yPb-1)  — droite du cote superieur du PU
+3. B0 (above-right) : (xPb+nPbW, yPb-1)    — coin superieur droit du PU
+4. A0 (below-left)  : (xPb-1, yPb+nPbH)    — coin inferieur gauche du PU
+5. B2 (above-left)  : (xPb-1, yPb-1)       — coin superieur gauche, seulement si < 4 candidats
 6. Temporal candidate (co-located block dans la ref pic)
 7. Zero MV (padding si < MaxNumMergeCand)
 ```

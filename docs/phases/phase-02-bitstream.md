@@ -47,10 +47,15 @@ Phase 1 complétée (BitstreamReader, infrastructure).
 Detecter les frontieres entre Access Units (= frames) dans le flux NAL.
 
 - [ ] Regle principale : un nouveau AU commence quand on rencontre un VCL NAL avec `first_slice_segment_in_pic_flag == 1`
-- [ ] AUD (Access Unit Delimiter) : si present, marque explicitement le debut d'un AU
-- [ ] Regles supplementaires : un non-VCL NAL (VPS/SPS/PPS/SEI) apres un VCL NAL marque un nouveau AU
+- [ ] AUD (Access Unit Delimiter, nal_unit_type == 35) : si present, marque explicitement le debut d'un AU
+- [ ] Un **prefix SEI** (nal_unit_type == 39) apres un VCL NAL declenche un nouveau AU
+- [ ] Un **suffix SEI** (nal_unit_type == 40) apres un VCL NAL **NE declenche PAS** un nouveau AU — il appartient au meme AU que le VCL precedent
+- [ ] VPS/SPS/PPS (nal_unit_type 32-34) apres un VCL NAL declenchent un nouveau AU
+- [ ] EOS (nal_unit_type == 36) et EOB (nal_unit_type == 37) terminent le AU courant
+- [ ] RSV_NVCL (41..47) et UNSPEC (48..63) apres un VCL NAL declenchent un nouveau AU
 - [ ] Stocker les NAL units groupes par AU pour le decodage frame-by-frame
 - [ ] Tests : verifier le nombre de frames detectees vs le nombre reel
+- [ ] Tests : bitstream avec suffix SEI (ex: decoded_picture_hash) — ne doit PAS creer un AU supplementaire
 
 ### 2.7 — more_rbsp_data() (§7.2)
 Implementation correcte de la fonction `more_rbsp_data()` :

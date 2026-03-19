@@ -34,9 +34,16 @@ Phase 2 complétée (NAL parsing, BitstreamReader avec ue/se).
 - [ ] Bit depth luma/chroma
 - [ ] Quad-tree config (MinCb, Ctb, MinTb, MaxTb sizes)
 - [ ] Toutes les valeurs dérivées (§7.4.3.2.1)
-- [ ] Scaling list data (peut être stubbed avec flat 16 d'abord)
+- [ ] Scaling list data avec mecanisme de fallback complet (§7.4.5) :
+  - Si `scaling_list_enabled_flag == 0` : facteurs flat = 16 pour toutes les tailles
+  - Si `scaling_list_enabled_flag == 1` et `sps_scaling_list_data_present_flag == 0` : utiliser les matrices par defaut (Tables 7-3, 7-4, 7-5 — **non flat** pour 8x8, 16x16, 32x32)
+  - Si `scaling_list_pred_mode_flag == 0` : copier depuis une autre matrice via `scaling_list_pred_matrix_id_delta`
+  - Les matrices par defaut sont differentes pour intra et inter
 - [ ] Short-term reference picture sets (§7.3.7)
-- [ ] Long-term reference pics config
+- [ ] Long-term reference pics config :
+  - `num_long_term_ref_pics_sps` et `lt_ref_pic_poc_lsb_sps[i]`
+  - `used_by_curr_pic_lt_sps_flag[i]`
+  - Ces valeurs sont referencees dans le slice header par index
 - [ ] VUI parameters (§E.2, peut être stubbed)
 - [ ] Tests : chaque valeur dérivée vérifiée
 
@@ -55,12 +62,30 @@ Phase 2 complétée (NAL parsing, BitstreamReader avec ue/se).
 - [ ] Slice type (I/P/B)
 - [ ] POC (slice_pic_order_cnt_lsb)
 - [ ] Short-term RPS selection/parsing
-- [ ] Long-term ref pics
+- [ ] Long-term ref pics (parsing complet) :
+  - `num_long_term_sps` : nombre de LT refs provenant du SPS
+  - `num_long_term_pics` : nombre de LT refs specifiees directement
+  - `lt_idx_sps[i]` : index dans la table SPS
+  - `poc_lsb_lt[i]` : POC LSB pour les LT specifiees dans le slice
+  - `used_by_curr_pic_lt_flag[i]`
+  - `delta_poc_msb_present_flag[i]` et `delta_poc_msb_cycle_lt[i]` : pour disambiguer les LT dont le POC LSB wrappe
 - [ ] Reference picture list modification
-- [ ] Pred weight table
+- [ ] Pred weight table (`pred_weight_table()`) :
+  - `luma_log2_weight_denom` (ue)
+  - `delta_chroma_log2_weight_denom` (se)
+  - Pour chaque ref dans L0/L1 : `luma_weight_l0_flag[i]`, `chroma_weight_l0_flag[i]`
+  - Si flag=1 : `delta_luma_weight_l0[i]` (se), `luma_offset_l0[i]` (se)
+  - Si flag=0 : weight = `1 << luma_log2_weight_denom`, offset = 0 (valeurs par defaut)
+  - Chroma : `delta_chroma_weight_l0[i][j]`, `delta_chroma_offset_l0[i][j]`
 - [ ] SAO flags
-- [ ] Deblocking overrides
+- [ ] Deblocking overrides :
+  - `slice_deblocking_filter_disabled_flag`
+  - `slice_beta_offset_div2`, `slice_tc_offset_div2`
 - [ ] QP delta
+- [ ] Entry point offsets (requis meme en Phase 3 pour parser le slice header complet) :
+  - `num_entry_point_offsets` (ue) — vaut 0 si pas de tiles ni WPP
+  - Si > 0 : `offset_len_minus1` (ue) et `entry_point_offset_minus1[i]` (u(v))
+  - Le parsing est necessaire pour atteindre le byte alignment correctement
 - [ ] Byte alignment
 - [ ] Dependent slice segments
 
