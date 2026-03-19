@@ -96,7 +96,7 @@ const int16_t dct_32x32[32][32] = { /* ... */ };
 ### Processus de transform inverse
 
 ```cpp
-// 8.6.4.2 — Transform process (2D = vertical puis horizontal)
+// 8.6.3 — Transform process (2D = vertical puis horizontal)
 void transform_inverse(int16_t* coeffs, int16_t* residual, int log2TrSize,
                         int cIdx, bool intra) {
     int nTbS = 1 << log2TrSize;
@@ -109,10 +109,17 @@ void transform_inverse(int16_t* coeffs, int16_t* residual, int log2TrSize,
     else
         matrix = get_dct_matrix(nTbS);
 
-    // Transform skip check
+    // Transform skip check (§8.6.4.2)
     if (transform_skip_flag) {
-        // Pas de transform, juste un shift
-        // residual = coeffs << shift
+        // Pas de transform inverse (ni DCT ni DST)
+        // Les coefficients apres dequant sont directement le residu spatial
+        // Mais un shift specifique s'applique :
+        int tsShift = 15 - BitDepth;
+        for (int y = 0; y < nTbS; y++)
+            for (int x = 0; x < nTbS; x++)
+                residual[y*nTbS+x] = (coeffs[y*nTbS+x] + (1 << (tsShift-1))) >> tsShift;
+        // Note : en transform skip, le scan order dans residual_coding est
+        // HORIZONTAL (pas diagonal) — voir §7.4.9.11
         return;
     }
 

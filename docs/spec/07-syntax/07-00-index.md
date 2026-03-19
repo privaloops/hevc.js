@@ -9,6 +9,7 @@ Ce chapitre est le coeur du parsing HEVC. Chaque sous-section correspond à une 
 | §7.3.1 | `07-03-nal-unit.md` | NAL unit syntax | 2 |
 | §7.3.2-4 | `07-04-parameter-sets.md` | VPS, SPS, PPS | 3 |
 | §7.3.6 | `07-05-slice-header.md` | Slice segment header | 3 |
+| §7.3.8.1 | `07-08-slice-segment-data.md` | Boucle slice_segment_data(), end_of_slice_segment_flag | 4 |
 | §7.3.8-11 | `07-06-slice-data.md` | CTU, CU, PU, TU | 4-5 |
 | §7.3.7 | `07-07-sei.md` | SEI messages | Optionnel |
 

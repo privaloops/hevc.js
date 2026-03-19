@@ -12,17 +12,29 @@ Phase 5 complétée (inter prediction fonctionnelle, sans filtres).
 
 ## Tâches
 
-### 6.1 — Deblocking : Boundary Derivation
+### 6.1 — Deblocking : Pre-checks et Boundary Derivation
+- [ ] Verification `slice_deblocking_filter_disabled_flag` : si actif, **aucun** filtrage pour ce slice
+- [ ] Verification `pps_deblocking_filter_disabled_flag` : si actif et pas d'override slice, aucun filtrage
 - [ ] Identifier les edges à filtrer (frontières CU/TU/PU)
 - [ ] Alignement sur grille 8 pixels (luma)
 - [ ] Exclusion des bords de picture/tile/slice
 - [ ] `loop_filter_across_tiles_enabled_flag`
 - [ ] `slice_loop_filter_across_slices_enabled_flag`
 
-### 6.2 — Deblocking : Boundary Strength
-- [ ] Bs = 2 si intra
-- [ ] Bs = 1 si coefficients non-nuls ou MV/refPic différents
-- [ ] Bs = 0 sinon
+### 6.2 — Deblocking : Boundary Strength (§8.7.2.4)
+- [ ] Bs = 2 si l'un des blocs est intra ou PCM (avec `pcm_loop_filter_disabled_flag == 0`)
+- [ ] Bs = 2 si l'un des blocs a `cu_transquant_bypass_flag == 1` — pas de filtrage
+- [ ] Bs = 1 si l'un des blocs a des coefficients de transform non-nuls (cbf != 0)
+- [ ] Bs = 1 si les reference pictures different entre les deux blocs
+- [ ] Bs = 0 — conditions detaillees pour **uni-prediction** :
+  - Meme reference picture ET `|mvP - mvQ| < 4` en 1/4-pel (pour chaque composante x et y)
+- [ ] Bs = 0 — conditions detaillees pour **bi-prediction** (combinatoire) :
+  - Les deux blocs sont bi-pred
+  - Les paires (refPic0, mv0) et (refPic1, mv1) matchent dans **l'un des deux ordres** :
+    - Ordre direct : `refPicP_L0 == refPicQ_L0 && refPicP_L1 == refPicQ_L1 && |mvP_L0-mvQ_L0| < 4 && |mvP_L1-mvQ_L1| < 4`
+    - Ordre croise : `refPicP_L0 == refPicQ_L1 && refPicP_L1 == refPicQ_L0 && |mvP_L0-mvQ_L1| < 4 && |mvP_L1-mvQ_L0| < 4`
+  - Si **aucun** des deux ordres ne matche → Bs = 1
+  - **Piege** : quand les deux ref pics L0 et L1 sont identiques, il faut tester les DEUX ordres et prendre Bs = 0 si l'un des deux matche
 - [ ] Stockage de Bs pour chaque edge
 
 ### 6.3 — Deblocking : beta et tC
@@ -62,8 +74,16 @@ Phase 5 complétée (inter prediction fonctionnelle, sans filtres).
 
 ### 6.10 — Intégration
 - [ ] Ordre correct : reconstruction -> deblocking -> SAO
-- [ ] SAO opère sur les samples post-deblocking
-- [ ] Gestion des bords de CTU pour les comparaisons EO
+- [ ] SAO opère sur les samples **post-deblocking** :
+  - Le deblocking est applique sur toute la picture d'abord
+  - Puis le SAO est applique en utilisant les samples debloques
+  - Pour les comparaisons EO aux bords de CTU, les samples du CTU voisin sont ceux **apres deblocking** (pas apres SAO du voisin)
+- [ ] Gestion des bords de picture pour les comparaisons EO :
+  - Les comparaisons qui sortent des limites de la picture ne sont **pas effectuees**
+  - La categorie est fixee a 0 (pas d'offset) pour ces positions
+- [ ] Gestion des bords de CTU/slice/tile pour les comparaisons EO :
+  - Verifier `loop_filter_across_slices_enabled_flag` et `loop_filter_across_tiles_enabled_flag`
+  - Si desactive, les samples de l'autre slice/tile ne sont pas utilises pour la comparaison
 
 ## Critère de sortie
 
