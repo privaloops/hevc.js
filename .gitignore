@@ -1,0 +1,36 @@
+# Build
+build/
+build-wasm/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Compiled
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.wasm
+*.js.map
+
+# Test data
+*.yuv
+*.265
+*.h265
+*.hevc
+tests/conformance/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
