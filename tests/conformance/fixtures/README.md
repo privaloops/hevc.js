@@ -15,6 +15,18 @@ de reference calcule sur le YUV decode par ffmpeg (libavcodec).
 | `b_qcif_10f.265` | 171K | 176x144 | 10 | I+P+B | off | off | 5 | `dffe2712c0561c75ee40256d59299826` |
 | `full_qcif_10f.265` | 171K | 176x144 | 10 | I+P+B | **on** | **on** | 6 | `a4984ee61d18ac9619808c5338132eaa` |
 
+## Toy bitstreams (debug step-by-step)
+
+| Fichier | Taille | Resolution | Frames | QP | Phase | MD5 (YUV decode) |
+|---------|--------|------------|--------|----|-------|------------------|
+| `toy_qp30.265` | 187B | 64x64 | 1 | 30 | 4 | `9f59878470d904dc2e162d3d191611af` |
+| `toy_qp45.265` | 141B | 64x64 | 1 | 45 | 4 | `52ca5108bd4354383a9d29d96cf64b47` |
+| `toy_qp10.265` | 274B | 64x64 | 1 | 10 | 4 | `ff469ce7e872152490b9b39b0d05dd7b` |
+
+Encodage : `x265 --preset ultrafast --keyint 1 --no-deblock --no-sao --no-wpp --no-info --qp <QP>`
+
+Ces bitstreams ont 1 seul CTU (64x64), ideal pour debugger CABAC et intra prediction etape par etape.
+
 ## Parametres d'encodage communs
 
 ```
