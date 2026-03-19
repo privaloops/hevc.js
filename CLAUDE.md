@@ -26,15 +26,85 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 # Build WASM
 emcmake cmake -B build-wasm && cmake --build build-wasm
 
-# Tests
+# Tests unitaires (doivent TOUJOURS passer)
 cd build && ctest --output-on-failure
 
-# Oracle comparison
-python3 tools/oracle_compare.py --input test.265 --decoder ./build/hevc-torture --oracle libde265
+# Tests oracle par phase (skip = pas encore implémenté, c'est normal)
+cd build && ctest -L phase4 --output-on-failure
+cd build && ctest -L phase5 --output-on-failure
+cd build && ctest -L phase6 --output-on-failure
+cd build && ctest -L oracle --output-on-failure    # tous les oracle tests
+
+# Comparaison YUV pixel-perfect manuelle
+python3 tools/oracle_compare.py ref.yuv test.yuv <width> <height>
 
 # Lint
 clang-tidy src/**/*.cpp -- -std=c++17
 ```
+
+## Workflow de développement
+
+### Procédure pour chaque phase
+
+1. **Lire** : consulte le routing par phase (ci-dessous) pour savoir quels docs lire
+2. **Coder** : implémente en suivant les tâches de `docs/phases/phase-XX-*.md`
+3. **Tests unitaires** : écris des tests pour chaque fonction, lance `ctest --output-on-failure`
+4. **Tests oracle** : quand ta phase est complète, les oracle tests de cette phase doivent passer
+5. **Debug mismatch** : si un oracle test FAIL, suis la procédure de debug ci-dessous
+
+### Tests oracle — comment ça marche
+
+7 bitstreams de test sont dans `tests/conformance/fixtures/` avec des hash MD5 de référence (calculés depuis ffmpeg). Le script `tools/oracle_test.sh` :
+
+1. Décode le bitstream avec `./build/hevc-torture <input> -o <output.yuv>`
+2. Calcule le MD5 du YUV produit
+3. Compare avec le MD5 de référence
+
+| Résultat | Signification | Action |
+|----------|---------------|--------|
+| **Pass** | MD5 identique = pixel-perfect | Tout va bien |
+| **Skip** | Le décodeur ne produit pas encore de YUV | Normal si la phase n'est pas implémentée |
+| **Fail** | MD5 différent = mismatch pixel | Debugger (voir ci-dessous) |
+
+### Jalons oracle par phase
+
+| Phase terminée | Tests oracle qui doivent passer |
+|----------------|-------------------------------|
+| Phase 4 (Intra) | `oracle_i_64x64_qp22` |
+| Phase 5 (Inter) | `oracle_p_qcif_10f`, `oracle_b_qcif_10f` |
+| Phase 6 (Filters) | `oracle_i_64x64_deblock`, `oracle_i_64x64_sao`, `oracle_i_64x64_full`, `oracle_full_qcif_10f` |
+
+Le test `oracle_full_qcif_10f` (label `milestone`) = **Main profile complet**. Quand il passe, le décodeur est conforme.
+
+### Debugging d'un oracle FAIL
+
+Quand un test oracle échoue (MD5 mismatch) :
+
+```bash
+# 1. Décoder avec hevc-torture
+./build/hevc-torture tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
+
+# 2. Décoder la référence avec ffmpeg
+ffmpeg -y -i tests/conformance/fixtures/i_64x64_qp22.265 -pix_fmt yuv420p /tmp/ref.yuv
+
+# 3. Comparer pixel par pixel
+python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv 64 64
+
+# Output exemple :
+# FAIL: 1/1 frames differ
+#   Frame 0: 42 pixels differ, max_diff=3, PSNR=45.2dB
+
+# 4. Identifier le premier pixel faux -> localiser le CTU/CU
+# 5. Ajouter du debug logging (HEVC_DEBUG) pour ce CU
+# 6. Comparer les valeurs intermédiaires :
+#    - prediction samples (avant résidu)
+#    - residual (après transform inverse)
+#    - reconstruction (avant filtres)
+#    - après deblocking
+#    - après SAO
+```
+
+Voir `docs/oracle/oracle-strategy.md` pour la stratégie complète de debugging.
 
 ## Structure
 
