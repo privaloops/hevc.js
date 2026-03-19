@@ -65,12 +65,13 @@ if (filter_flag) {
 
 // Strong intra smoothing (8.5.4.2.3) pour 32x32
 if (strong_intra_smoothing_enabled_flag && nTbS == 32 && filter_flag) {
-    bool bilinear = (abs(p[-1][63] + p[63][-1] - 2*p[-1][-1]) < threshold);
+    int threshold = 1 << (BitDepthY - 5);
+    bool bilinear = (abs(p[-1][2*nTbS-1] + p[2*nTbS-1][-1] - 2*p[-1][-1]) < threshold);
     if (bilinear) {
         // Interpolation bilineaire entre les coins
-        for (i = 0; i < 63; i++) {
-            p'[-1][i] = ((63-i)*p[-1][-1] + (i+1)*p[-1][63] + 32) >> 6;
-            p'[i][-1] = ((63-i)*p[-1][-1] + (i+1)*p[63][-1] + 32) >> 6;
+        for (i = 0; i < 2*nTbS - 1; i++) {
+            p'[-1][i] = ((2*nTbS-1-i)*p[-1][-1] + (i+1)*p[-1][2*nTbS-1] + nTbS) >> (log2(nTbS)+1);
+            p'[i][-1] = ((2*nTbS-1-i)*p[-1][-1] + (i+1)*p[2*nTbS-1][-1] + nTbS) >> (log2(nTbS)+1);
         }
     }
 }
@@ -79,24 +80,38 @@ if (strong_intra_smoothing_enabled_flag && nTbS == 32 && filter_flag) {
 ## 8.5.4.4 — Planar Mode (Mode 0)
 
 ```cpp
-// 8.5.4.2.4 — Interpolation bilineaire
-void intra_pred_planar(int16_t* pred, int stride, const int16_t* ref, int nTbS) {
-    int log2 = log2(nTbS);
+// 8.4.4.2.4 — Planar prediction
+//
+// 1D layout convention for reference samples p[]:
+//   p[0..2N]   = top row:   p[x][-1] for x = -1..2N-1  (index 0 = p[-1][-1] = corner)
+//   p[2N+1..4N] = left col: p[-1][y] for y = 0..2N-1    (index 2N+1 = p[-1][0])
+//
+// Mapping from spec 2D notation to 1D array:
+//   p[x][-1]   -> p[x + 1]         (x = -1..2N-1, so indices 0..2N)
+//   p[-1][y]   -> p[2*nTbS + 1 + y] (y = 0..2N-1, so indices 2N+1..4N)
+//   p[-1][-1]  -> p[0]              (corner, same as p[x+1] with x=-1)
+
+void intra_pred_planar(int16_t* pred, int stride, const int16_t* p, int nTbS) {
+    int log2 = Log2(nTbS);
+    // Shorthand accessors matching spec notation
+    // p_top(x)  = p[x][-1]  -> p[x + 1]
+    // p_left(y) = p[-1][y]  -> p[2*nTbS + 1 + y]
+    // p_top(nTbS)           = p[nTbS][-1]  (top-right)  -> p[nTbS + 1]
+    // p_left(nTbS)          = p[-1][nTbS]  (bottom-left) -> p[2*nTbS + 1 + nTbS]
+
     for (int y = 0; y < nTbS; y++) {
         for (int x = 0; x < nTbS; x++) {
             pred[y*stride + x] = (
-                (nTbS - 1 - x) * ref[-1 + y+1]  +    // left ref, weighted
-                (x + 1)        * ref[nTbS + 1 + (-1)] + // top-right corner
-                (nTbS - 1 - y) * ref[x + 1]      +    // top ref, weighted
-                (y + 1)        * ref[-1 + nTbS+1]  +  // bottom-left corner
-                nTbS  // rounding
+                (nTbS - 1 - x) * p[2*nTbS + 1 + y]     +  // p[-1][y]   (left)
+                (x + 1)        * p[nTbS + 1]            +  // p[nTbS][-1] (top-right)
+                (nTbS - 1 - y) * p[x + 1]               +  // p[x][-1]   (top)
+                (y + 1)        * p[2*nTbS + 1 + nTbS]   +  // p[-1][nTbS] (bottom-left)
+                nTbS                                        // rounding
             ) >> (log2 + 1);
         }
     }
 }
 ```
-
-*Note : l'indexation ci-dessus est schematique. L'implementation reelle doit respecter exactement le layout du vecteur de reference.*
 
 ## 8.5.4.5 — DC Mode (Mode 1)
 
@@ -152,6 +167,8 @@ void intra_pred_angular(int16_t* pred, int stride, const int16_t* ref,
     bool is_horizontal = (mode >= 2 && mode <= 17);  // modes 2-17
 
     // Construire le vecteur de reference etendu
+    // For horizontal modes: main = left refs, side = top refs
+    // For vertical modes:   main = top refs,  side = left refs
     int16_t refMain[2*64+1];  // taille max pour 32x32
     int16_t refSide[2*64+1];
 
@@ -162,39 +179,56 @@ void intra_pred_angular(int16_t* pred, int stride, const int16_t* ref,
         // Main = top, Side = left
     }
 
-    // Extension pour angles negatifs
+    // Extension pour angles negatifs (spec 8.4.4.2.6)
+    // For negative angles, extend refMain with projected samples from refSide
     if (angle < 0) {
         int invAng = invAngle[mode];
-        for (int i = -1; i >= -(nTbS * angle >> 5) - 1; i--) {
-            refMain[i] = refSide[-1 + ((-1 - i) * invAng + 128) >> 8];
+        // x goes from -1 down to the limit determined by the angle
+        for (int x = -1; x >= -(nTbS * angle >> 5) - 1; x--) {
+            refMain[x] = refSide[(x * invAng + 128) >> 8];
         }
     }
 
     // Prediction
+    // For both horizontal and vertical modes, the prediction loop is written
+    // in "vertical" form: outer loop = y (rows), inner loop = x (columns).
+    // For horizontal modes (2-17), the roles of x/y are swapped relative to
+    // the output block — the result is transposed after the loop.
     for (int y = 0; y < nTbS; y++) {
+        int iIdx  = ((y + 1) * angle) >> 5;
+        int iFact = ((y + 1) * angle) & 31;
         for (int x = 0; x < nTbS; x++) {
-            int idx, fact;
-            if (is_horizontal) {
-                idx = ((y + 1) * angle) >> 5;
-                fact = ((y + 1) * angle) & 31;
-            } else {
-                idx = ((x + 1) * angle) >> 5;  // Note: simplified, actual depends on mode
-                fact = ((x + 1) * angle) & 31;
-            }
-
-            if (fact != 0)
-                pred[y*stride+x] = ((32-fact)*refMain[idx+1+x] + fact*refMain[idx+2+x] + 16) >> 5;
+            if (iFact != 0)
+                pred[y*stride+x] = ((32-iFact)*refMain[x+iIdx+1] + iFact*refMain[x+iIdx+2] + 16) >> 5;
             else
-                pred[y*stride+x] = refMain[idx+1+x];
+                pred[y*stride+x] = refMain[x+iIdx+1];
         }
     }
 
-    // Post-filter pour modes purement vertical (26) ou horizontal (10)
-    // sur la premiere row/column, seulement pour luma
+    // For horizontal modes (2-17), the prediction was computed in transposed form
+    // (using left refs as main, iterating as if vertical). Transpose the result.
+    if (is_horizontal) {
+        for (int y = 0; y < nTbS; y++)
+            for (int x = y + 1; x < nTbS; x++)
+                std::swap(pred[y*stride+x], pred[x*stride+y]);
+    }
+
+    // Post-filtering for pure horizontal (mode 10) and pure vertical (mode 26)
+    // Only for luma (cIdx == 0) and only the first row/column
+    // 8.4.4.2.6 — applies when intraPredAngle == 0
+    if (cIdx == 0 && (mode == 10 || mode == 26)) {
+        if (mode == 26) {
+            // Vertical: filter first column
+            for (int y = 0; y < nTbS; y++)
+                pred[y*stride] = Clip1Y(p[0][-1] + ((p[-1][y] - p[-1][-1]) >> 1));
+        } else {
+            // Horizontal: filter first row
+            for (int x = 0; x < nTbS; x++)
+                pred[x] = Clip1Y(p[-1][0] + ((p[x][-1] - p[-1][-1]) >> 1));
+        }
+    }
 }
 ```
-
-*Note : le pseudo-code ci-dessus est simplifie. La spec distingue soigneusement les cas horizontal/vertical et l'indexation change. Il faut suivre la spec exactement.*
 
 ## Intra Mode Derivation — 8.5.4.1
 

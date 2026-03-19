@@ -138,6 +138,43 @@ bool is_rasl_nal(uint8_t type) { return type == 8 || type == 9; }
 bool is_radl_nal(uint8_t type) { return type == 6 || type == 7; }
 ```
 
+## Delimitation des Access Units (§7.4.2.4.4)
+
+Un Access Unit (AU) correspond a une frame decodee. La detection des frontieres d'AU est necessaire pour le decodage frame-by-frame.
+
+### Regles de detection
+
+Un nouveau AU commence quand l'une de ces conditions est remplie :
+
+1. **AUD** : Un `AUD_NUT` (type 35) marque toujours le debut d'un AU
+2. **Premier VCL** : Un VCL NAL avec `first_slice_segment_in_pic_flag == 1`
+3. **Transition non-VCL -> VCL** : Certains NAL types non-VCL (VPS, SPS, PPS, PREFIX_SEI) apres un VCL NAL indiquent un nouveau AU
+
+```cpp
+bool is_new_access_unit(const NalUnit& prev_vcl, const NalUnit& current) {
+    // AUD est toujours un delimiteur
+    if (current.header.nal_unit_type == AUD_NUT)
+        return true;
+
+    // Les non-VCL NAL types suivants, apres un VCL, indiquent un nouveau AU
+    if (prev_vcl.valid && !is_vcl_nal(current.header.nal_unit_type)) {
+        uint8_t t = current.header.nal_unit_type;
+        if (t == VPS_NUT || t == SPS_NUT || t == PPS_NUT ||
+            t == PREFIX_SEI_NUT || t == AUD_NUT ||
+            (t >= 41 && t <= 44) || (t >= 48 && t <= 55))
+            return true;
+    }
+
+    // VCL NAL avec first_slice_segment_in_pic_flag
+    if (is_vcl_nal(current.header.nal_unit_type)) {
+        // Lire le premier bit du RBSP = first_slice_segment_in_pic_flag
+        return current.rbsp_data[0] & 0x80;  // premier bit du premier byte
+    }
+
+    return false;
+}
+```
+
 ## Checklist
 
 - [ ] BitstreamReader avec read_bits, read_u, read_i, byte_aligned, more_rbsp_data

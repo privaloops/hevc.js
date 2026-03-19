@@ -74,8 +74,10 @@ Le DPB stocke les frames de reference et les frames en attente d'output. Sa tail
    b. Pour chaque CTU dans le slice :
       i.   Parser coding_tree_unit (CABAC)
       ii.  Pour chaque CU :
-           - Si intra : derive intra prediction
-           - Si inter : derive motion vectors, interpolation
+           - Si PCM : reconstruction directe (bypass prediction/transform), reset CABAC
+           - Si intra : derive intra prediction (35 modes luma, 5 modes chroma)
+           - Si inter : derive motion vectors (merge/AMVP), interpolation (8-tap luma, 4-tap chroma)
+           - Si skip : merge mode, pas de résidu
       iii. Transform inverse + dequant
       iv.  Reconstruction = prediction + residual
    c. Loop filters (deblocking + SAO) sur la picture complete
@@ -101,3 +103,8 @@ Le DPB stocke les frames de reference et les frames en attente d'output. Sa tail
 | §8.7.2 | Deblocking | src/filters/deblocking.cpp |
 | §8.7.3 | SAO | src/filters/sao.cpp |
 | §9 | CABAC | src/bitstream/cabac.cpp |
+| §7.3.10.2 | PCM Samples | src/syntax/pcm.cpp |
+| §8.1 | General Decoding | src/decoding/decoder.cpp |
+| §8.3.1 | POC Derivation | src/decoding/ref_pictures.cpp |
+| §C.5 | DPB Output/Bumping | src/common/dpb.cpp |
+| Annexe A | Profile/Level | src/syntax/profile_tier_level.cpp |

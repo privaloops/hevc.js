@@ -16,40 +16,30 @@ Coefficients CABAC -> Dequant (scaling) -> Transform inverse -> Residu
 // Pour chaque coefficient (x, y) du TU :
 // d[x][y] = coefficient decode par CABAC (TransCoeffLevel)
 
-// 8.6.2 — Scaling process
-int scale_coefficient(int coeff, int qp, int log2TrSize, int cIdx,
-                       const ScalingList* scaling_list) {
-    // 1. Determiner le QP effectif
-    int qpPrime;
-    if (cIdx == 0)
-        qpPrime = qp;  // Qp'Y derive du slice/CU QP delta
-    else
-        qpPrime = qpC;  // Qp'Cb ou Qp'Cr (table de mapping 8.6.1)
-
-    int qpPer = qpPrime / 6;
-    int qpRem = qpPrime % 6;
-
-    // 2. Scaling factor
-    int scale;
-    if (scaling_list) {
-        // Utiliser la matrice de scaling list
-        scale = scaling_list->get(log2TrSize, cIdx, x, y);
-    } else {
-        // Matrice par defaut : flat 16
-        scale = 16;
-    }
-
-    // 3. Level scale (Table 8-250 dans la spec)
+// §8.6.3 — Scaling process for transform coefficients
+// For each coefficient d[x][y] in the TU:
+void scale_transform_coefficients(int32_t* d, int32_t* d_scaled,
+                                   int log2TrSize, int qP, int cIdx,
+                                   int BitDepth, const int* scalingFactor) {
     const int levelScale[6] = { 40, 45, 51, 57, 64, 72 };
 
-    // 4. Calcul
-    int shift = std::max(0, 14 - log2TrSize) + qpPer;  // shift depend de la taille
-    // En realite la formule exacte est :
-    // d'[x][y] = Clip3(coeffMin, coeffMax,
-    //   ((d[x][y] * scale * levelScale[qpRem]) << qpPer) + (1 << (shift-1))) >> shift
-    // ... la formule exacte varie avec bdShift, voir spec
+    int bdShift = BitDepth + log2TrSize - 5;
+    int qPPer = qP / 6;
+    int qPRem = qP % 6;
 
-    return result;
+    // coeffMin/coeffMax for clipping
+    int coeffMin = -(1 << 15);  // -32768
+    int coeffMax = (1 << 15) - 1;  // 32767
+
+    int nTbS = 1 << log2TrSize;
+    for (int y = 0; y < nTbS; y++) {
+        for (int x = 0; x < nTbS; x++) {
+            int m = scalingFactor ? scalingFactor[y * nTbS + x] : 16;  // flat 16 default
+            int intermediate = (d[y*nTbS+x] * m * levelScale[qPRem]) << qPPer;
+            d_scaled[y*nTbS+x] = Clip3(coeffMin, coeffMax,
+                (intermediate + (1 << (bdShift - 1))) >> bdShift);
+        }
+    }
 }
 ```
 
@@ -132,8 +122,17 @@ void transform_inverse(int16_t* coeffs, int16_t* residual, int log2TrSize,
         partial_butterfly_inverse(coeffs, temp, col, nTbS, matrix, shift1);
     }
 
+    // CRITICAL: Intermediate clipping after first pass
+    // Values must be clipped to 16-bit signed range [-32768, 32767]
+    // Required for bit-exactness: without this clipping, overflow in the
+    // second pass produces incorrect residual values that differ from the
+    // reference decoder output.
+    for (int y = 0; y < nTbS; y++)
+        for (int x = 0; x < nTbS; x++)
+            temp[y][x] = Clip3(-32768, 32767, temp[y][x]);
+
     // Etape 2 : Transform horizontale (lignes)
-    int shift2 = 20 - bitDepth;
+    int shift2 = 20 - BitDepth;
     for (int row = 0; row < nTbS; row++) {
         partial_butterfly_inverse(temp, residual, row, nTbS, matrix, shift2);
     }

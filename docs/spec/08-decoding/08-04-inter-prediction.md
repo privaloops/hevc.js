@@ -87,6 +87,33 @@ int filter_h(const int16_t* ref, int x, int y, int frac) {
 }
 ```
 
+### Precision intermediaire pour le filtre 2D
+
+Pour l'interpolation 2D (xFrac != 0 ET yFrac != 0), le filtre horizontal produit des valeurs intermediaires en precision etendue :
+- **Pas de clipping** apres le filtre horizontal
+- Les valeurs intermediaires sont sur ~22 bits (8-bit input * 8-tap filter avec coefficients jusqu'a 64)
+- Le filtre vertical applique ensuite sur ces valeurs etendues
+- Le clipping final est applique apres le filtre vertical : Clip3(0, (1 << BitDepth) - 1, (result + offset) >> shift)
+
+```cpp
+// Shifts pour l'interpolation 2D :
+// Apres filtre H : pas de shift (garder la precision)
+// Apres filtre V : shift = 6 (pour 8-bit) = 14 - BitDepth + 6 - 6...
+// En fait :
+// shift_h = 0 (si suivi de filtre V) ou BitDepth - 8 (si H seulement)
+// shift_v = 6 (si precede de filtre H) ou 14 - BitDepth (si V seulement)
+// shift pour uni-pred final : pas de shift supplementaire
+// shift pour bi-pred : >> (15 - BitDepth) apres sommation
+
+// Pour 8-bit, H-only :
+// result = (sum + 0) >> 0 ... non
+// En fait la spec dit :
+// H-only ou V-only : shift1 = BitDepth - 8, rounding = (1 << (shift1 - 1)) si shift1 > 0
+// HV : H pass no shift, V pass shift = 6, pas de rounding intermediaire
+```
+
+**Attention** : Les shifts exacts dependent de la combinaison (H/V/HV) et de l'utilisation (uni/bi pred). Se referer exactement a §8.5.3.3.3.
+
 ## 8.5.3.3 — Chroma Sample Interpolation
 
 Filtre 4-tap pour la chroma (precision 1/8 pel) :
@@ -135,6 +162,47 @@ Candidats merge (dans l'ordre de priorite) :
 6. Temporal candidate (co-located block dans la ref pic)
 7. Zero MV (padding si < MaxNumMergeCand)
 ```
+
+### Combined Bi-predictive Merge Candidates (§8.5.3.2.4)
+
+Si le nombre de candidats merge est inferieur a `MaxNumMergeCand` et que le slice est de type B, des candidats bi-predictifs combines sont generes :
+
+```cpp
+// Combiner des paires de candidats L0-only en candidats bi-predictifs
+// Pour chaque paire (l0Idx, l1Idx) dans un ordre defini :
+// combIdx: 0 -> (0,1), 1 -> (1,0), 2 -> (0,2), ...
+for (int combIdx = 0; combIdx < numCombinations && numMergeCand < MaxNumMergeCand; combIdx++) {
+    int l0CandIdx = l0CandIdxTable[combIdx];
+    int l1CandIdx = l1CandIdxTable[combIdx];
+
+    MergeCand& l0Cand = mergeCandList[l0CandIdx];
+    MergeCand& l1Cand = mergeCandList[l1CandIdx];
+
+    // Combiner seulement si les ref pics sont differentes
+    // (sinon c'est redondant avec le candidat original)
+    if (l0Cand.refPicL0 != l1Cand.refPicL1) {
+        MergeCand combined;
+        combined.predFlagL0 = 1;
+        combined.predFlagL1 = 1;
+        combined.mvL0 = l0Cand.mvL0;
+        combined.refIdxL0 = l0Cand.refIdxL0;
+        combined.mvL1 = l1Cand.mvL1;
+        combined.refIdxL1 = l1Cand.refIdxL1;
+        mergeCandList[numMergeCand++] = combined;
+    }
+}
+```
+
+### Ordre des paires (Table 8-8 de la spec)
+
+| combIdx | l0CandIdx | l1CandIdx |
+|---------|-----------|-----------|
+| 0 | 0 | 1 |
+| 1 | 1 | 0 |
+| 2 | 0 | 2 |
+| 3 | 2 | 0 |
+| 4 | 1 | 2 |
+| ... | ... | ... |
 
 ### AMVP (8.5.3.2.6)
 

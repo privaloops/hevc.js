@@ -40,8 +40,10 @@ Spec refs : §7.3.1 (NAL unit syntax), §7.4.2 (NAL unit semantics), Annexe B (b
 - RBSP extraction (emulation prevention byte removal)
 - Exp-Golomb coding (ue(v), se(v))
 - Bitstream reader (read_bits, read_u, read_ue, read_se, read_flag, byte_aligned)
+- Access Unit boundary detection (§7.4.2.4.4) — frame delimitation
+- `more_rbsp_data()` implementation (§7.2) — stop bit detection
 
-**Critère de sortie** : Parser un fichier .265 et lister correctement tous les NAL units avec leur type. Validé contre libde265 --dump-headers.
+**Critère de sortie** : Parser un fichier .265 et lister correctement tous les NAL units avec leur type. Délimiter les Access Units (frames). Validé contre libde265 --dump-headers.
 
 ### Phase 3 — Parameter Sets & Slice Header (`docs/phases/phase-03-parsing.md`)
 
@@ -72,6 +74,8 @@ Sous-étapes :
 6. **Transform inverse** : DCT/DST 4x4, 8x8, 16x16, 32x32
 7. **Intra prediction samples** : DC, Planar, Angular (modes 2-34)
 8. **Reconstruction** : prediction + residual, clipping
+9. **PCM mode** : Parsing et reconstruction directe (§7.3.10.2), reset CABAC post-PCM
+10. **Dependent slice segments** : Continuation CABAC, héritage des paramètres slice
 
 **Critère de sortie** : Décoder correctement des bitstreams I-only. Comparaison pixel-perfect avec libde265 sur les bitstreams de conformité intra.
 
@@ -84,10 +88,11 @@ Spec refs : §8.3 (reference picture management), §8.5.3 (inter prediction), §
 Sous-étapes :
 1. **Reference Picture Set (RPS)** : ShortTermRefPicSet, LongTermRefPic, DPB management
 2. **Reference Picture List Construction** : RefPicList0, RefPicList1, modification
-3. **Motion Vector Derivation** : Merge mode, AMVP, MVP candidates
-4. **Motion Compensation** : 8-tap luma interpolation filter, 4-tap chroma interpolation
-5. **Weighted Prediction** : Explicit/implicit weighted pred
-6. **Bi-prediction** : Averaging des deux prédictions
+3. **Motion Vector Derivation** : Merge mode (5 spatial + 1 temporal + combined bi-pred + zero), AMVP (2 spatial + 1 temporal + zero)
+4. **TMVP** : Picture co-localisée, bloc co-localisé, MV scaling (§8.5.3.2.9, §8.5.3.2.12)
+5. **Motion Compensation** : 8-tap luma interpolation filter, 4-tap chroma interpolation
+6. **Weighted Prediction** : Explicit/implicit weighted pred
+7. **Bi-prediction** : Averaging des deux prédictions
 
 **Critère de sortie** : Décoder des bitstreams P et B. Pixel-perfect vs libde265 sur bitstreams de conformité inter.
 
@@ -191,3 +196,23 @@ Voir `docs/oracle/oracle-strategy.md` pour les détails.
 - Chaque fichier source référence les sections spec qu'il implémente
 - Pseudo-code de la spec traduit ligne par ligne en C++, puis optimisé
 - Un commit = une sous-section spec implémentée (traçabilité)
+
+## Pièges de conformité identifiés
+
+Points critiques pour la conformité stricte à la spec, souvent source de mismatch :
+
+| Piège | Section spec | Phase | Impact |
+|-------|-------------|-------|--------|
+| PCM mode absent | §7.3.10.2 | 4 | Crash sur certains bitstreams |
+| `more_rbsp_data()` incorrect | §7.2 | 2 | Parsing incorrect des parameter sets |
+| `NoRaslOutputFlag` non dérivé | §8.1 | 5 | POC incorrect aux points d'accès |
+| MV scaling manquant | §8.5.3.2.12 | 5 | MV temporels incorrects |
+| Bs bi-prediction simplifié | §8.7.2.4.5 | 6 | Deblocking incorrect en B-frames |
+| `sig_coeff_flag` context erroné | §9.3.4.2.8 | 4 | Divergence CABAC totale |
+| `cRiceParam` non adaptatif | §9.3.3.11 | 4 | Grands coefficients mal décodés |
+| Clipping inter-passe transform | §8.6.4.2 | 4 | Résidu incorrect (bit-inexact) |
+| Planar indexation incorrecte | §8.4.4.2.4 | 4 | Intra prediction fausse |
+| Transposition angular absente | §8.4.4.2.6 | 4 | Modes 2-17 incorrects |
+| TMVP incomplet | §8.5.3.2.9 | 5 | Candidat temporel absent/faux |
+| Dependent slice CABAC | §9.2 | 4 | Divergence CABAC sur slices dépendants |
+| `constrained_intra_pred_flag` | §8.4.4.2.2 | 4 | Mauvais samples de référence intra |

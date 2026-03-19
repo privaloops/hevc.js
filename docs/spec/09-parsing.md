@@ -107,26 +107,53 @@ Chaque syntax element a un schema de binarization specifique :
 // §9.3.3.3 — coeff_abs_level_remaining : bypass-coded (pas de contexte)
 //   → Golomb-Rice code avec parametre adaptatif
 
+// §9.3.3.11 — coeff_abs_level_remaining binarization
 int decode_coeff_abs_level_remaining(ArithmeticDecoder& ad, int cRiceParam) {
-    // Prefix : TR binarization (bypass)
     int prefix = 0;
-    while (prefix < 5 && ad.decode_bypass())  // max 5 bins unary
+    while (prefix < 4 && ad.decode_bypass())
         prefix++;
 
-    int value;
-    if (prefix < 5) {
-        // Suffix : cRiceParam bits (bypass)
-        value = (prefix << cRiceParam) + ad.decode_bypass_bits(cRiceParam);
-    } else {
-        // Exp-Golomb suffix
-        int length = cRiceParam + 1;
-        while (ad.decode_bypass())
-            length++;
-        value = (((1 << length) - 1) << cRiceParam) + ad.decode_bypass_bits(length + cRiceParam);
+    if (prefix < 4) {
+        // Truncated Rice: prefix * (1 << cRiceParam) + suffix
+        return (prefix << cRiceParam) + ad.decode_bypass_bits(cRiceParam);
     }
-    return value;
+
+    // Exp-Golomb coded suffix (order = cRiceParam)
+    // Read unary-coded length extension
+    int length = cRiceParam;
+    while (ad.decode_bypass()) {
+        length++;
+    }
+    return (((1 << (length - cRiceParam)) + 3) << cRiceParam)
+           + ad.decode_bypass_bits(length);
 }
 ```
+
+### Adaptation du parametre Rice (cRiceParam)
+
+Le parametre Rice est adaptatif : il s'ajuste apres chaque sub-block en fonction des niveaux de coefficients decodes.
+
+```cpp
+// §9.3.3.11 — cRiceParam update
+// Apres le decodage de chaque coeff_abs_level_remaining :
+// Si la valeur absolue reconstruite > 3 * (1 << cRiceParam)
+//    cRiceParam = min(cRiceParam + 1, 4)
+// Le cRiceParam est reinitialise a 0 au debut de chaque sub-block group
+
+// En pratique :
+int cRiceParam = 0;  // reset au debut de chaque 4x4 sub-block
+for (int n = numSigCoeff - 1; n >= 0; n--) {
+    if (need_remaining[n]) {
+        int remaining = decode_coeff_abs_level_remaining(ad, cRiceParam);
+        baseLevel[n] += remaining;
+        // Update Rice parameter
+        if (baseLevel[n] > 3 * (1 << cRiceParam) && cRiceParam < 4)
+            cRiceParam++;
+    }
+}
+```
+
+Le `cRiceParam` commence a 0 pour chaque sub-block et peut monter jusqu'a 4. C'est critique pour le decodage correct des grands coefficients residuels.
 
 ## 9.4 — Context Modeling
 
@@ -153,6 +180,66 @@ int ctx_split_cu_flag(int x0, int y0, int log2CbSize) {
 // Depend de : cIdx, log2TrafoSize, scan position, coded_sub_block_flag des voisins
 // ~42 contextes pour luma, ~16 pour chroma
 ```
+
+### sig_coeff_flag context derivation (§9.3.4.2.8) — CRITIQUE
+
+C'est la derivation de contexte la plus complexe en HEVC. Le contexte depend de 5 facteurs :
+
+```cpp
+int ctx_sig_coeff_flag(int xS, int yS, int xC, int yC, int log2TrafoSize,
+                        int cIdx, const uint8_t* coded_sub_block_flag) {
+    // xS, yS : position du sub-block (4x4)
+    // xC, yC : position du coefficient dans le sub-block (0-3)
+    // coded_sub_block_flag : flags des sub-blocks voisins
+
+    int sigCtx;
+
+    if (log2TrafoSize == 2) {
+        // 4x4 TU : contexte base sur la position dans le scan
+        // Table fixe : ctxIdxMap[15] pour luma/chroma
+        sigCtx = ctxIdxMap[4*yC + xC];  // Tables 9-50, 9-51
+    } else {
+        // TU > 4x4 : contexte base sur les sub-blocks voisins
+        int prevCsbf = 0;
+        if (xS < (1 << (log2TrafoSize - 2)) - 1)
+            prevCsbf += coded_sub_block_flag[(xS+1) + yS * stride];  // right
+        if (yS < (1 << (log2TrafoSize - 2)) - 1)
+            prevCsbf += (coded_sub_block_flag[xS + (yS+1) * stride] << 1);  // below
+
+        // Position dans le sub-block
+        int xP = xC, yP = yC;
+
+        if (prevCsbf == 0)
+            sigCtx = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0;
+        else if (prevCsbf == 1)
+            sigCtx = (yP == 0) ? 2 : (yP == 1) ? 1 : 0;
+        else if (prevCsbf == 2)
+            sigCtx = (xP == 0) ? 2 : (xP == 1) ? 1 : 0;
+        else
+            sigCtx = 2;
+
+        // Offset par composante et taille
+        if (cIdx == 0) {
+            // Luma : 27 contextes (3 zones de taille)
+            if (log2TrafoSize == 3)
+                sigCtx += 9;    // 8x8
+            else if (log2TrafoSize == 4)
+                sigCtx += 21;   // 16x16 (uses different pattern)
+            else
+                sigCtx += 12;   // 32x32
+        } else {
+            // Chroma : 15 contextes base
+            sigCtx += (log2TrafoSize == 3) ? 9 : 12;
+        }
+    }
+
+    // Le contexte 0 est reserve au "last" coefficient (DC du dernier sub-block)
+    // Ajouter l'offset de base pour sig_coeff_flag (different I/P/B)
+    return sigCtx;
+}
+```
+
+**Attention** : Ce pseudo-code est simplifie. L'implementation DOIT suivre exactement les equations 9-48 a 9-54 de la spec. Une erreur d'un seul contexte corrompt l'ensemble du decodage CABAC.
 
 ### Table des contextes (resume)
 
