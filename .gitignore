@@ -24,7 +24,9 @@ cmake-build-*/
 *.265
 *.h265
 *.hevc
-tests/conformance/
+# Conformance bitstreams téléchargés (gros fichiers)
+# Les fixtures commitées sont dans tests/conformance/fixtures/
+tests/conformance/downloaded/
 
 # OS
 .DS_Store
