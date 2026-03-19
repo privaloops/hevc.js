@@ -14,7 +14,7 @@ Décodeur HEVC conforme à la spec ITU-T H.265 (v8, 2021), compilé en WebAssemb
 | Build | CMake + Emscripten |
 | WASM | Emscripten SDK |
 | Tests | Google Test + CTest |
-| Oracle | libde265 (comparaison pixel-perfect) |
+| Oracle | ffmpeg (décode la référence YUV) + MD5 pixel-perfect |
 | CI | GitHub Actions |
 
 ## Commandes
@@ -46,11 +46,16 @@ clang-tidy src/**/*.cpp -- -std=c++17
 
 ### Procédure pour chaque phase
 
-1. **Lire** : consulte le routing par phase (ci-dessous) pour savoir quels docs lire
-2. **Coder** : implémente en suivant les tâches de `docs/phases/phase-XX-*.md`
-3. **Tests unitaires** : écris des tests pour chaque fonction, lance `ctest --output-on-failure`
-4. **Tests oracle** : quand ta phase est complète, les oracle tests de cette phase doivent passer
-5. **Debug mismatch** : si un oracle test FAIL, suis la procédure de debug ci-dessous
+1. **Consulter BACKLOG.md** : voir les tâches restantes et le statut actuel
+2. **Lire MASTER-PLAN.md** section "Pièges de conformité" : vérifier les pièges pour cette phase
+3. **Lire DECISIONS.md** : respecter les choix d'architecture (types, layouts, ownership)
+4. **Lire les docs de la phase** : consulte le routing par phase (ci-dessous) pour la liste complète
+5. **Respecter les interfaces existantes** : les headers `.h` dans `src/` définissent les structs et signatures — les utiliser, ne pas en créer de nouvelles incompatibles
+6. **Coder** : implémente en suivant les tâches de `docs/phases/phase-XX-*.md`
+7. **Tests unitaires** : écris des tests pour chaque fonction, lance `ctest --output-on-failure`
+8. **Tests oracle** : quand ta phase est complète, les oracle tests de cette phase doivent passer
+9. **Debug mismatch** : si un oracle test FAIL, suis la procédure de debug ci-dessous
+10. **Mettre à jour BACKLOG.md** : cocher les tâches terminées, ajouter les nouvelles si identifiées
 
 ### Tests oracle — comment ça marche
 
@@ -118,11 +123,12 @@ src/
 └── wasm/           # JS bindings, worker interface (à implémenter)
 tests/
 ├── unit/           # Tests unitaires par module (16 tests BitstreamReader)
-├── conformance/    # Bitstreams de conformité HEVC (à télécharger)
-└── oracle/         # Comparaison frame-by-frame vs libde265
+├── conformance/
+│   └── fixtures/   # 7 bitstreams de test + README avec hash MD5 de référence
+└── oracle/         # Comparaison frame-by-frame
 tools/
-├── oracle_compare.py   # Script de comparaison YUV (opérationnel)
-└── fetch_conformance.sh # Téléchargement bitstreams de test (à créer)
+├── oracle_compare.py   # Comparaison YUV pixel-perfect (opérationnel)
+└── oracle_test.sh      # Test oracle CTest : decode → MD5 → compare (opérationnel)
 docs/
 ├── spec/           # Notes par chapitre de la spec H.265
 │   ├── pdf/        # PDF de la spec ITU-T (gitignored, source de vérité)
@@ -180,11 +186,29 @@ Les valeurs numériques critiques (tables CABAC, matrices DCT, coefficients de f
 | `tables/scaling-list-defaults.md` | Matrices par défaut 4x4/8x8 intra+inter, fallback |
 | `tables/merge-table.md` | Table 8-8 (combined bi-pred candidates) |
 
-### Chapitres clés
+### Index des pages du PDF
 
-- **Ch. 7** : Syntax and semantics (NAL, parameter sets, slice)
-- **Ch. 8** : Decoding process (prediction, transform, filters)
-- **Ch. 9** : Parsing process (CABAC, binarization)
+Pour lire une section avec `pdftotext -f <debut> -l <fin> docs/spec/pdf/T-REC-H.265-202108-S.pdf -` :
+
+| Section | Sujet | Pages PDF |
+|---------|-------|-----------|
+| §6 | Bitstream and picture formats | 34-43 |
+| §7.1-7.2 | Syntax general, more_rbsp_data | 44-53 |
+| §7.3.1 | NAL unit syntax | 54-56 |
+| §7.3.2 | Parameter sets (VPS, SPS, PPS) | 54-66 |
+| §7.3.6 | Slice segment header | 66-71 |
+| §7.3.8 | Slice data (CTU, CU, PU, TU, residual) | 71-100 |
+| §7.4 | Semantics (valeurs dérivées, inferred) | 100-136 |
+| §8.1 | General decoding process | 137-138 |
+| §8.3 | Reference pictures, POC, DPB | 139-145 |
+| §8.4 | Intra prediction (35 modes) | 146-162 |
+| §8.5 | Inter prediction (merge, AMVP, interpolation) | 163-195 |
+| §8.6 | Transform inverse + dequant | 196-203 |
+| §8.7 | Loop filters (deblocking + SAO) | 204-224 |
+| §9.1-9.2 | CABAC init, context tables | 225-237 |
+| §9.3 | CABAC binarization, arithmetic decoding | 238-247 |
+| Annexe A | Profiles, tiers, levels | 248-271 |
+| Annexe B | Byte stream format | 272-273 |
 
 ## Routing par phase
 
