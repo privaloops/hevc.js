@@ -40,24 +40,28 @@ clang-tidy src/**/*.cpp -- -std=c++17
 
 ```
 src/
-├── bitstream/      # NAL unit parsing, RBSP, Exp-Golomb
-├── syntax/         # VPS, SPS, PPS, slice header, slice data
-├── decoding/       # Intra, inter, transform, quant
-├── filters/        # Deblocking, SAO
-├── common/         # Types, buffers, picture management
-└── wasm/           # JS bindings, worker interface
+├── bitstream/      # BitstreamReader, NAL unit parsing, RBSP, Exp-Golomb
+├── syntax/         # VPS, SPS, PPS, slice header, slice data (à implémenter)
+├── decoding/       # Intra, inter, transform, quant (à implémenter)
+├── filters/        # Deblocking, SAO (à implémenter)
+├── common/         # Types (Pixel, MV, NalUnitType, enums), Picture
+└── wasm/           # JS bindings, worker interface (à implémenter)
 tests/
-├── unit/           # Tests unitaires par module
-├── conformance/    # Bitstreams de conformité HEVC
+├── unit/           # Tests unitaires par module (16 tests BitstreamReader)
+├── conformance/    # Bitstreams de conformité HEVC (à télécharger)
 └── oracle/         # Comparaison frame-by-frame vs libde265
 tools/
-├── oracle_compare.py   # Script de comparaison YUV
-└── fetch_conformance.sh # Téléchargement bitstreams de test
+├── oracle_compare.py   # Script de comparaison YUV (opérationnel)
+└── fetch_conformance.sh # Téléchargement bitstreams de test (à créer)
 docs/
 ├── spec/           # Notes par chapitre de la spec H.265
-├── phases/         # Plan d'implémentation par phase
+│   ├── pdf/        # PDF de la spec ITU-T (gitignored, source de vérité)
+│   └── tables/     # Tables de données extraites (CABAC, DCT, filtres, etc.)
+├── phases/         # Plan d'implémentation par phase (9 phases)
 ├── oracle/         # Stratégie de test oracle
 └── adr/            # Architecture Decision Records
+MASTER-PLAN.md      # Plan global avec dépendances et 23 pièges de conformité
+DECISIONS.md        # Décisions d'architecture (AD-001 à AD-006)
 ```
 
 ## Profils cibles (par ordre d'implémentation)
@@ -72,7 +76,42 @@ docs/
 
 ITU-T H.265 (V8, 08/2021) — "High Efficiency Video Coding"
 
-Les chapitres clés :
+### PDF de la spec (source de vérité)
+
+Le PDF officiel est stocké localement dans `docs/spec/pdf/` (gitignored).
+
+**IMPORTANT** : Quand tu implémentes une section de la spec, **lis le PDF** en priorité. Les notes dans `docs/spec/` sont des résumés — le PDF fait autorité en cas de divergence.
+
+```
+docs/spec/pdf/T-REC-H.265-202108-S.pdf    # Spec complète (716 pages, 12 Mo)
+```
+
+Pour lire une section spécifique, utilise `pdftotext` via Bash avec un range de pages :
+```bash
+pdftotext -f 200 -l 210 docs/spec/pdf/T-REC-H.265-202108-S.pdf - 2>/dev/null
+```
+
+Si le PDF n'est pas présent, le télécharger :
+```bash
+mkdir -p docs/spec/pdf && curl -sL -o docs/spec/pdf/T-REC-H.265-202108-S.pdf \
+  "https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-H.265-202108-S!!PDF-E&type=items"
+```
+
+### Tables de données extraites
+
+Les valeurs numériques critiques (tables CABAC, matrices DCT, coefficients de filtre, etc.) sont dans `docs/spec/tables/` sous forme de code C++ directement copiable :
+
+| Fichier | Contenu |
+|---------|---------|
+| `tables/cabac-arithmetic.md` | rangeTabLps[64][4], transIdxMps[64], transIdxLps[64], algorithmes decode |
+| `tables/cabac-init-values.md` | Toutes les tables d'init contextes (Tables 9-5 à 9-31) pour I/P/B |
+| `tables/transform-matrices.md` | DCT 8x8, 16x16, 32x32 complètes + partial butterfly |
+| `tables/intra-tables.md` | intraPredAngle[35], invAngle[35], filtrage, MPM |
+| `tables/scaling-list-defaults.md` | Matrices par défaut 4x4/8x8 intra+inter, fallback |
+| `tables/merge-table.md` | Table 8-8 (combined bi-pred candidates) |
+
+### Chapitres clés
+
 - **Ch. 7** : Syntax and semantics (NAL, parameter sets, slice)
 - **Ch. 8** : Decoding process (prediction, transform, filters)
 - **Ch. 9** : Parsing process (CABAC, binarization)
