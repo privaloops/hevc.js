@@ -30,7 +30,12 @@ Phase 4 complétée (I-frames décodées correctement).
 
 ### 5.3 — Merge Mode
 - [ ] 5 candidats spatiaux (A1, B1, B0, A0, B2)
-- [ ] Candidat temporel (co-located block)
+- [ ] Candidat temporel TMVP (§8.5.3.2.9) :
+  - Selection de la picture co-localisee (`collocated_from_l0_flag`, `collocated_ref_idx`)
+  - Selection du bloc : bottom-right du PU (+1,+1) en priorite, puis centre du PU
+  - Verification de disponibilite (pas hors-image, pas intra, dans le meme slice/tile)
+  - MV scaling selon la distance POC (§8.5.3.2.12)
+  - `slice_temporal_mvp_enabled_flag` doit etre actif
 - [ ] Zero MV padding
 - [ ] Combined bi-predictive candidates
 - [ ] Merge index parsing
@@ -43,6 +48,12 @@ Phase 4 complétée (I-frames décodées correctement).
 - [ ] MVP index parsing
 - [ ] MVD parsing + application
 - [ ] Tests : vérifier le MV final
+
+### 5.4b — MV Scaling (§8.5.3.2.12)
+- [ ] Scaling des MVs quand les distances POC source/cible different
+- [ ] Formule : `distScaleFactor = Clip3(-4096, 4095, (tb * tx + 32) >> 6)` avec `tx = (16384 + (abs(td) >> 1)) / td`
+- [ ] Utilise par le candidat temporel merge et AMVP
+- [ ] Tests : sequences avec B-frames hierarchiques (distances POC asymetriques)
 
 ### 5.5 — Luma Interpolation
 - [ ] Filtre 8-tap (Table 8-1)

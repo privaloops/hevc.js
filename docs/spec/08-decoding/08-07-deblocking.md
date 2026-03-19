@@ -33,26 +33,77 @@ Les frontieres a filtrer sont aux positions alignees sur 8 pixels (luma) :
 ## 8.7.2.3 — Boundary Filtering Strength (Bs)
 
 ```cpp
-int derive_boundary_strength(const CU& p, const CU& q) {
-    // p = bloc a gauche/au-dessus, q = bloc a droite/en-dessous
+int derive_boundary_strength(const Block& p, const Block& q) {
+    // p = block on one side, q = block on other side of the edge
 
-    if (p.is_intra || q.is_intra)
+    // Bs = 2 if either block is intra
+    if (p.CuPredMode == MODE_INTRA || q.CuPredMode == MODE_INTRA)
         return 2;
 
-    // Si l'un des blocs a des coefficients residuels non-nuls
+    // Bs = 1 if either block has non-zero transform coefficients
     if (p.has_nonzero_coeffs || q.has_nonzero_coeffs)
         return 1;
 
-    // Comparer les motion vectors et ref pics
-    if (p.refPic != q.refPic)
+    // §8.7.2.4.5 — Compare motion parameters
+    // nRefP, nRefQ = number of MVs (1 for uni-pred, 2 for bi-pred)
+    int nRefP = p.predFlagL0 + p.predFlagL1;
+    int nRefQ = q.predFlagL0 + q.predFlagL1;
+
+    if (nRefP != nRefQ)
         return 1;
 
-    if (abs(p.mv.x - q.mv.x) >= 4 || abs(p.mv.y - q.mv.y) >= 4)
-        return 1;  // MV differe de >= 1 pixel (MV est en 1/4 pel)
+    if (nRefP == 1) {
+        // Uni-prediction: compare the single MV + ref pic
+        PicRef refP = p.predFlagL0 ? p.refPicL0 : p.refPicL1;
+        PicRef refQ = q.predFlagL0 ? q.refPicL0 : q.refPicL1;
+        MV mvP = p.predFlagL0 ? p.mvL0 : p.mvL1;
+        MV mvQ = q.predFlagL0 ? q.mvL0 : q.mvL1;
 
-    return 0;  // Pas de filtrage
+        if (refP != refQ)
+            return 1;
+        if (abs(mvP.x - mvQ.x) >= 4 || abs(mvP.y - mvQ.y) >= 4)
+            return 1;
+    } else {
+        // Bi-prediction: two ref pics on each side
+        // Check both orderings (same pair or swapped pair)
+        bool samePairSameOrder =
+            (p.refPicL0 == q.refPicL0 && p.refPicL1 == q.refPicL1);
+        bool samePairSwapped =
+            (p.refPicL0 == q.refPicL1 && p.refPicL1 == q.refPicL0);
+
+        if (!samePairSameOrder && !samePairSwapped)
+            return 1;
+
+        if (samePairSameOrder && !samePairSwapped) {
+            // Same order: compare L0↔L0 and L1↔L1
+            if (abs(p.mvL0.x - q.mvL0.x) >= 4 || abs(p.mvL0.y - q.mvL0.y) >= 4 ||
+                abs(p.mvL1.x - q.mvL1.x) >= 4 || abs(p.mvL1.y - q.mvL1.y) >= 4)
+                return 1;
+        } else if (!samePairSameOrder && samePairSwapped) {
+            // Swapped: compare L0↔L1 and L1↔L0
+            if (abs(p.mvL0.x - q.mvL1.x) >= 4 || abs(p.mvL0.y - q.mvL1.y) >= 4 ||
+                abs(p.mvL1.x - q.mvL0.x) >= 4 || abs(p.mvL1.y - q.mvL0.y) >= 4)
+                return 1;
+        } else {
+            // Both orderings match: Bs=0 only if BOTH orderings give small MV diff
+            bool order1_ok =
+                abs(p.mvL0.x - q.mvL0.x) < 4 && abs(p.mvL0.y - q.mvL0.y) < 4 &&
+                abs(p.mvL1.x - q.mvL1.x) < 4 && abs(p.mvL1.y - q.mvL1.y) < 4;
+            bool order2_ok =
+                abs(p.mvL0.x - q.mvL1.x) < 4 && abs(p.mvL0.y - q.mvL1.y) < 4 &&
+                abs(p.mvL1.x - q.mvL0.x) < 4 && abs(p.mvL1.y - q.mvL0.y) < 4;
+            if (!order1_ok && !order2_ok)
+                return 1;
+        }
+    }
+
+    return 0;  // No filtering needed
 }
 ```
+
+### Note : PCM et deblocking
+
+Si `pcm_loop_filter_disabled_flag` est actif dans le SPS et qu'un bloc est PCM, le deblocking est desactive pour les edges de ce bloc (Bs force a 0 pour les edges touchant un bloc PCM).
 
 ## 8.7.2.4 — Luma Filtering
 
