@@ -116,6 +116,22 @@ Les valeurs numériques critiques (tables CABAC, matrices DCT, coefficients de f
 - **Ch. 8** : Decoding process (prediction, transform, filters)
 - **Ch. 9** : Parsing process (CABAC, binarization)
 
+## Routing par phase
+
+Avant de travailler sur une phase, lis ces fichiers dans cet ordre :
+
+| Phase | Fichiers à lire en premier |
+|-------|---------------------------|
+| **2 — Bitstream** | `BACKLOG.md` → `docs/phases/phase-02-bitstream.md` → `docs/spec/07-syntax/07-03-nal-unit.md` → `docs/spec/test-bitstreams.md` (sections 1-6) → `src/bitstream/nal_unit.h` (interface) |
+| **3 — Parsing** | `BACKLOG.md` → `docs/phases/phase-03-parsing.md` → `docs/spec/07-syntax/07-04-parameter-sets.md` → `src/syntax/vps.h` + `sps.h` + `pps.h` + `slice_header.h` (interfaces) |
+| **4 — Intra** | `BACKLOG.md` → `docs/phases/phase-04-intra.md` → `docs/spec/09-parsing.md` + `docs/spec/tables/cabac-*.md` → `docs/spec/08-decoding/08-05-intra-prediction.md` + `docs/spec/tables/intra-tables.md` → `docs/spec/08-decoding/08-06-transform-quant.md` + `docs/spec/tables/transform-matrices.md` |
+| **5 — Inter** | `BACKLOG.md` → `docs/phases/phase-05-inter.md` → `docs/spec/08-decoding/08-03-reference-pictures.md` → `docs/spec/08-decoding/08-04-inter-prediction.md` + `docs/spec/tables/merge-table.md` |
+| **6 — Filters** | `BACKLOG.md` → `docs/phases/phase-06-loop-filters.md` → `docs/spec/08-decoding/08-07-deblocking.md` → `docs/spec/08-decoding/08-08-sao.md` |
+
+Pour la cross-reference complete (spec section → source → doc → test) : voir `docs/cross-reference.md`.
+
+Toujours consulter `MASTER-PLAN.md` (section "Pièges de conformité") avant de commencer une phase.
+
 ## JIRA
 N/A
 
