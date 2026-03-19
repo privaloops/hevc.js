@@ -6,7 +6,7 @@ Etat d'avancement par phase et prochaines taches.
 
 | Phase | Statut | Progression |
 |-------|--------|-------------|
-| 1 — Infrastructure | **En cours** | CMake, BitstreamReader, types, tests, oracle script OK. Manque CI GitHub Actions. |
+| 1 — Infrastructure | **En cours** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging OK. Manque CI GitHub Actions. |
 | 2 — Bitstream & NAL | A faire | — |
 | 3 — Parameter Sets | A faire | — |
 | 4 — Intra Prediction | A faire | — |
@@ -20,7 +20,11 @@ Etat d'avancement par phase et prochaines taches.
 
 - [ ] CI GitHub Actions (`build.yml`, `test.yml`)
 - [ ] `tools/fetch_conformance.sh`
-- [ ] Structure `Picture` (buffer YUV avec stride)
+- [x] Structure `Picture` (buffer YUV avec stride) — `src/common/picture.cpp`
+- [x] `HEVC_DEBUG` logging infrastructure — `src/common/debug.h`
+- [x] Bitstreams jouets (toy_qp10/30/45) — `tests/conformance/fixtures/toy_*.265`
+- [x] Script extraction CABAC reference — `tools/extract_cabac_reference.py`
+- [x] Guide agent — `docs/agent-guide.md`
 
 ## Phase 2 — Prochaine
 

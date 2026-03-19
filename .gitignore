@@ -24,8 +24,10 @@ cmake-build-*/
 *.265
 *.h265
 *.hevc
+# Allow committed test fixtures
+!tests/conformance/fixtures/*.265
+
 # Conformance bitstreams téléchargés (gros fichiers)
-# Les fixtures commitées sont dans tests/conformance/fixtures/
 tests/conformance/downloaded/
 
 # OS

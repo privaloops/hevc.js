@@ -27,6 +27,7 @@ endif()
 # Library
 add_library(hevc-torture-lib
     src/bitstream/bitstream_reader.cpp
+    src/common/picture.cpp
 )
 
 target_include_directories(hevc-torture-lib PUBLIC
@@ -68,6 +69,7 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
 
     add_executable(hevc_tests
         tests/unit/test_bitstream_reader.cpp
+        tests/unit/test_picture.cpp
     )
 
     target_link_libraries(hevc_tests PRIVATE
@@ -86,6 +88,25 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
 
     # All oracle tests skip gracefully when decoder can't produce output yet
     # Exit code 2 = SKIP (decoder not implemented for this feature)
+
+    # Toy bitstreams — ultra-simple for step-by-step debugging (64x64, 1 CTU)
+    add_test(NAME oracle_toy_qp30
+        COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp30.265 64 64
+            9f59878470d904dc2e162d3d191611af $<TARGET_FILE:hevc-torture>)
+    set_tests_properties(oracle_toy_qp30 PROPERTIES LABELS "oracle;phase4;toy"
+        SKIP_RETURN_CODE 2)
+
+    add_test(NAME oracle_toy_qp45
+        COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp45.265 64 64
+            52ca5108bd4354383a9d29d96cf64b47 $<TARGET_FILE:hevc-torture>)
+    set_tests_properties(oracle_toy_qp45 PROPERTIES LABELS "oracle;phase4;toy"
+        SKIP_RETURN_CODE 2)
+
+    add_test(NAME oracle_toy_qp10
+        COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp10.265 64 64
+            ff469ce7e872152490b9b39b0d05dd7b $<TARGET_FILE:hevc-torture>)
+    set_tests_properties(oracle_toy_qp10 PROPERTIES LABELS "oracle;phase4;toy"
+        SKIP_RETURN_CODE 2)
 
     # Phase 4 — I-only, no filters
     add_test(NAME oracle_i_64x64_qp22
