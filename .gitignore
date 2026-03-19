@@ -34,3 +34,6 @@ Thumbs.db
 __pycache__/
 *.pyc
 .venv/
+
+# Spec PDF (copyright ITU-T, usage local uniquement)
+docs/spec/pdf/
