@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <array>
 
+#include "syntax/profile_tier_level.h"
+
 namespace hevc {
 
 class BitstreamReader;
@@ -16,8 +18,9 @@ struct VPS {
     uint8_t vps_max_sub_layers_minus1 = 0;       // u(3)
     bool vps_temporal_id_nesting_flag = false;    // u(1)
 
-    // profile_tier_level() — parsed separately
-    // sub_layer_ordering_info
+    ProfileTierLevel profile_tier_level;
+
+    bool vps_sub_layer_ordering_info_present_flag = false;
     struct SubLayerOrderingInfo {
         uint32_t max_dec_pic_buffering_minus1 = 0;
         uint32_t max_num_reorder_pics = 0;
@@ -29,7 +32,8 @@ struct VPS {
     uint16_t vps_num_layer_sets_minus1 = 0;      // ue(v)
 
     bool vps_timing_info_present_flag = false;    // u(1)
-    // timing info fields (optional, stubbed)
+    uint32_t vps_num_units_in_tick = 0;
+    uint32_t vps_time_scale = 0;
 
     // Parse from bitstream
     bool parse(BitstreamReader& bs);
