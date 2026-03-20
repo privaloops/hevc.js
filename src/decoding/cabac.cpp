@@ -79,13 +79,15 @@ int CabacEngine::decode_decision(int ctxIdx) {
     }
 
     renormalize();
+    bin_count_++;
     return binVal;
 }
 
 // §9.3.4.3.4 — Bypass decoding
 int CabacEngine::decode_bypass() {
-    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits(1));
+    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
 
+    bin_count_++;
     if (ivlOffset_ >= ivlCurrRange_) {
         ivlOffset_ -= ivlCurrRange_;
         return 1;
@@ -97,6 +99,7 @@ int CabacEngine::decode_bypass() {
 int CabacEngine::decode_terminate() {
     ivlCurrRange_ -= 2;
 
+    bin_count_++;
     if (ivlOffset_ >= ivlCurrRange_) {
         return 1;
     }
@@ -118,7 +121,7 @@ int CabacEngine::decode_bypass_bins(int numBins) {
 void CabacEngine::renormalize() {
     while (ivlCurrRange_ < 256) {
         ivlCurrRange_ <<= 1;
-        ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits(1));
+        ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
     }
 }
 

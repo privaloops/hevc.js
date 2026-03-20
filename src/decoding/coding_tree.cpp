@@ -763,6 +763,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
 
         // Reconstruct
         reconstruct_block(ctx, x0, y0, log2TrafoSize, 0, pred_samples, residual);
+
     } else if (cu.pred_mode == PredMode::MODE_INTRA) {
         // No residual but still need intra prediction
         int intra_mode = ctx.intra_mode_at(x0, y0);
@@ -773,6 +774,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
         // Reconstruct with zero residual
         int16_t zero[64 * 64] = {};
         reconstruct_block(ctx, x0, y0, log2TrafoSize, 0, pred_samples, zero);
+
     }
 
     // Chroma residual (4:2:0: chroma TU is log2TrafoSize-1, min 2)

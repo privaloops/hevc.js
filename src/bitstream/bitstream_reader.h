@@ -23,6 +23,9 @@ public:
     bool     read_flag() { return read_bits(1) != 0; }
     uint8_t  read_byte();
 
+    // Read bits with zero-padding past end (for CABAC renormalization)
+    uint32_t read_bits_safe(int n);
+
     // Exp-Golomb (§9.2)
     uint32_t read_ue();
     int32_t  read_se();

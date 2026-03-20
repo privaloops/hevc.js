@@ -185,8 +185,9 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     int intra_mode = ctx.intra_mode_at(x0, y0);
     int scanIdx = derive_scan_idx(log2TrafoSize, intra_mode, cIdx);
 
-    HEVC_LOG(CABAC, "residual_coding (%d,%d) log2=%d cIdx=%d scanIdx=%d",
-             x0, y0, log2TrafoSize, cIdx, scanIdx);
+    int bins_start = cabac.bin_count();
+    HEVC_LOG(CABAC, "residual_coding (%d,%d) log2=%d cIdx=%d scanIdx=%d bins_at=%d",
+             x0, y0, log2TrafoSize, cIdx, scanIdx, bins_start);
 
     // Last significant coefficient position
     int lastSigCoeffXPrefix = decode_last_sig_coeff_prefix(cabac, CTX_LAST_SIG_COEFF_X,
@@ -410,6 +411,14 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
             }
         }
     }
+
+    // Count total nonzero
+    int totalNonzero = 0;
+    for (int k = 0; k < trSize * trSize; k++)
+        if (coefficients[k] != 0) totalNonzero++;
+
+    HEVC_LOG(CABAC, "residual_coding done: %d bins consumed, %d nonzero coeffs",
+             cabac.bin_count() - bins_start, totalNonzero);
 }
 
 } // namespace hevc
