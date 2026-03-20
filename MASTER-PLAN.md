@@ -226,3 +226,13 @@ Points critiques pour la conformité stricte à la spec, souvent source de misma
 | `cabac_init_flag` permutation | §9.2.1.1 | 4 | CABAC init tables inversées P/B |
 | AU boundary suffix SEI | §7.4.2.4.4 | 2 | Découpage incorrect des frames |
 | PCM byte alignment | §7.3.10.2 | 4 | Lecture décalée des samples PCM |
+
+## Goulots de performance identifiés
+
+Points à traiter au moment de la phase indiquée, pas avant :
+
+| Point | Phase | Description | Action |
+|-------|-------|-------------|--------|
+| Picture stride non aligné | 7-9 | `stride = width` empêche le SIMD 128-bit (WASM) qui requiert un alignement 16 ou 32 samples. | Phase 7 ou 9 : arrondir le stride à un multiple de 32 dans `Picture::allocate()`. Ne pas changer avant — les tests oracle comparent du YUV brut, un stride padded changerait l'output. |
+| Stack WASM trop petite | 8 | La stack WASM par défaut Emscripten est ~64KB (pas 1MB). Avec les buffers 64x64 sur la stack (AD-006) et la récursion quad-tree CTU→CU→TU, risque de stack overflow. | Phase 8 : ajouter `-sSTACK_SIZE=1048576` aux flags Emscripten, ou passer les buffers temporaires au niveau CTU et propager des pointeurs. |
+| `extract_rbsp()` copie tout | 9 | Chaque NAL unit est copiée pour retirer les emulation prevention bytes. Sur de gros slice data NALs (4K), c'est une allocation + copie de centaines de KB. | Phase 9 : considérer un BitstreamReader qui skip les 0x03 à la volée sans copie préalable. |

@@ -8,6 +8,9 @@ namespace hevc {
 
 // BitstreamReader — Reads bits from an RBSP buffer
 // Spec refs: §7.2 (more_rbsp_data), §9.1 (parsing)
+//
+// Uses a 64-bit cache with lazy refill for O(1) read_bits.
+// The last-one-bit position (for more_rbsp_data) is computed once at construction.
 class BitstreamReader {
 public:
     BitstreamReader() = default;
@@ -42,10 +45,19 @@ public:
 
 private:
     const uint8_t* data_ = nullptr;
-    size_t size_ = 0;         // in bytes
-    size_t bit_pos_ = 0;      // current bit position
+    size_t size_ = 0;            // in bytes
+    size_t bit_pos_ = 0;         // current bit position (logical)
 
-    size_t find_last_one_bit() const;
+    // 64-bit read cache
+    uint64_t cache_ = 0;
+    int cache_bits_ = 0;         // valid bits remaining in cache (MSB-aligned)
+    size_t byte_pos_ = 0;        // next byte to load into cache
+
+    void refill();
+
+    // Precomputed position of rbsp_stop_one_bit (§7.2)
+    size_t last_one_bit_pos_ = 0;
+    static size_t find_last_one_bit(const uint8_t* data, size_t size);
 };
 
 // RBSP extraction — remove emulation prevention bytes (§7.3.1.1)
