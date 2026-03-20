@@ -379,8 +379,8 @@ static void predict_angular(const int16_t* refTop, const int16_t* refLeft,
             if (isVertical) {
                 pred[y * nTbS + x] = static_cast<int16_t>(val);
             } else {
-                // Horizontal: transpose the result
-                pred[x * nTbS + y] = static_cast<int16_t>(val);
+                // Horizontal: x/y swapped in computation, store in row-major
+                pred[y * nTbS + x] = static_cast<int16_t>(val);
             }
         }
     }
