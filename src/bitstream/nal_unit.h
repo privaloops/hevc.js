@@ -23,7 +23,7 @@ struct AccessUnit {
 };
 
 // Byte stream parser — extracts NAL units from Annex B byte stream
-// Spec refs: Annex B, §7.3.1
+// Spec refs: Annex B, §7.3.1, §7.4.2.4.4
 class NalParser {
 public:
     // Parse a complete byte stream into NAL units
@@ -34,14 +34,17 @@ public:
 
 private:
     // Find next start code (0x000001 or 0x00000001)
-    // Returns offset of first byte after start code, or -1 if not found
-    int64_t find_start_code(const uint8_t* data, size_t size, size_t offset);
+    // Returns offset of first byte after start code, or size if not found
+    size_t find_start_code(const uint8_t* data, size_t size, size_t offset);
 
-    // Parse NAL unit header (2 bytes)
+    // Parse NAL unit header (2 bytes) — §7.3.1.2
     NalUnitHeader parse_header(const uint8_t* data);
 
-    // Check if this NAL starts a new Access Unit
-    bool starts_new_access_unit(const NalUnit& nal, bool prev_was_vcl);
+    // Check if this NAL starts a new Access Unit — §7.4.2.4.4
+    bool starts_new_access_unit(const NalUnit& nal, bool seen_vcl, bool prev_was_vcl);
 };
+
+// NAL unit type name for debug/dump output
+const char* nal_type_name(NalUnitType type);
 
 } // namespace hevc
