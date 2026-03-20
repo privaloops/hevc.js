@@ -40,6 +40,7 @@ private:
     // Decoding context allocations (per-picture)
     std::vector<CUInfo> cu_info_buf_;
     std::vector<int> intra_mode_buf_;
+    std::vector<int> chroma_mode_buf_;
 };
 
 } // namespace hevc

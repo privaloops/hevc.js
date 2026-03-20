@@ -46,6 +46,7 @@ struct DecodingContext {
     // Intra mode storage per PU (for neighbour MPM derivation)
     // Indexed like cu_info but at PU granularity
     int* intra_pred_mode_y = nullptr;
+    int* intra_pred_mode_c = nullptr;
     int intra_pred_mode_stride = 0;
 
     // Helper: get CU info at luma sample position
@@ -58,12 +59,18 @@ struct DecodingContext {
         return cu_info[(y / minCbSize) * cu_info_stride + (x / minCbSize)];
     }
 
-    // Get intra mode at position
+    // Get intra mode at position (luma)
     int intra_mode_at(int x, int y) const {
         int minCbSize = sps->MinCbSizeY;
         return intra_pred_mode_y[(y / minCbSize) * intra_pred_mode_stride + (x / minCbSize)];
     }
+    // Get chroma intra mode at position
+    int chroma_mode_at(int x, int y) const {
+        int minCbSize = sps->MinCbSizeY;
+        return intra_pred_mode_c[(y / minCbSize) * intra_pred_mode_stride + (x / minCbSize)];
+    }
     void set_intra_mode(int x, int y, int size, int mode);
+    void set_chroma_mode(int x, int y, int size, int mode);
 };
 
 // ============================================================

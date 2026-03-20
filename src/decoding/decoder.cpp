@@ -93,6 +93,8 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
 
     intra_mode_buf_.resize(cuGridW * cuGridH);
     std::fill(intra_mode_buf_.begin(), intra_mode_buf_.end(), 1); // DC default
+    chroma_mode_buf_.resize(cuGridW * cuGridH);
+    std::fill(chroma_mode_buf_.begin(), chroma_mode_buf_.end(), 0); // Planar default
 
     // Setup decoding context
     CabacEngine cabac;
@@ -105,6 +107,7 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.cu_info = cu_info_buf_.data();
     ctx.cu_info_stride = cuGridW;
     ctx.intra_pred_mode_y = intra_mode_buf_.data();
+    ctx.intra_pred_mode_c = chroma_mode_buf_.data();
     ctx.intra_pred_mode_stride = cuGridW;
 
     // Create bitstream reader for slice data (RBSP already extracted by NalParser)
