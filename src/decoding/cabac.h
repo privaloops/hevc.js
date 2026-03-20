@@ -55,6 +55,10 @@ public:
 
     BitstreamReader* bitstream() { return bs_; }
 
+    // Bin counter for debugging
+    int bin_count() const { return bin_count_; }
+    void reset_bin_count() { bin_count_ = 0; }
+
 private:
     void renormalize();  // §9.3.4.3.3
 
@@ -62,6 +66,7 @@ private:
     uint16_t ivlCurrRange_ = 0;
     uint16_t ivlOffset_ = 0;
     BitstreamReader* bs_ = nullptr;
+    int bin_count_ = 0;
 };
 
 } // namespace hevc

@@ -71,6 +71,47 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
 
     std::memset(available, false, sizeof(available));
 
+    // Helper: check if a sample at (rx,ry) in component coordinates is available
+    // Available = in picture, in a previously decoded CTU, or in the same CTU
+    // but preceding in Z-scan order. Simplified: available if before current TU
+    // in raster scan (ry < yC) or (ry == yC..yC+nTbS-1 and rx < xC)
+    // or the sample is in a CTU that precedes the current CTU.
+    int ctbSize = (cIdx > 0) ? sps.CtbSizeY / sps.SubWidthC : sps.CtbSizeY;
+    int curCtbX = xC / ctbSize;
+    int curCtbY = yC / ctbSize;
+
+    auto is_reconstructed = [&](int rx, int ry) -> bool {
+        if (rx < 0 || ry < 0 || rx >= picW || ry >= picH) return false;
+
+        int refCtbX = rx / ctbSize;
+        int refCtbY = ry / ctbSize;
+
+        // Different CTU: available if CTU was already decoded
+        // (CTU at or before current in raster scan)
+        if (refCtbX != curCtbX || refCtbY != curCtbY) {
+            int refCtbAddr = refCtbY * ((cIdx > 0) ?
+                (sps.PicWidthInCtbsY) : sps.PicWidthInCtbsY) + refCtbX;
+            int curCtbAddr = curCtbY * sps.PicWidthInCtbsY + curCtbX;
+            return refCtbAddr < curCtbAddr;
+        }
+
+        // Same CTU: available if the sample precedes current TU in Z-scan
+        // Simplified: (ry < yC) or (ry >= yC and rx < xC)
+        // More precisely: check minCb-granularity Z-scan order
+        int lumaRx = (cIdx > 0) ? rx * sps.SubWidthC : rx;
+        int lumaRy = (cIdx > 0) ? ry * sps.SubHeightC : ry;
+        int lumaX0 = (cIdx > 0) ? x0 : x0; // x0 is already in luma coords
+        int lumaY0 = (cIdx > 0) ? y0 : y0;
+
+        // Use minCb Z-scan: compare (lumaRx, lumaRy) vs (lumaX0, lumaY0)
+        // in the recursive quad-tree order. Approximation: raster row-major.
+        if (lumaRy < lumaY0) return true;
+        if (lumaRy >= lumaY0 && lumaRy < lumaY0 + (nTbS * ((cIdx > 0) ? sps.SubHeightC : 1))) {
+            return lumaRx < lumaX0;
+        }
+        return false;
+    };
+
     // Sample ordering in the reference array:
     // Index 0: bottom-left extension (p[-1][2*nTbS-1])
     // ...
@@ -85,7 +126,7 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
         int refY = yC + 2 * nTbS - 1 - k;
         int refX = xC - 1;
         int idx = k;
-        if (refX >= 0 && refY >= 0 && refX < picW && refY < picH) {
+        if (is_reconstructed(refX, refY)) {
             samples[idx] = static_cast<int16_t>(pic.sample(cIdx, refX, refY));
             available[idx] = true;
         }
@@ -96,7 +137,7 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
         int refX = xC - 1;
         int refY = yC - 1;
         int idx = 2 * nTbS;
-        if (refX >= 0 && refY >= 0 && refX < picW && refY < picH) {
+        if (is_reconstructed(refX, refY)) {
             samples[idx] = static_cast<int16_t>(pic.sample(cIdx, refX, refY));
             available[idx] = true;
         }
@@ -107,7 +148,7 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
         int refX = xC + k;
         int refY = yC - 1;
         int idx = 2 * nTbS + 1 + k;
-        if (refX >= 0 && refY >= 0 && refX < picW && refY < picH) {
+        if (is_reconstructed(refX, refY)) {
             samples[idx] = static_cast<int16_t>(pic.sample(cIdx, refX, refY));
             available[idx] = true;
         }
