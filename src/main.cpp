@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "bitstream/bitstream_reader.h"
+#include "bitstream/nal_unit.h"
 #include "common/types.h"
 
 static void print_usage(const char* prog) {
@@ -63,13 +64,41 @@ int main(int argc, char* argv[]) {
     auto data = read_file(input_path);
     printf("Read %zu bytes from %s\n", data.size(), input_path);
 
-    // TODO: NAL unit parsing (Phase 2)
+    // Phase 2: NAL unit parsing
+    hevc::NalParser parser;
+    auto nals = parser.parse(data.data(), data.size());
+
     if (dump_nals) {
-        printf("--dump-nals: not yet implemented\n");
+        printf("\n%-6s  %-8s  %-14s  %-6s  %-8s  %s\n",
+               "Index", "Offset", "Type", "Size", "TempId", "TypeName");
+        printf("------  --------  --------------  ------  --------  --------\n");
+
+        for (size_t i = 0; i < nals.size(); i++) {
+            const auto& nal = nals[i];
+            printf("%-6zu  %-8zu  %-14d  %-6zu  %-8d  %s\n",
+                   i,
+                   nal.offset,
+                   static_cast<int>(nal.header.nal_unit_type),
+                   nal.size,
+                   nal.header.TemporalId(),
+                   hevc::nal_type_name(nal.header.nal_unit_type));
+        }
+
+        // Group into Access Units and show summary
+        auto aus = parser.group_access_units(nals);
+        printf("\n%zu NAL units in %zu Access Units (frames)\n", nals.size(), aus.size());
+        for (size_t i = 0; i < aus.size(); i++) {
+            printf("  AU %zu: %zu NALs [", i, aus[i].nal_units.size());
+            for (size_t j = 0; j < aus[i].nal_units.size(); j++) {
+                if (j > 0) printf(", ");
+                printf("%s", hevc::nal_type_name(aus[i].nal_units[j].header.nal_unit_type));
+            }
+            printf("]\n");
+        }
     }
 
     if (dump_headers) {
-        printf("--dump-headers: not yet implemented\n");
+        printf("--dump-headers: not yet implemented (Phase 3)\n");
     }
 
     // TODO: Decode pipeline (Phase 2+)
