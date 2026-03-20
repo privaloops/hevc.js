@@ -24,6 +24,7 @@ void BitstreamReader::refill() {
 
 uint32_t BitstreamReader::read_bits(int n) {
     assert(n >= 0 && n <= 32);
+    if (n == 0) return 0;
 
     if (bit_pos_ + static_cast<size_t>(n) > size_ * 8) {
         throw std::runtime_error("BitstreamReader: read past end of data");
@@ -86,11 +87,9 @@ bool BitstreamReader::byte_aligned() const {
 }
 
 void BitstreamReader::byte_alignment() {
-    // Read and discard alignment_bit_equal_to_one (1 bit)
-    // Then read alignment_bit_equal_to_zero until byte aligned
-    if (!byte_aligned()) {
-        read_bits(1);  // alignment_bit_equal_to_one
-    }
+    // §7.2 — always read alignment_bit_equal_to_one (1 bit),
+    // then alignment_bit_equal_to_zero until byte aligned
+    read_bits(1);  // alignment_bit_equal_to_one
     while (!byte_aligned()) {
         read_bits(1);  // alignment_bit_equal_to_zero
     }
@@ -136,11 +135,14 @@ std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size) {
 
     size_t i = 0;
     while (i < nal_size) {
-        // Check for emulation prevention: 0x00 0x00 0x03
+        // Check for emulation prevention: 0x00 0x00 0x03 followed by 0x00-0x03
+        // Spec §7.3.1.1: the 0x03 byte is removed only when followed by
+        // 0x00, 0x01, 0x02, or 0x03, or when it's the last byte of the NAL
         if (i + 2 < nal_size &&
             nal_data[i] == 0x00 &&
             nal_data[i + 1] == 0x00 &&
-            nal_data[i + 2] == 0x03)
+            nal_data[i + 2] == 0x03 &&
+            (i + 3 >= nal_size || nal_data[i + 3] <= 0x03))
         {
             // Copy the two 0x00 bytes, skip the 0x03
             rbsp.push_back(0x00);
