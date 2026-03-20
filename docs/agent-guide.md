@@ -54,15 +54,15 @@ HEVC_LOG(TRANSFORM, "coeff[%d][%d] = %d (after dequant)", row, col, val);
 
 Catégories : BITSTREAM, NAL, PARSE, CABAC, TREE, INTRA, INTER, TRANSFORM, QUANT, FILTER, RECON, DPB.
 
-Filtrage runtime : `HEVC_DEBUG_FILTER=CABAC,INTRA ./hevc-torture input.265`
+Filtrage runtime : `HEVC_DEBUG_FILTER=CABAC,INTRA ./hevc-decode input.265`
 
 ## Comment debugger un oracle FAIL
 
 Quand le MD5 du YUV ne matche pas :
 
 ```bash
-# 1. Décoder avec hevc-torture
-./build/hevc-torture tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
+# 1. Décoder avec hevc-decode
+./build/hevc-decode tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
 
 # 2. Décoder la référence avec ffmpeg
 ffmpeg -y -i tests/conformance/fixtures/i_64x64_qp22.265 -pix_fmt yuv420p /tmp/ref.yuv
@@ -71,7 +71,7 @@ ffmpeg -y -i tests/conformance/fixtures/i_64x64_qp22.265 -pix_fmt yuv420p /tmp/r
 python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv 64 64
 
 # 4. Activer le debug sur la catégorie suspecte
-HEVC_DEBUG_FILTER=CABAC,INTRA ./build/hevc-torture input.265 -o /tmp/test.yuv 2>/tmp/debug.log
+HEVC_DEBUG_FILTER=CABAC,INTRA ./build/hevc-decode input.265 -o /tmp/test.yuv 2>/tmp/debug.log
 
 # 5. Chercher le premier pixel faux dans le log
 # Le PSNR et la position du premier mismatch pointent vers le CTU/CU problématique

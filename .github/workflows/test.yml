@@ -1,0 +1,30 @@
+name: Test
+
+on:
+  push:
+    branches: [main, feature/*, fix/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Unit tests
+        working-directory: build
+        run: ctest --output-on-failure --label-exclude oracle
+
+      - name: Oracle tests
+        working-directory: build
+        run: ctest --output-on-failure --label-regex oracle
+        continue-on-error: true

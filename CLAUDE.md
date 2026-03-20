@@ -1,4 +1,4 @@
-# HEVC Torture - Décodeur HEVC/H.265 en C++ (WASM)
+# HEVC Decode - Décodeur HEVC/H.265 en C++ (WASM)
 
 Décodeur HEVC conforme à la spec ITU-T H.265 (v8, 2021), compilé en WebAssembly pour intégration dans un player web.
 
@@ -59,9 +59,9 @@ clang-tidy src/**/*.cpp -- -std=c++17
 
 ### Tests oracle — comment ça marche
 
-7 bitstreams de test sont dans `tests/conformance/fixtures/` avec des hash MD5 de référence (calculés depuis ffmpeg). Le script `tools/oracle_test.sh` :
+12 bitstreams de test sont dans `tests/conformance/fixtures/` avec des hash MD5 de référence (calculés depuis ffmpeg). Le script `tools/oracle_test.sh` :
 
-1. Décode le bitstream avec `./build/hevc-torture <input> -o <output.yuv>`
+1. Décode le bitstream avec `./build/hevc-decode <input> -o <output.yuv>`
 2. Calcule le MD5 du YUV produit
 3. Compare avec le MD5 de référence
 
@@ -78,16 +78,18 @@ clang-tidy src/**/*.cpp -- -std=c++17
 | Phase 4 (Intra) | `oracle_i_64x64_qp22` |
 | Phase 5 (Inter) | `oracle_p_qcif_10f`, `oracle_b_qcif_10f` |
 | Phase 6 (Filters) | `oracle_i_64x64_deblock`, `oracle_i_64x64_sao`, `oracle_i_64x64_full`, `oracle_full_qcif_10f` |
+| Phase 6+ (Realworld) | `oracle_bbb1080_50f`, `oracle_bbb4k_25f` |
 
 Le test `oracle_full_qcif_10f` (label `milestone`) = **Main profile complet**. Quand il passe, le décodeur est conforme.
+Les tests `oracle_bbb1080_50f` et `oracle_bbb4k_25f` valident sur du contenu réel (Big Buck Bunny).
 
 ### Debugging d'un oracle FAIL
 
 Quand un test oracle échoue (MD5 mismatch) :
 
 ```bash
-# 1. Décoder avec hevc-torture
-./build/hevc-torture tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
+# 1. Décoder avec hevc-decode
+./build/hevc-decode tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
 
 # 2. Décoder la référence avec ffmpeg
 ffmpeg -y -i tests/conformance/fixtures/i_64x64_qp22.265 -pix_fmt yuv420p /tmp/ref.yuv
@@ -124,7 +126,7 @@ src/
 tests/
 ├── unit/           # Tests unitaires par module (16 tests BitstreamReader)
 ├── conformance/
-│   └── fixtures/   # 7 bitstreams de test + README avec hash MD5 de référence
+│   └── fixtures/   # 12 bitstreams de test + README avec hash MD5 de référence
 └── oracle/         # Comparaison frame-by-frame
 tools/
 ├── oracle_compare.py   # Comparaison YUV pixel-perfect (opérationnel)

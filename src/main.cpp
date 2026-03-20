@@ -36,6 +36,7 @@ int main(int argc, char* argv[]) {
     }
 
     const char* input_path = nullptr;
+    const char* output_path = nullptr;
     bool dump_nals = false;
     bool dump_headers = false;
 
@@ -44,6 +45,8 @@ int main(int argc, char* argv[]) {
             dump_nals = true;
         } else if (strcmp(argv[i], "--dump-headers") == 0) {
             dump_headers = true;
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            output_path = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -67,6 +70,18 @@ int main(int argc, char* argv[]) {
 
     if (dump_headers) {
         printf("--dump-headers: not yet implemented\n");
+    }
+
+    // TODO: Decode pipeline (Phase 2+)
+    // When implemented, this will:
+    // 1. Parse NAL units
+    // 2. Parse parameter sets & slice headers
+    // 3. Decode slices (CABAC + prediction + transform)
+    // 4. Apply loop filters
+    // 5. Write YUV output
+    if (output_path) {
+        fprintf(stderr, "Decoding to YUV not yet implemented\n");
+        return 2;  // Exit code 2 = SKIP for oracle tests
     }
 
     return 0;

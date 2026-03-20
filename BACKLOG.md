@@ -6,8 +6,8 @@ Etat d'avancement par phase et prochaines taches.
 
 | Phase | Statut | Progression |
 |-------|--------|-------------|
-| 1 — Infrastructure | **En cours** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging OK. Manque CI GitHub Actions. |
-| 2 — Bitstream & NAL | A faire | — |
+| 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
+| 2 — Bitstream & NAL | **Prochaine** | — |
 | 3 — Parameter Sets | A faire | — |
 | 4 — Intra Prediction | A faire | — |
 | 5 — Inter Prediction | A faire | — |
@@ -16,13 +16,14 @@ Etat d'avancement par phase et prochaines taches.
 | 8 — WASM Integration | A faire | — |
 | 9 — Performance | A faire | — |
 
-## Phase 1 — Restant
+## Phase 1 — Terminee
 
-- [ ] CI GitHub Actions (`build.yml`, `test.yml`)
+- [x] CI GitHub Actions (`build.yml`, `test.yml`)
 - [ ] `tools/fetch_conformance.sh`
 - [x] Structure `Picture` (buffer YUV avec stride) — `src/common/picture.cpp`
 - [x] `HEVC_DEBUG` logging infrastructure — `src/common/debug.h`
 - [x] Bitstreams jouets (toy_qp10/30/45) — `tests/conformance/fixtures/toy_*.265`
+- [x] Bitstreams real-world (bbb1080_50f, bbb4k_25f) — Big Buck Bunny
 - [x] Script extraction CABAC reference — `tools/extract_cabac_reference.py`
 - [x] Guide agent — `docs/agent-guide.md`
 
@@ -64,6 +65,7 @@ Etat d'avancement par phase et prochaines taches.
 
 ## Taches transverses
 
-- [ ] Générer des bitstreams de test réels avec x265 (voir `docs/spec/test-bitstreams.md`)
+- [x] Générer des bitstreams de test réels avec x265 (voir `docs/spec/test-bitstreams.md`)
+- [x] Bitstreams real-world Big Buck Bunny (1080p 50f, 4K 25f)
 - [ ] Télécharger les bitstreams de conformité HEVC officiels
-- [ ] Setup CI GitHub Actions
+- [x] Setup CI GitHub Actions

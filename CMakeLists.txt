@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(hevc-torture VERSION 0.1.0 LANGUAGES CXX)
+project(hevc-decode VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,29 +25,29 @@ if(HEVC_DEBUG OR CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 # Library
-add_library(hevc-torture-lib
+add_library(hevc-decode-lib
     src/bitstream/bitstream_reader.cpp
     src/common/picture.cpp
 )
 
-target_include_directories(hevc-torture-lib PUBLIC
+target_include_directories(hevc-decode-lib PUBLIC
     ${CMAKE_SOURCE_DIR}/src
 )
 
 # CLI executable
-add_executable(hevc-torture
+add_executable(hevc-decode
     src/main.cpp
 )
 
-target_link_libraries(hevc-torture PRIVATE hevc-torture-lib)
+target_link_libraries(hevc-decode PRIVATE hevc-decode-lib)
 
 # WASM-specific settings
 if(BUILD_WASM)
-    set_target_properties(hevc-torture PROPERTIES
+    set_target_properties(hevc-decode PROPERTIES
         SUFFIX ".js"
     )
-    target_compile_options(hevc-torture PRIVATE -O3)
-    target_link_options(hevc-torture PRIVATE
+    target_compile_options(hevc-decode PRIVATE -O3)
+    target_link_options(hevc-decode PRIVATE
         -s WASM=1
         -s ALLOW_MEMORY_GROWTH=1
         -s MODULARIZE=1
@@ -73,7 +73,7 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
     )
 
     target_link_libraries(hevc_tests PRIVATE
-        hevc-torture-lib
+        hevc-decode-lib
         GTest::gtest_main
     )
 
@@ -92,68 +92,81 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
     # Toy bitstreams — ultra-simple for step-by-step debugging (64x64, 1 CTU)
     add_test(NAME oracle_toy_qp30
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp30.265 64 64
-            9f59878470d904dc2e162d3d191611af $<TARGET_FILE:hevc-torture>)
+            9f59878470d904dc2e162d3d191611af $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_toy_qp30 PROPERTIES LABELS "oracle;phase4;toy"
         SKIP_RETURN_CODE 2)
 
     add_test(NAME oracle_toy_qp45
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp45.265 64 64
-            52ca5108bd4354383a9d29d96cf64b47 $<TARGET_FILE:hevc-torture>)
+            52ca5108bd4354383a9d29d96cf64b47 $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_toy_qp45 PROPERTIES LABELS "oracle;phase4;toy"
         SKIP_RETURN_CODE 2)
 
     add_test(NAME oracle_toy_qp10
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/toy_qp10.265 64 64
-            ff469ce7e872152490b9b39b0d05dd7b $<TARGET_FILE:hevc-torture>)
+            ff469ce7e872152490b9b39b0d05dd7b $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_toy_qp10 PROPERTIES LABELS "oracle;phase4;toy"
         SKIP_RETURN_CODE 2)
 
     # Phase 4 — I-only, no filters
     add_test(NAME oracle_i_64x64_qp22
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/i_64x64_qp22.265 64 64
-            48c64cd2de381113913149e92065d66c $<TARGET_FILE:hevc-torture>)
+            48c64cd2de381113913149e92065d66c $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_i_64x64_qp22 PROPERTIES LABELS "oracle;phase4"
         SKIP_RETURN_CODE 2)
 
     # Phase 5 — P-frames, no filters
     add_test(NAME oracle_p_qcif_10f
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/p_qcif_10f.265 176 144
-            921650ab84b8e366a1aa4e16f2527e46 $<TARGET_FILE:hevc-torture>)
+            921650ab84b8e366a1aa4e16f2527e46 $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_p_qcif_10f PROPERTIES LABELS "oracle;phase5"
         SKIP_RETURN_CODE 2)
 
     # Phase 5 — B-frames, no filters
     add_test(NAME oracle_b_qcif_10f
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/b_qcif_10f.265 176 144
-            dffe2712c0561c75ee40256d59299826 $<TARGET_FILE:hevc-torture>)
+            dffe2712c0561c75ee40256d59299826 $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_b_qcif_10f PROPERTIES LABELS "oracle;phase5"
         SKIP_RETURN_CODE 2)
 
     # Phase 6 — I-frame with deblocking only
     add_test(NAME oracle_i_64x64_deblock
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/i_64x64_deblock.265 64 64
-            576ef497ceedffa01709ddfaa13c76c3 $<TARGET_FILE:hevc-torture>)
+            576ef497ceedffa01709ddfaa13c76c3 $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_i_64x64_deblock PROPERTIES LABELS "oracle;phase6"
         SKIP_RETURN_CODE 2)
 
     # Phase 6 — I-frame with SAO only
     add_test(NAME oracle_i_64x64_sao
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/i_64x64_sao.265 64 64
-            eacb4952591daa891e8dc5344c6c34ee $<TARGET_FILE:hevc-torture>)
+            eacb4952591daa891e8dc5344c6c34ee $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_i_64x64_sao PROPERTIES LABELS "oracle;phase6"
         SKIP_RETURN_CODE 2)
 
     # Phase 6 — I-frame with deblocking + SAO
     add_test(NAME oracle_i_64x64_full
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/i_64x64_full.265 64 64
-            dcb7ae02b4514b6e7fd801ae691d901a $<TARGET_FILE:hevc-torture>)
+            dcb7ae02b4514b6e7fd801ae691d901a $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_i_64x64_full PROPERTIES LABELS "oracle;phase6"
         SKIP_RETURN_CODE 2)
 
     # Phase 6 — Full pipeline (B-frames + deblocking + SAO) = Main profile milestone
     add_test(NAME oracle_full_qcif_10f
         COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/full_qcif_10f.265 176 144
-            a4984ee61d18ac9619808c5338132eaa $<TARGET_FILE:hevc-torture>)
+            a4984ee61d18ac9619808c5338132eaa $<TARGET_FILE:hevc-decode>)
     set_tests_properties(oracle_full_qcif_10f PROPERTIES LABELS "oracle;phase6;milestone"
+        SKIP_RETURN_CODE 2)
+
+    # Real-world bitstreams — Big Buck Bunny (Main profile, full pipeline)
+    add_test(NAME oracle_bbb1080_50f
+        COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/bbb1080_50f.265 1920 1080
+            a7c12e24701e3636ce58246033bff6ed $<TARGET_FILE:hevc-decode>)
+    set_tests_properties(oracle_bbb1080_50f PROPERTIES LABELS "oracle;phase6;realworld"
+        SKIP_RETURN_CODE 2)
+
+    add_test(NAME oracle_bbb4k_25f
+        COMMAND ${ORACLE_SCRIPT} ${FIXTURES_DIR}/bbb4k_25f.265 3840 2160
+            69f2ba71153ec5f3c1573fed17631ed4 $<TARGET_FILE:hevc-decode>)
+    set_tests_properties(oracle_bbb4k_25f PROPERTIES LABELS "oracle;phase6;realworld"
         SKIP_RETURN_CODE 2)
 endif()

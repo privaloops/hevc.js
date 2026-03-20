@@ -27,6 +27,15 @@ Encodage : `x265 --preset ultrafast --keyint 1 --no-deblock --no-sao --no-wpp --
 
 Ces bitstreams ont 1 seul CTU (64x64), ideal pour debugger CABAC et intra prediction etape par etape.
 
+## Real-world bitstreams (Big Buck Bunny)
+
+| Fichier | Taille | Resolution | Frames | FPS | Type | Phase | MD5 (YUV decode) |
+|---------|--------|------------|--------|-----|------|-------|------------------|
+| `bbb1080_50f.265` | 783K | 1920x1080 | 50 | 25 | I+P+B (full) | 6+ | `a7c12e24701e3636ce58246033bff6ed` |
+| `bbb4k_25f.265` | 4.4M | 3840x2160 | 25 | 25 | I+P+B (full) | 6+ | `69f2ba71153ec5f3c1573fed17631ed4` |
+
+Source : Big Buck Bunny, encode HEVC Main profile, extrait sans re-encodage depuis hevc-gpu demo streams.
+
 ## Parametres d'encodage communs
 
 ```

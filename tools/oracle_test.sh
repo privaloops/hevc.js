@@ -1,5 +1,5 @@
 #!/bin/bash
-# oracle_test.sh — Test oracle : decode avec hevc-torture, compare MD5 avec reference
+# oracle_test.sh — Test oracle : decode avec hevc-decode, compare MD5 avec reference
 #
 # Usage: oracle_test.sh <bitstream.265> <width> <height> <expected_md5> [decoder_path]
 #
@@ -11,7 +11,7 @@ BITSTREAM="$1"
 WIDTH="$2"
 HEIGHT="$3"
 EXPECTED_MD5="$4"
-DECODER="${5:-./hevc-torture}"
+DECODER="${5:-./hevc-decode}"
 
 # Vérifier que le décodeur existe
 if [ ! -x "$DECODER" ]; then
@@ -29,7 +29,7 @@ fi
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
-# Décoder avec hevc-torture (may fail if not yet implemented)
+# Décoder avec hevc-decode (may fail if not yet implemented)
 "$DECODER" "$BITSTREAM" -o "$TMPDIR/output.yuv" 2>/dev/null || true
 
 if [ ! -f "$TMPDIR/output.yuv" ] || [ ! -s "$TMPDIR/output.yuv" ]; then

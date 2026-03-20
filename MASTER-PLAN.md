@@ -2,7 +2,7 @@
 
 ## Vision
 
-Implémenter un décodeur HEVC conforme à la spec ITU-T H.265 (v8, 2021) en C++17, compilé en WebAssembly pour intégration dans un player web. Le décodeur sera validé frame-par-frame contre libde265 comme oracle de référence.
+Implémenter un décodeur HEVC conforme à la spec ITU-T H.265 (v8, 2021) en C++17, compilé en WebAssembly pour intégration dans un player web. Le décodeur sera validé frame-par-frame contre ffmpeg comme oracle de référence.
 
 ## Profils cibles
 
