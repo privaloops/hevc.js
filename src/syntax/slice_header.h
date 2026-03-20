@@ -5,11 +5,11 @@
 #include <vector>
 
 #include "common/types.h"
+#include "syntax/sps.h"
 
 namespace hevc {
 
 class BitstreamReader;
-struct SPS;
 struct PPS;
 
 // Prediction Weight Table — spec §7.3.6.3
@@ -55,7 +55,7 @@ struct SliceHeader {
     // Short-term RPS
     bool short_term_ref_pic_set_sps_flag = false;
     uint32_t short_term_ref_pic_set_idx = 0;
-    // or inline short_term_ref_pic_set
+    ShortTermRefPicSet st_rps;  // inline RPS (when not from SPS)
 
     // Long-term refs
     uint32_t num_long_term_sps = 0;
@@ -114,6 +114,9 @@ struct SliceHeader {
     // ---- Derived values ----
     int SliceQpY = 0;
     int MaxNumMergeCand = 5;
+
+    // Active RPS for this slice (pointer to SPS set or inline set)
+    const ShortTermRefPicSet* active_rps = nullptr;
 
     // Parse from bitstream (needs active SPS and PPS)
     bool parse(BitstreamReader& bs, const SPS& sps, const PPS& pps,

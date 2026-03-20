@@ -8,8 +8,8 @@ Etat d'avancement par phase et prochaines taches.
 |-------|--------|-------------|
 | 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
-| 3 — Parameter Sets | **Prochaine** | — |
-| 4 — Intra Prediction | A faire | — |
+| 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
+| 4 — Intra Prediction | **Prochaine** | — |
 | 5 — Inter Prediction | A faire | — |
 | 6 — Loop Filters | A faire | — |
 | 7 — High Profiles | A faire | — |
@@ -37,15 +37,15 @@ Etat d'avancement par phase et prochaines taches.
 - [x] 2.6 Access Unit boundary detection (prefix/suffix SEI distinction, AUD, EOS, multi-slice)
 - [x] 2.7 `more_rbsp_data()` (tests edge cases : single byte, trailing zeros, multi-byte)
 
-## Phase 3 — Après Phase 2
+## Phase 3 — Terminee
 
-- [ ] 3.1 Profile/Tier/Level parsing
-- [ ] 3.2 VPS parsing complet
-- [ ] 3.3 SPS parsing complet (avec scaling list fallback)
-- [ ] 3.4 PPS parsing complet (avec tiles layout)
-- [ ] 3.5 Slice header parsing complet (avec entry point offsets, pred weight table)
-- [ ] 3.6 Parameter set management (stockage par ID)
-- [ ] 3.7 CLI `--dump-headers`
+- [x] 3.1 Profile/Tier/Level parsing (general + sub-layer, constraint flags)
+- [x] 3.2 VPS parsing complet (timing info, layer sets)
+- [x] 3.3 SPS parsing complet (scaling list data + defaults, st_ref_pic_set inter-prediction, long-term refs, VUI skip)
+- [x] 3.4 PPS parsing complet (tiles layout + CtbAddrRsToTs/TsToRs/TileId derivation)
+- [x] 3.5 Slice header parsing complet (entry point offsets, pred weight table, ref pic list modification, deblocking overrides, dependent slices)
+- [x] 3.6 Parameter set management (ParameterSetManager, stockage par ID, activation via slice)
+- [x] 3.7 CLI `--dump-headers` (VPS/SPS/PPS/SliceHeader dump complet)
 
 ## Phase 4 — Après Phase 3
 
