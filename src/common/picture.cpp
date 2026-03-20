@@ -56,23 +56,31 @@ bool Picture::write_yuv(const char* path) const {
     int crop_top[3]    = { conf_win_top, conf_win_top / sub_h, conf_win_top / sub_h };
     int crop_bottom[3] = { conf_win_bottom, conf_win_bottom / sub_h, conf_win_bottom / sub_h };
 
+    // Reusable row buffer for 8-bit conversion (avoid per-line allocation)
+    std::vector<uint8_t> row_buf;
+
     for (int c = 0; c < 3; c++) {
         if (width[c] == 0 || height[c] == 0) continue;
 
         int out_width  = width[c] - crop_left[c] - crop_right[c];
         int out_height = height[c] - crop_top[c] - crop_bottom[c];
 
+        if (bd[c] <= 8) {
+            row_buf.resize(out_width);
+        }
+
         for (int y = crop_top[c]; y < crop_top[c] + out_height; y++) {
             const uint16_t* row = &planes[c][y * stride[c]];
 
             if (bd[c] <= 8) {
-                // Write as 8-bit: truncate uint16_t to uint8_t
-                for (int x = crop_left[c]; x < crop_left[c] + out_width; x++) {
-                    uint8_t val = static_cast<uint8_t>(row[x]);
-                    if (fwrite(&val, 1, 1, fp) != 1) {
-                        fclose(fp);
-                        return false;
-                    }
+                // Write as 8-bit: convert row to uint8_t buffer, write once
+                for (int x = 0; x < out_width; x++) {
+                    row_buf[x] = static_cast<uint8_t>(row[crop_left[c] + x]);
+                }
+                if (fwrite(row_buf.data(), 1, out_width, fp) !=
+                    static_cast<size_t>(out_width)) {
+                    fclose(fp);
+                    return false;
                 }
             } else {
                 // Write as 16-bit little-endian
