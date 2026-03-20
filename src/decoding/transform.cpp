@@ -235,13 +235,15 @@ static void inverse_transform_2d(int log2TrafoSize, bool use_dst,
                                   const int16_t* coeff, int16_t* residual) {
     int trSize = 1 << log2TrafoSize;
     int16_t tmp[64 * 64];
+    int16_t tmp2[64 * 64];
 
     // Vertical pass: shift1 = 7
     int shift1 = 7;
     // Horizontal pass: shift2 = 20 - BitDepth
     int shift2 = 20 - bit_depth;
 
-    // Pass 1: vertical (columns) — transform rows of the transposed matrix
+    // Pass 1: vertical (columns)
+    // idctN processes columns: for each j, transforms src[k*line+j] -> dst[k*line+j]
     if (use_dst && log2TrafoSize == 2) {
         idst4(coeff, tmp, shift1, trSize);
     } else {
@@ -253,19 +255,27 @@ static void inverse_transform_2d(int log2TrafoSize, bool use_dst,
         }
     }
 
-    // CRITICAL: Inter-pass clipping to [-32768, 32767] already done in each idctN
+    // Transpose between passes so pass 2 transforms rows
+    for (int y = 0; y < trSize; y++)
+        for (int x = 0; x < trSize; x++)
+            tmp2[y * trSize + x] = tmp[x * trSize + y];
 
-    // Pass 2: horizontal (rows)
+    // Pass 2: horizontal (rows) — after transpose, columns of tmp2 are rows of tmp
     if (use_dst && log2TrafoSize == 2) {
-        idst4(tmp, residual, shift2, trSize);
+        idst4(tmp2, tmp, shift2, trSize);
     } else {
         switch (log2TrafoSize) {
-            case 2: idct4(tmp, residual, shift2, trSize); break;
-            case 3: idct8(tmp, residual, shift2, trSize); break;
-            case 4: idct16(tmp, residual, shift2, trSize); break;
-            case 5: idct32(tmp, residual, shift2, trSize); break;
+            case 2: idct4(tmp2, tmp, shift2, trSize); break;
+            case 3: idct8(tmp2, tmp, shift2, trSize); break;
+            case 4: idct16(tmp2, tmp, shift2, trSize); break;
+            case 5: idct32(tmp2, tmp, shift2, trSize); break;
         }
     }
+
+    // Transpose back to get final residual in row-major order
+    for (int y = 0; y < trSize; y++)
+        for (int x = 0; x < trSize; x++)
+            residual[y * trSize + x] = tmp[x * trSize + y];
 }
 
 // ============================================================

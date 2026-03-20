@@ -406,6 +406,7 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
                 }
 
                 coefficients[yC * trSize + xC] = static_cast<int16_t>(sign * absLevel);
+
                 sumAbsLevel += absLevel;
                 numSigCoeff++;
             }

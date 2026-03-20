@@ -515,6 +515,7 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             auto& cu = ctx.cu_at(x0 + i * sps.MinCbSizeY,
                                   y0 + j * sps.MinCbSizeY);
             cu.pred_mode = pred_mode;
+            cu.part_mode = part_mode;
             cu.log2CbSize = log2CbSize;
             cu.cu_transquant_bypass = cu_transquant_bypass;
         }
@@ -643,11 +644,10 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
 
     bool split = false;
 
-    // Compute MaxTrafoDepth
+    // IntraSplitFlag — Table 7-10: only set when PartMode == NxN for intra
     auto& cu = ctx.cu_at(x0, y0);
     bool intraSplitFlag = (cu.pred_mode == PredMode::MODE_INTRA &&
-                           cu.log2CbSize == sps.MinCbLog2SizeY &&
-                           sps.MinCbLog2SizeY > sps.MinTbLog2SizeY);
+                           cu.part_mode == PartMode::PART_NxN);
     int maxTrafoDepth;
     if (cu.pred_mode == PredMode::MODE_INTRA) {
         maxTrafoDepth = sps.max_transform_hierarchy_depth_intra +
@@ -747,6 +747,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
             int qpPrime = qpY + sps.QpBdOffsetY;
             perform_dequant(ctx, x0, y0, log2TrafoSize, 0, qpPrime,
                            coefficients, scaled);
+
             perform_transform_inverse(log2TrafoSize, 0,
                                        cu.pred_mode == PredMode::MODE_INTRA,
                                        transform_skip, sps.BitDepthY,

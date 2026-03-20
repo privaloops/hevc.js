@@ -18,6 +18,7 @@ namespace hevc {
 // Per-CU info stored in the picture grid (for neighbour access)
 struct CUInfo {
     PredMode pred_mode = PredMode::MODE_INTRA;
+    PartMode part_mode = PartMode::PART_2Nx2N;
     int log2CbSize = 0;
     int intra_mode_luma = 1; // DC default
     int qp_y = 26;

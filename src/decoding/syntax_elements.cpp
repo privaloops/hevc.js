@@ -229,14 +229,15 @@ int decode_coeff_abs_level_remaining(CabacEngine& cabac, int cRiceParam) {
         }
         return (prefix << cRiceParam) + suffix;
     } else {
-        // EGk with k = cRiceParam + 1
-        int suffix = 0;
-        int k = cRiceParam + 1;
+        // EGk suffix with k = cRiceParam + 1
+        // §9.3.3.3: read 1's incrementing k, then 0, then k bits
+        int kStart = cRiceParam + 1;
+        int k = kStart;
         while (cabac.decode_bypass()) k++;
-        suffix = (1 << k) - 1 + cabac.decode_bypass_bins(k);
-        // Total = 4 << cRiceParam + suffix - (1 << cRiceParam)
-        // Actually: prefix=4, so base = 4 << cRiceParam
-        // Then EGk adds the suffix
+        int suffix = cabac.decode_bypass_bins(k);
+        // Reconstruct: sum of (1<<k_j) for each '1' read + final k bits
+        // = (1 << k) - (1 << kStart) + suffix
+        suffix += (1 << k) - (1 << kStart);
         return (4 << cRiceParam) + suffix;
     }
 }
