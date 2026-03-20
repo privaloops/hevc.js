@@ -5,24 +5,40 @@
 namespace hevc {
 
 BitstreamReader::BitstreamReader(const uint8_t* data, size_t size)
-    : data_(data), size_(size), bit_pos_(0) {}
+    : data_(data), size_(size), bit_pos_(0),
+      cache_(0), cache_bits_(0), byte_pos_(0),
+      last_one_bit_pos_(find_last_one_bit(data, size))
+{
+    refill();
+}
+
+// Refill the 64-bit cache from the byte stream (MSB-aligned).
+// Loads as many full bytes as fit into the empty upper bits of the cache.
+void BitstreamReader::refill() {
+    while (cache_bits_ <= 56 && byte_pos_ < size_) {
+        cache_ |= static_cast<uint64_t>(data_[byte_pos_]) << (56 - cache_bits_);
+        cache_bits_ += 8;
+        byte_pos_++;
+    }
+}
 
 uint32_t BitstreamReader::read_bits(int n) {
     assert(n >= 0 && n <= 32);
-    assert(!eof());
 
-    uint32_t result = 0;
-    for (int i = 0; i < n; i++) {
-        size_t byte_idx = bit_pos_ / 8;
-        size_t bit_idx  = 7 - (bit_pos_ % 8);
-
-        if (byte_idx >= size_) {
-            throw std::runtime_error("BitstreamReader: read past end of data");
-        }
-
-        result = (result << 1) | ((data_[byte_idx] >> bit_idx) & 1);
-        bit_pos_++;
+    if (bit_pos_ + static_cast<size_t>(n) > size_ * 8) {
+        throw std::runtime_error("BitstreamReader: read past end of data");
     }
+
+    if (cache_bits_ < n) {
+        refill();
+    }
+
+    // Extract n bits from the MSB side of the cache
+    uint32_t result = static_cast<uint32_t>(cache_ >> (64 - n));
+    cache_ <<= n;
+    cache_bits_ -= n;
+    bit_pos_ += n;
+
     return result;
 }
 
@@ -58,7 +74,7 @@ uint32_t BitstreamReader::read_ue() {
 }
 
 // Exp-Golomb signed (§9.2)
-// Maps: 0→0, 1→1, 2→-1, 3→2, 4→-2, ...
+// Maps: 0->0, 1->1, 2->-1, 3->2, 4->-2, ...
 int32_t BitstreamReader::read_se() {
     uint32_t code = read_ue();
     int32_t value = static_cast<int32_t>((code + 1) / 2);
@@ -81,21 +97,23 @@ void BitstreamReader::byte_alignment() {
 }
 
 // §7.2 — more_rbsp_data()
-// Returns true if current position is before the rbsp_stop_one_bit
+// Returns true if current position is before the rbsp_stop_one_bit.
+// last_one_bit_pos_ is precomputed at construction — O(1) per call.
 bool BitstreamReader::more_rbsp_data() const {
     if (bit_pos_ >= size_ * 8) return false;
-
-    size_t last_one = find_last_one_bit();
-    return bit_pos_ < last_one;
+    return bit_pos_ < last_one_bit_pos_;
 }
 
-size_t BitstreamReader::find_last_one_bit() const {
-    // Scan backward from end to find the last '1' bit (rbsp_stop_one_bit)
-    for (size_t i = size_ * 8; i > 0; i--) {
-        size_t byte_idx = (i - 1) / 8;
-        size_t bit_idx  = 7 - ((i - 1) % 8);
-        if ((data_[byte_idx] >> bit_idx) & 1) {
-            return i - 1;
+// Scan backward from end to find the last '1' bit (rbsp_stop_one_bit).
+// Called once at construction.
+size_t BitstreamReader::find_last_one_bit(const uint8_t* data, size_t size) {
+    for (size_t i = size; i > 0; i--) {
+        uint8_t byte = data[i - 1];
+        if (byte != 0) {
+            // Find lowest set bit in this byte = last '1' bit in stream order
+            int bit = 0;
+            while (((byte >> bit) & 1) == 0) bit++;
+            return (i - 1) * 8 + (7 - bit);
         }
     }
     return 0;

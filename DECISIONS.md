@@ -92,4 +92,4 @@ int32_t transform_buf[64 * 64];  // precision etendue pour transform
 **Justification** :
 - Pas d'allocation dynamique dans le hot path
 - 64*64*4 = 16KB par buffer, ~48KB total — acceptable sur la stack
-- WASM a une stack par defaut de 1MB (configurable)
+- WASM : la stack par defaut Emscripten est ~64KB (le heap est extensible, pas la stack). Prevoir `-sSTACK_SIZE=1048576` en Phase 8, ou restructurer pour allouer les buffers au niveau CTU
