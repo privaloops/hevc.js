@@ -35,6 +35,13 @@ add_library(hevc-decode-lib
     src/syntax/pps.cpp
     src/syntax/slice_header.cpp
     src/syntax/parameter_sets.cpp
+    src/decoding/cabac.cpp
+    src/decoding/syntax_elements.cpp
+    src/decoding/coding_tree.cpp
+    src/decoding/residual_coding.cpp
+    src/decoding/transform.cpp
+    src/decoding/intra_prediction.cpp
+    src/decoding/decoder.cpp
 )
 
 target_include_directories(hevc-decode-lib PUBLIC
@@ -79,6 +86,7 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
         tests/unit/test_nal_parser.cpp
         tests/unit/test_picture.cpp
         tests/unit/test_parameter_sets.cpp
+        tests/unit/test_cabac.cpp
     )
 
     target_link_libraries(hevc_tests PRIVATE
