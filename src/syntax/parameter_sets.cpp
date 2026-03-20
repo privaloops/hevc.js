@@ -75,14 +75,14 @@ bool ParameterSetManager::parse_slice_header(SliceHeader& sh, const NalUnit& nal
         return false;
     }
 
-    // Update active parameter sets
-    active_sps_ = sps;
-    active_pps_ = pps;
+    // Update active parameter set IDs (safe against PS replacement)
+    active_sps_id_ = static_cast<int>(pps->pps_seq_parameter_set_id);
+    active_pps_id_ = static_cast<int>(pps_id);
 
     // Re-parse the full slice header from the beginning
     BitstreamReader bs2(nal.rbsp.data(), nal.rbsp.size());
     (void)first_slice;
-    return sh.parse(bs2, *sps, *pps, nal.header.nal_unit_type, nal.header.nuh_temporal_id_plus1);
+    return sh.parse(bs2, *sps, *pps, nal.header.nal_unit_type, nal.header.TemporalId());
 }
 
 } // namespace hevc
