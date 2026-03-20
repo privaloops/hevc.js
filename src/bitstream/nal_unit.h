@@ -30,7 +30,8 @@ public:
     std::vector<NalUnit> parse(const uint8_t* data, size_t size);
 
     // Group NAL units into Access Units (§7.4.2.4.4)
-    std::vector<AccessUnit> group_access_units(const std::vector<NalUnit>& nals);
+    // Takes ownership of NAL units to avoid copying RBSP data
+    std::vector<AccessUnit> group_access_units(std::vector<NalUnit>&& nals);
 
 private:
     // Find next start code (0x000001 or 0x00000001)

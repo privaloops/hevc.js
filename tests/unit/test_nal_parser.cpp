@@ -288,7 +288,7 @@ TEST(NalParser, AccessUnit_SingleIFrame) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     // All belong to one AU (no previous VCL before VPS/SPS/PPS)
     ASSERT_EQ(aus.size(), 1u);
@@ -307,7 +307,7 @@ TEST(NalParser, AccessUnit_TwoFrames) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 2u);
     EXPECT_EQ(aus[0].nal_units.size(), 4u);  // VPS+SPS+PPS+IDR
@@ -325,7 +325,7 @@ TEST(NalParser, AccessUnit_SuffixSEI_SameAU) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 1u);
     EXPECT_EQ(aus[0].nal_units.size(), 5u);  // VPS+SPS+PPS+IDR+SUFFIX_SEI
@@ -340,7 +340,7 @@ TEST(NalParser, AccessUnit_PrefixSEI_NewAU) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 2u);
     EXPECT_EQ(aus[0].nal_units.size(), 1u);  // IDR
@@ -360,7 +360,7 @@ TEST(NalParser, AccessUnit_AUD_StartsNewAU) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 2u);
     EXPECT_EQ(aus[0].nal_units.size(), 5u);  // AUD+VPS+SPS+PPS+IDR
@@ -378,7 +378,7 @@ TEST(NalParser, AccessUnit_VPSAfterVCL_NewAU) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 2u);
     EXPECT_EQ(aus[0].nal_units.size(), 1u);  // IDR
@@ -396,7 +396,7 @@ TEST(NalParser, AccessUnit_MultiSliceSameFrame) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 1u);
     EXPECT_EQ(aus[0].nal_units.size(), 5u);
@@ -409,7 +409,7 @@ TEST(NalParser, AccessUnit_EOS_TerminatesAU) {
 
     NalParser parser;
     auto nals = parser.parse(stream.data(), stream.size());
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
 
     ASSERT_EQ(aus.size(), 2u);
     EXPECT_EQ(aus[0].nal_units.size(), 1u);  // IDR
@@ -488,6 +488,6 @@ TEST(NalParser, ParseRealBitstream_ToyQP30) {
     EXPECT_EQ(nals[2].header.nal_unit_type, NalUnitType::PPS_NUT);
 
     // Check AU grouping
-    auto aus = parser.group_access_units(nals);
+    auto aus = parser.group_access_units(std::move(nals));
     EXPECT_GE(aus.size(), 1u);
 }

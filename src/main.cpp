@@ -85,7 +85,8 @@ int main(int argc, char* argv[]) {
         }
 
         // Group into Access Units and show summary
-        auto aus = parser.group_access_units(nals);
+        auto nals_copy = nals;  // copy before move (nals used above)
+        auto aus = parser.group_access_units(std::move(nals_copy));
         printf("\n%zu NAL units in %zu Access Units (frames)\n", nals.size(), aus.size());
         for (size_t i = 0; i < aus.size(); i++) {
             printf("  AU %zu: %zu NALs [", i, aus[i].nal_units.size());
