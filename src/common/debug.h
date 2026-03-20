@@ -78,8 +78,8 @@ inline bool debug_category_enabled(DebugCategory cat) {
     do { \
         if (::hevc::debug_category_enabled(::hevc::DebugCategory::category)) { \
             fprintf(stderr, "[%s] " fmt "\n", \
-                ::hevc::debug_category_name(::hevc::DebugCategory::category), \
-                ##__VA_ARGS__); \
+                ::hevc::debug_category_name(::hevc::DebugCategory::category) \
+                __VA_OPT__(,) __VA_ARGS__); \
         } \
     } while (0)
 

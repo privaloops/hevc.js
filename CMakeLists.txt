@@ -27,6 +27,7 @@ endif()
 # Library
 add_library(hevc-decode-lib
     src/bitstream/bitstream_reader.cpp
+    src/bitstream/nal_parser.cpp
     src/common/picture.cpp
 )
 
@@ -69,6 +70,7 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
 
     add_executable(hevc_tests
         tests/unit/test_bitstream_reader.cpp
+        tests/unit/test_nal_parser.cpp
         tests/unit/test_picture.cpp
     )
 
