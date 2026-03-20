@@ -209,33 +209,24 @@ static bool needs_filtering(int intra_mode, int log2BlkSize) {
     return false;
 }
 
-static void filter_reference_samples(int16_t* ref, int nTbS, bool strongSmoothing,
-                                      int bitDepth) {
-    if (strongSmoothing && nTbS == 32) {
-        // Strong intra smoothing for 32x32
+static void filter_reference_samples(int16_t* ref, int nTbS, bool biIntFlag,
+                                      int /*bitDepth*/) {
+    if (biIntFlag) {
+        // §8.4.4.2.3: bilinear interpolation between endpoints
+        int16_t filtered[2 * 64 + 1];
         int topLeft = ref[0];
-        int topRight = ref[2 * nTbS]; // p[2*nTbS-1][-1] is at index 2*nTbS
-        // Note: refTop[2*nTbS] is the last top-right sample
-
-        // Check condition
-        int threshold = 1 << (bitDepth - 5);
-        bool doStrong = (std::abs(topLeft + topRight - 2 * ref[nTbS]) < threshold);
-        // Also check left side using refLeft (but we need both arrays)
-        // For simplicity, apply only if condition met on top
-        if (doStrong) {
-            int16_t filtered[2 * 64 + 1];
-            filtered[0] = ref[0];
-            for (int i = 1; i < 2 * nTbS; i++) {
-                filtered[i] = static_cast<int16_t>(
-                    ((2 * nTbS - i) * topLeft + i * topRight + nTbS) / (2 * nTbS));
-            }
-            filtered[2 * nTbS] = ref[2 * nTbS];
-            std::memcpy(ref, filtered, sizeof(int16_t) * (2 * nTbS + 1));
-            return;
+        int endVal = ref[2 * nTbS];
+        filtered[0] = ref[0];
+        for (int i = 1; i < 2 * nTbS; i++) {
+            filtered[i] = static_cast<int16_t>(
+                ((2 * nTbS - i) * topLeft + i * endVal + nTbS) / (2 * nTbS));
         }
+        filtered[2 * nTbS] = ref[2 * nTbS];
+        std::memcpy(ref, filtered, sizeof(int16_t) * (2 * nTbS + 1));
+        return;
     }
 
-    // Standard [1,2,1]/4 filter
+    // Standard [1,2,1]/4 filter (eq 8-41 to 8-45)
     int16_t filtered[2 * 64 + 1];
     filtered[0] = ref[0]; // Corner not filtered
     for (int i = 1; i < 2 * nTbS; i++) {
@@ -422,13 +413,26 @@ void perform_intra_prediction(DecodingContext& ctx, int x0, int y0,
 
     build_reference_samples(ctx, x0, y0, nTbS, cIdx, refTop, refLeft);
 
-    // Filter reference samples if needed
-    bool doFilter = needs_filtering(intra_mode, log2PredSize);
+    // Filter reference samples if needed (§8.4.4.2.1 step 1 + §8.4.4.2.3)
+    bool doFilter = !ctx.sps->intra_smoothing_disabled_flag &&
+                     needs_filtering(intra_mode, log2PredSize);
     if (doFilter) {
-        bool strongSmoothing = (ctx.sps->strong_intra_smoothing_enabled_flag &&
-                                cIdx == 0);
-        filter_reference_samples(refTop, nTbS, strongSmoothing, bitDepth);
-        filter_reference_samples(refLeft, nTbS, strongSmoothing, bitDepth);
+        // §8.4.4.2.3: biIntFlag requires ALL conditions:
+        // strong_intra_smoothing, cIdx==0, nTbS==32,
+        // top smoothness check AND left smoothness check
+        bool biIntFlag = false;
+        if (ctx.sps->strong_intra_smoothing_enabled_flag &&
+            cIdx == 0 && nTbS == 32) {
+            int threshold = 1 << (bitDepth - 5);
+            int topLeft = refTop[0]; // = refLeft[0] = p[-1][-1]
+            bool topSmooth = std::abs(topLeft + refTop[2 * nTbS] -
+                                       2 * refTop[nTbS]) < threshold;
+            bool leftSmooth = std::abs(topLeft + refLeft[2 * nTbS] -
+                                        2 * refLeft[nTbS]) < threshold;
+            biIntFlag = topSmooth && leftSmooth;
+        }
+        filter_reference_samples(refTop, nTbS, biIntFlag, bitDepth);
+        filter_reference_samples(refLeft, nTbS, biIntFlag, bitDepth);
     }
 
     // Dispatch to prediction mode
