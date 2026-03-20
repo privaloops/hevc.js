@@ -1,9 +1,8 @@
 #include "syntax/slice_header.h"
 #include "syntax/pps.h"
 #include "bitstream/bitstream_reader.h"
+#include "common/types.h"
 #include "common/debug.h"
-
-#include <cmath>
 
 namespace hevc {
 
@@ -29,10 +28,15 @@ static bool parse_pred_weight_table(BitstreamReader& bs, PredWeightTable& pwt,
         }
     }
 
-    // L0 weight/offset values
+    // Derived chroma log2 weight denom (spec §7.4.7.3)
+    int chromaLog2WeightDenom = static_cast<int>(pwt.luma_log2_weight_denom) +
+                                pwt.delta_chroma_log2_weight_denom;
+
+    // L0 weight/offset values — derive final values per spec §7.4.7.3
     for (uint32_t i = 0; i <= num_ref_idx_l0; i++) {
         if (pwt.l0[i].luma_weight_flag) {
-            pwt.l0[i].luma_weight = static_cast<int16_t>(bs.read_se());
+            int16_t delta = static_cast<int16_t>(bs.read_se());
+            pwt.l0[i].luma_weight = static_cast<int16_t>((1 << pwt.luma_log2_weight_denom) + delta);
             pwt.l0[i].luma_offset = static_cast<int16_t>(bs.read_se());
         } else {
             pwt.l0[i].luma_weight = static_cast<int16_t>(1 << pwt.luma_log2_weight_denom);
@@ -40,14 +44,17 @@ static bool parse_pred_weight_table(BitstreamReader& bs, PredWeightTable& pwt,
         }
         if (pwt.l0[i].chroma_weight_flag) {
             for (int j = 0; j < 2; j++) {
-                pwt.l0[i].chroma_weight[j] = static_cast<int16_t>(bs.read_se());
-                pwt.l0[i].chroma_offset[j] = static_cast<int16_t>(bs.read_se());
+                int16_t delta_weight = static_cast<int16_t>(bs.read_se());
+                int16_t delta_offset = static_cast<int16_t>(bs.read_se());
+                pwt.l0[i].chroma_weight[j] = static_cast<int16_t>((1 << chromaLog2WeightDenom) + delta_weight);
+                pwt.l0[i].chroma_offset[j] = static_cast<int16_t>(
+                    Clip3(-128, 127,
+                          static_cast<int>(delta_offset) -
+                          ((128 * pwt.l0[i].chroma_weight[j]) >> chromaLog2WeightDenom) + 128));
             }
         } else {
-            int chromaDenom = static_cast<int>(pwt.luma_log2_weight_denom) +
-                              pwt.delta_chroma_log2_weight_denom;
             for (int j = 0; j < 2; j++) {
-                pwt.l0[i].chroma_weight[j] = static_cast<int16_t>(1 << chromaDenom);
+                pwt.l0[i].chroma_weight[j] = static_cast<int16_t>(1 << chromaLog2WeightDenom);
                 pwt.l0[i].chroma_offset[j] = 0;
             }
         }
@@ -66,7 +73,8 @@ static bool parse_pred_weight_table(BitstreamReader& bs, PredWeightTable& pwt,
         }
         for (uint32_t i = 0; i <= num_ref_idx_l1; i++) {
             if (pwt.l1[i].luma_weight_flag) {
-                pwt.l1[i].luma_weight = static_cast<int16_t>(bs.read_se());
+                int16_t delta = static_cast<int16_t>(bs.read_se());
+                pwt.l1[i].luma_weight = static_cast<int16_t>((1 << pwt.luma_log2_weight_denom) + delta);
                 pwt.l1[i].luma_offset = static_cast<int16_t>(bs.read_se());
             } else {
                 pwt.l1[i].luma_weight = static_cast<int16_t>(1 << pwt.luma_log2_weight_denom);
@@ -74,14 +82,17 @@ static bool parse_pred_weight_table(BitstreamReader& bs, PredWeightTable& pwt,
             }
             if (pwt.l1[i].chroma_weight_flag) {
                 for (int j = 0; j < 2; j++) {
-                    pwt.l1[i].chroma_weight[j] = static_cast<int16_t>(bs.read_se());
-                    pwt.l1[i].chroma_offset[j] = static_cast<int16_t>(bs.read_se());
+                    int16_t delta_weight = static_cast<int16_t>(bs.read_se());
+                    int16_t delta_offset = static_cast<int16_t>(bs.read_se());
+                    pwt.l1[i].chroma_weight[j] = static_cast<int16_t>((1 << chromaLog2WeightDenom) + delta_weight);
+                    pwt.l1[i].chroma_offset[j] = static_cast<int16_t>(
+                        Clip3(-128, 127,
+                              static_cast<int>(delta_offset) -
+                              ((128 * pwt.l1[i].chroma_weight[j]) >> chromaLog2WeightDenom) + 128));
                 }
             } else {
-                int chromaDenom = static_cast<int>(pwt.luma_log2_weight_denom) +
-                                  pwt.delta_chroma_log2_weight_denom;
                 for (int j = 0; j < 2; j++) {
-                    pwt.l1[i].chroma_weight[j] = static_cast<int16_t>(1 << chromaDenom);
+                    pwt.l1[i].chroma_weight[j] = static_cast<int16_t>(1 << chromaLog2WeightDenom);
                     pwt.l1[i].chroma_offset[j] = 0;
                 }
             }
@@ -332,7 +343,8 @@ bool SliceHeader::parse(BitstreamReader& bs, const SPS& sps, const PPS& pps,
         }
     }
 
-    // Loop filter across slices
+    // Loop filter across slices — infer from PPS when not present (spec §7.4.7.1)
+    slice_loop_filter_across_slices_enabled_flag = pps.pps_loop_filter_across_slices_enabled_flag;
     if (pps.pps_loop_filter_across_slices_enabled_flag &&
         (slice_sao_luma_flag || slice_sao_chroma_flag ||
          !slice_deblocking_filter_disabled_flag)) {
