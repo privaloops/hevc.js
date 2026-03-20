@@ -29,6 +29,12 @@ add_library(hevc-decode-lib
     src/bitstream/bitstream_reader.cpp
     src/bitstream/nal_parser.cpp
     src/common/picture.cpp
+    src/syntax/profile_tier_level.cpp
+    src/syntax/vps.cpp
+    src/syntax/sps.cpp
+    src/syntax/pps.cpp
+    src/syntax/slice_header.cpp
+    src/syntax/parameter_sets.cpp
 )
 
 target_include_directories(hevc-decode-lib PUBLIC
@@ -72,11 +78,16 @@ if(BUILD_TESTS AND NOT BUILD_WASM)
         tests/unit/test_bitstream_reader.cpp
         tests/unit/test_nal_parser.cpp
         tests/unit/test_picture.cpp
+        tests/unit/test_parameter_sets.cpp
     )
 
     target_link_libraries(hevc_tests PRIVATE
         hevc-decode-lib
         GTest::gtest_main
+    )
+
+    target_compile_definitions(hevc_tests PRIVATE
+        FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/conformance/fixtures"
     )
 
     include(GoogleTest)

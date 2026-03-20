@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Phase 3 — Parameter Sets & Slice Header parsing**:
+  - `ProfileTierLevel` parsing (§7.3.3) — general + sub-layer profiles, constraint flags for all profile_idc branches
+  - `VPS::parse()` (§7.3.2.1) — timing info, layer sets, sub-layer ordering
+  - `SPS::parse()` + `SPS::derive()` (§7.3.2.2, §7.4.3.2.1) — chroma format, dimensions, conformance window, bit depth, quad-tree config, scaling list data with full fallback, short-term reference picture sets with inter-prediction, long-term ref pics, VUI skip
+  - `PPS::parse()` + `PPS::derive_tile_scan()` (§7.3.2.3, §6.5.1) — tiles layout, CtbAddrRsToTs/TsToRs/TileId derivation, deblocking filter control
+  - `SliceHeader::parse()` (§7.3.6) — POC, short-term/long-term RPS, ref pic list modification, pred_weight_table, SAO flags, deblocking overrides, entry point offsets, dependent slices
+  - `ScalingListData` with default matrices (Tables 7-3 to 7-5) and copy/prediction mechanism
+  - `ParameterSetManager` — VPS/SPS/PPS storage by ID (AD-003), activation via slice header
+  - CLI `--dump-headers` — full parameter set and slice header inspection
+  - 17 new unit tests covering parsers across toy (64x64), QCIF (176x144), 1080p, 4K, and conformance edge-case bitstreams
+
 - **NalParser** (`src/bitstream/nal_parser.cpp`) — Annex B byte stream parsing:
   - Start code detection (3-byte `0x000001` and 4-byte `0x00000001`)
   - NAL unit header parsing (nal_unit_type, nuh_layer_id, nuh_temporal_id_plus1) with `forbidden_zero_bit` validation

@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "syntax/sps.h"
+
 namespace hevc {
 
 class BitstreamReader;
@@ -54,6 +56,7 @@ struct PPS {
     int32_t pps_tc_offset_div2 = 0;
 
     bool pps_scaling_list_data_present_flag = false;
+    ScalingListData scaling_list_data;
 
     bool lists_modification_present_flag = false;
     uint32_t log2_parallel_merge_level_minus2 = 0;
@@ -63,15 +66,15 @@ struct PPS {
     int Log2MinCuQpDeltaSize = 0;
 
     // Tile scan conversion tables (derived from tile layout)
-    std::vector<int> CtbAddrRsToTs;  // raster scan → tile scan
-    std::vector<int> CtbAddrTsToRs;  // tile scan → raster scan
-    std::vector<int> TileId;         // CTB address → tile ID
+    std::vector<int> CtbAddrRsToTs;  // raster scan -> tile scan
+    std::vector<int> CtbAddrTsToRs;  // tile scan -> raster scan
+    std::vector<int> TileId;         // CTB address -> tile ID
 
     // Parse from bitstream
-    bool parse(BitstreamReader& bs, const struct SPS& sps);
+    bool parse(BitstreamReader& bs, const SPS& sps);
 
     // Compute tile scan tables
-    void derive_tile_scan(const struct SPS& sps);
+    void derive_tile_scan(const SPS& sps);
 };
 
 } // namespace hevc

@@ -4,9 +4,9 @@
 #include <fstream>
 #include <vector>
 
-#include "bitstream/bitstream_reader.h"
 #include "bitstream/nal_unit.h"
 #include "common/types.h"
+#include "syntax/parameter_sets.h"
 
 static void print_usage(const char* prog) {
     fprintf(stderr, "Usage: %s [options] input.265\n", prog);
@@ -28,6 +28,118 @@ static std::vector<uint8_t> read_file(const char* path) {
     std::vector<uint8_t> data(static_cast<size_t>(size));
     file.read(reinterpret_cast<char*>(data.data()), size);
     return data;
+}
+
+static void dump_vps(const hevc::VPS& vps) {
+    printf("\n=== VPS (id=%d) ===\n", vps.vps_video_parameter_set_id);
+    printf("  max_layers_minus1          = %d\n", vps.vps_max_layers_minus1);
+    printf("  max_sub_layers_minus1      = %d\n", vps.vps_max_sub_layers_minus1);
+    printf("  temporal_id_nesting_flag   = %d\n", vps.vps_temporal_id_nesting_flag ? 1 : 0);
+    printf("  profile_idc               = %d\n", vps.profile_tier_level.general_profile_idc);
+    printf("  level_idc                  = %d (%d.%d)\n",
+           vps.profile_tier_level.general_level_idc,
+           vps.profile_tier_level.general_level_idc / 30,
+           (vps.profile_tier_level.general_level_idc % 30) / 3);
+    printf("  tier_flag                  = %d\n", vps.profile_tier_level.general_tier_flag ? 1 : 0);
+    if (vps.vps_timing_info_present_flag) {
+        printf("  num_units_in_tick          = %u\n", vps.vps_num_units_in_tick);
+        printf("  time_scale                 = %u\n", vps.vps_time_scale);
+    }
+}
+
+static void dump_sps(const hevc::SPS& sps) {
+    printf("\n=== SPS (id=%d, vps=%d) ===\n", sps.sps_seq_parameter_set_id, sps.sps_video_parameter_set_id);
+    printf("  profile_idc               = %d\n", sps.profile_tier_level.general_profile_idc);
+    printf("  level_idc                  = %d (%d.%d)\n",
+           sps.profile_tier_level.general_level_idc,
+           sps.profile_tier_level.general_level_idc / 30,
+           (sps.profile_tier_level.general_level_idc % 30) / 3);
+    printf("  chroma_format_idc          = %d\n", sps.chroma_format_idc);
+    printf("  pic_width                  = %d\n", sps.pic_width_in_luma_samples);
+    printf("  pic_height                 = %d\n", sps.pic_height_in_luma_samples);
+    printf("  bit_depth_luma             = %d\n", sps.BitDepthY);
+    printf("  bit_depth_chroma           = %d\n", sps.BitDepthC);
+    if (sps.conformance_window_flag) {
+        printf("  conf_win                   = L%d R%d T%d B%d\n",
+               sps.conf_win_left_offset, sps.conf_win_right_offset,
+               sps.conf_win_top_offset, sps.conf_win_bottom_offset);
+    }
+    printf("  log2_max_poc_lsb           = %d\n", sps.log2_max_pic_order_cnt_lsb_minus4 + 4);
+    printf("  CtbSizeY                   = %d\n", sps.CtbSizeY);
+    printf("  MinCbSizeY                 = %d\n", sps.MinCbSizeY);
+    printf("  PicSize in CTBs            = %dx%d (%d total)\n",
+           sps.PicWidthInCtbsY, sps.PicHeightInCtbsY, sps.PicSizeInCtbsY);
+    printf("  MinTbSizeY                 = %d\n", sps.MinTbSizeY);
+    printf("  MaxTbSizeY                 = %d\n", sps.MaxTbSizeY);
+    printf("  scaling_list_enabled        = %d\n", sps.scaling_list_enabled_flag ? 1 : 0);
+    printf("  amp_enabled                = %d\n", sps.amp_enabled_flag ? 1 : 0);
+    printf("  sao_enabled                = %d\n", sps.sample_adaptive_offset_enabled_flag ? 1 : 0);
+    printf("  pcm_enabled                = %d\n", sps.pcm_enabled_flag ? 1 : 0);
+    printf("  temporal_mvp_enabled       = %d\n", sps.sps_temporal_mvp_enabled_flag ? 1 : 0);
+    printf("  strong_intra_smoothing     = %d\n", sps.strong_intra_smoothing_enabled_flag ? 1 : 0);
+    printf("  num_short_term_ref_pic_sets = %d\n", sps.num_short_term_ref_pic_sets);
+    for (uint32_t i = 0; i < sps.num_short_term_ref_pic_sets; i++) {
+        const auto& rps = sps.st_ref_pic_sets[i];
+        printf("    st_rps[%d]: neg=%d pos=%d\n", i, rps.NumNegativePics, rps.NumPositivePics);
+    }
+    printf("  long_term_ref_pics_present = %d\n", sps.long_term_ref_pics_present_flag ? 1 : 0);
+    if (sps.long_term_ref_pics_present_flag) {
+        printf("  num_long_term_ref_pics_sps = %d\n", sps.num_long_term_ref_pics_sps);
+    }
+}
+
+static void dump_pps(const hevc::PPS& pps) {
+    printf("\n=== PPS (id=%d, sps=%d) ===\n", pps.pps_pic_parameter_set_id, pps.pps_seq_parameter_set_id);
+    printf("  dependent_slices           = %d\n", pps.dependent_slice_segments_enabled_flag ? 1 : 0);
+    printf("  num_ref_idx_l0_default     = %d\n", pps.num_ref_idx_l0_default_active_minus1 + 1);
+    printf("  num_ref_idx_l1_default     = %d\n", pps.num_ref_idx_l1_default_active_minus1 + 1);
+    printf("  init_qp                    = %d\n", 26 + pps.init_qp_minus26);
+    printf("  constrained_intra_pred     = %d\n", pps.constrained_intra_pred_flag ? 1 : 0);
+    printf("  transform_skip_enabled     = %d\n", pps.transform_skip_enabled_flag ? 1 : 0);
+    printf("  cu_qp_delta_enabled        = %d\n", pps.cu_qp_delta_enabled_flag ? 1 : 0);
+    printf("  cb_qp_offset               = %d\n", pps.pps_cb_qp_offset);
+    printf("  cr_qp_offset               = %d\n", pps.pps_cr_qp_offset);
+    printf("  weighted_pred              = %d\n", pps.weighted_pred_flag ? 1 : 0);
+    printf("  weighted_bipred            = %d\n", pps.weighted_bipred_flag ? 1 : 0);
+    printf("  tiles                      = %d (%dx%d)\n",
+           pps.tiles_enabled_flag ? 1 : 0,
+           pps.num_tile_columns_minus1 + 1,
+           pps.num_tile_rows_minus1 + 1);
+    printf("  entropy_coding_sync        = %d\n", pps.entropy_coding_sync_enabled_flag ? 1 : 0);
+    printf("  deblocking_filter_disabled = %d\n", pps.pps_deblocking_filter_disabled_flag ? 1 : 0);
+    printf("  sign_data_hiding           = %d\n", pps.sign_data_hiding_enabled_flag ? 1 : 0);
+    printf("  cabac_init_present         = %d\n", pps.cabac_init_present_flag ? 1 : 0);
+    printf("  lists_modification_present = %d\n", pps.lists_modification_present_flag ? 1 : 0);
+}
+
+static void dump_slice(const hevc::SliceHeader& sh) {
+    const char* type_str = (sh.slice_type == hevc::SliceType::I) ? "I" :
+                           (sh.slice_type == hevc::SliceType::P) ? "P" : "B";
+    printf("\n--- Slice Header ---\n");
+    printf("  first_slice_in_pic         = %d\n", sh.first_slice_segment_in_pic_flag ? 1 : 0);
+    printf("  dependent_slice            = %d\n", sh.dependent_slice_segment_flag ? 1 : 0);
+    if (!sh.dependent_slice_segment_flag) {
+        printf("  slice_type                 = %s\n", type_str);
+        printf("  pic_order_cnt_lsb          = %d\n", sh.slice_pic_order_cnt_lsb);
+        printf("  slice_qp_y                 = %d\n", sh.SliceQpY);
+        printf("  sao_luma                   = %d\n", sh.slice_sao_luma_flag ? 1 : 0);
+        printf("  sao_chroma                 = %d\n", sh.slice_sao_chroma_flag ? 1 : 0);
+        printf("  deblocking_disabled        = %d\n", sh.slice_deblocking_filter_disabled_flag ? 1 : 0);
+        if (sh.slice_type != hevc::SliceType::I) {
+            printf("  num_ref_idx_l0_active      = %d\n", sh.num_ref_idx_l0_active_minus1 + 1);
+            if (sh.slice_type == hevc::SliceType::B) {
+                printf("  num_ref_idx_l1_active      = %d\n", sh.num_ref_idx_l1_active_minus1 + 1);
+            }
+            printf("  max_num_merge_cand         = %d\n", sh.MaxNumMergeCand);
+            printf("  temporal_mvp_enabled       = %d\n", sh.slice_temporal_mvp_enabled_flag ? 1 : 0);
+        }
+        if (sh.num_entry_point_offsets > 0) {
+            printf("  num_entry_point_offsets    = %d\n", sh.num_entry_point_offsets);
+        }
+    }
+    if (sh.slice_segment_address > 0) {
+        printf("  slice_segment_address      = %d\n", sh.slice_segment_address);
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -99,16 +211,36 @@ int main(int argc, char* argv[]) {
     }
 
     if (dump_headers) {
-        printf("--dump-headers: not yet implemented (Phase 3)\n");
+        hevc::ParameterSetManager ps_mgr;
+
+        for (const auto& nal : nals) {
+            auto type = nal.header.nal_unit_type;
+
+            if (type == hevc::NalUnitType::VPS_NUT ||
+                type == hevc::NalUnitType::SPS_NUT ||
+                type == hevc::NalUnitType::PPS_NUT) {
+                ps_mgr.process_nal(nal);
+
+                if (type == hevc::NalUnitType::VPS_NUT) {
+                    const auto* vps = ps_mgr.get_vps(0);  // usually id=0
+                    if (vps) dump_vps(*vps);
+                } else if (type == hevc::NalUnitType::SPS_NUT) {
+                    const auto* sps = ps_mgr.get_sps(0);
+                    if (sps) dump_sps(*sps);
+                } else if (type == hevc::NalUnitType::PPS_NUT) {
+                    const auto* pps = ps_mgr.get_pps(0);
+                    if (pps) dump_pps(*pps);
+                }
+            } else if (hevc::is_vcl(type)) {
+                hevc::SliceHeader sh;
+                if (ps_mgr.parse_slice_header(sh, nal)) {
+                    dump_slice(sh);
+                }
+            }
+        }
     }
 
-    // TODO: Decode pipeline (Phase 2+)
-    // When implemented, this will:
-    // 1. Parse NAL units
-    // 2. Parse parameter sets & slice headers
-    // 3. Decode slices (CABAC + prediction + transform)
-    // 4. Apply loop filters
-    // 5. Write YUV output
+    // TODO: Decode pipeline (Phase 4+)
     if (output_path) {
         fprintf(stderr, "Decoding to YUV not yet implemented\n");
         return 2;  // Exit code 2 = SKIP for oracle tests
