@@ -37,6 +37,16 @@ void DecodingContext::set_intra_mode(int x, int y, int size, int mode) {
             intra_pred_mode_y[(y0 + j) * intra_pred_mode_stride + (x0 + i)] = mode;
 }
 
+void DecodingContext::set_chroma_mode(int x, int y, int size, int mode) {
+    int minCbSize = sps->MinCbSizeY;
+    int x0 = x / minCbSize;
+    int y0 = y / minCbSize;
+    int n = size / minCbSize;
+    for (int j = 0; j < n; j++)
+        for (int i = 0; i < n; i++)
+            intra_pred_mode_c[(y0 + j) * intra_pred_mode_stride + (x0 + i)] = mode;
+}
+
 // ============================================================
 // SAO parsing stub (§7.3.8.3)
 // ============================================================
@@ -631,6 +641,7 @@ void decode_prediction_unit_intra(DecodingContext& ctx, int x0, int y0,
         // For 4:2:0/4:2:2, one chroma mode per CU
         int luma_mode_for_chroma = ctx.intra_mode_at(x0, y0);
         int chroma_mode = derive_chroma_intra_mode(coded_chroma, luma_mode_for_chroma);
+        ctx.set_chroma_mode(x0, y0, cbSize, chroma_mode);
         HEVC_LOG(INTRA, "CU (%d,%d) chroma_mode=%d (coded=%d luma=%d)",
                  x0, y0, chroma_mode, coded_chroma, luma_mode_for_chroma);
     }
@@ -834,7 +845,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                     }
 
                     // Chroma intra prediction
-                    int chroma_mode = ctx.intra_mode_at(x0, y0); // simplified: DM mode
+                    int chroma_mode = ctx.chroma_mode_at(x0, y0);
                     int16_t pred_samples[32 * 32] = {};
                     perform_intra_prediction(ctx, x0, y0, log2TrafoSizeC, cIdx,
                                             chroma_mode, pred_samples);
@@ -842,7 +853,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                     reconstruct_block(ctx, x0, y0, log2TrafoSizeC, cIdx,
                                      pred_samples, residual);
                 } else if (cu.pred_mode == PredMode::MODE_INTRA) {
-                    int chroma_mode = ctx.intra_mode_at(x0, y0);
+                    int chroma_mode = ctx.chroma_mode_at(x0, y0);
                     int16_t pred_samples[32 * 32] = {};
                     perform_intra_prediction(ctx, x0, y0, log2TrafoSizeC, cIdx,
                                             chroma_mode, pred_samples);
