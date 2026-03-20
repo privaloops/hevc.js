@@ -28,7 +28,8 @@ cmake-build-*/
 # Allow committed test fixtures
 !tests/conformance/fixtures/*.265
 
-# Conformance bitstreams téléchargés (gros fichiers)
+# Conformance bitstreams (generated/downloaded, not committed)
+tests/conformance/edge-cases/
 tests/conformance/downloaded/
 
 # OS
