@@ -10,7 +10,11 @@ Evidence: bin-by-bin comparison with HM showed divergence at the first chroma si
 
 **Root cause**: The spec formula `ctxInc = 27 + sigCtx` appears to conflict with the init table organization (28 luma entries). The reference implementation (HM) uses `FIRST_SIG_FLAG_CTX_CHROMA = 28`, and the init values are 28 luma + 16 chroma concatenated in Table 9-29.
 
-**Lesson**: Always cross-reference spec formulas with the HM reference implementation. The spec can be ambiguous about context boundary definitions. When in doubt, HM is authoritative.
+**Lesson**: Always cross-reference spec formulas with the HM reference implementation.
+
+**IMPORTANT FINDING**: The spec formula (eq 9-55: `ctxInc = 27 + sigCtx`) and the init values in Table 9-29 are **internally inconsistent** for chroma 4x4. Table 9-29 was designed for HM's context mapping (which uses `firstSignificanceMapContext + ctxIdxMap` offsets that differ from the spec formula). Example: chroma 4x4 position (0,1) → spec formula gives ctxInc=29 (initValue=182) but HM maps to chroma[11] (initValue=111). Both are internally consistent with their own mapping, but produce different decode results. Since HM is the conformance reference and all encoders follow it, we MUST use HM's mapping.
+
+This is NOT a PDF extraction error — Table 9-29 values verified with `-layout` extraction. The spec's context assignment formulas (eq 9-40 to 9-55) simply don't match the init value organization in Table 9-29.
 
 ### Context enum completeness
 

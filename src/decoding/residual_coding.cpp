@@ -93,6 +93,10 @@ static int derive_scan_idx(int log2TrafoSize, int intra_mode, int cIdx) {
 // ============================================================
 
 // §9.3.4.2.5 — Derivation of ctxInc for sig_coeff_flag
+// Luma follows spec formulas (eq 9-40 to 9-54) — verified 326 bins match HM.
+// Chroma follows HM layout (28 luma + 16 chroma) because spec eq 9-55 offset (27)
+// is inconsistent with Table 9-29 init values which are designed for HM mapping.
+// See LEARNINGS.md for details.
 static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
                                       int xC, int yC,
                                       int scanIdx,
@@ -100,68 +104,65 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
                                       int numSbPerSide) {
     int sigCtx;
 
-    // Table 9-50 — ctxIdxMap for 4x4 blocks
     static const int ctxIdxMap[16] = {
         0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
     };
 
-    if (log2TrafoSize == 2) {
-        // §9-41: sigCtx = ctxIdxMap[(yC << 2) + xC]
-        sigCtx = ctxIdxMap[(yC << 2) + xC];
-    } else if (xC + yC == 0) {
-        // §9-42
-        sigCtx = 0;
+    if (cIdx == 0) {
+        // === LUMA: follows spec formulas (eq 9-40 to 9-54) ===
+        if (log2TrafoSize == 2) {
+            sigCtx = ctxIdxMap[(yC << 2) + xC];
+        } else if (xC + yC == 0) {
+            sigCtx = 0;
+        } else {
+            int xS = xC >> 2, yS = yC >> 2;
+            int prevCsbf = 0;
+            if (xS < numSbPerSide - 1)
+                prevCsbf += coded_sub_block_flag[yS * numSbPerSide + (xS + 1)];
+            if (yS < numSbPerSide - 1)
+                prevCsbf += coded_sub_block_flag[(yS + 1) * numSbPerSide + xS] << 1;
+            int xP = xC & 3, yP = yC & 3;
+            switch (prevCsbf) {
+                case 0:  sigCtx = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0; break;
+                case 1:  sigCtx = (yP == 0) ? 2 : (yP == 1) ? 1 : 0; break;
+                case 2:  sigCtx = (xP == 0) ? 2 : (xP == 1) ? 1 : 0; break;
+                default: sigCtx = 2; break;
+            }
+            if (xS + yS > 0) sigCtx += 3;
+            if (log2TrafoSize == 3)
+                sigCtx += (scanIdx == 0) ? 9 : 15;
+            else
+                sigCtx += 21;
+        }
+        return sigCtx; // luma ctxInc = sigCtx (eq 9-54)
     } else {
-        // §9-43 to 9-48: derive from coded_sub_block_flag neighbours
-        int xS = xC >> 2;
-        int yS = yC >> 2;
-
+        // === CHROMA: follows HM layout (base offset 28) ===
+        // HM context set starts for chroma: DC=0, 4x4=9, 8x8=12, NxN=15
+        // notFirstGroupOffset[chroma] = 0
+        if (xC + yC == 0) {
+            return 28; // chroma DC
+        }
+        if (log2TrafoSize == 2) {
+            return 28 + 9 + ctxIdxMap[(yC << 2) + xC]; // chroma 4x4
+        }
+        int xS = xC >> 2, yS = yC >> 2;
         int prevCsbf = 0;
         if (xS < numSbPerSide - 1)
             prevCsbf += coded_sub_block_flag[yS * numSbPerSide + (xS + 1)];
         if (yS < numSbPerSide - 1)
             prevCsbf += coded_sub_block_flag[(yS + 1) * numSbPerSide + xS] << 1;
-
-        int xP = xC & 3;
-        int yP = yC & 3;
-
+        int xP = xC & 3, yP = yC & 3;
+        int cnt;
         switch (prevCsbf) {
-            case 0:
-                sigCtx = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0;
-                break;
-            case 1: // right neighbour coded
-                sigCtx = (yP == 0) ? 2 : (yP == 1) ? 1 : 0;
-                break;
-            case 2: // below neighbour coded
-                sigCtx = (xP == 0) ? 2 : (xP == 1) ? 1 : 0;
-                break;
-            default: // both coded
-                sigCtx = 2;
-                break;
+            case 0:  cnt = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0; break;
+            case 1:  cnt = (yP == 0) ? 2 : (yP == 1) ? 1 : 0; break;
+            case 2:  cnt = (xP == 0) ? 2 : (xP == 1) ? 1 : 0; break;
+            default: cnt = 2; break;
         }
-
-        // §9-49: add 3 if not DC sub-block
-        if (cIdx == 0) {
-            if (xS + yS > 0) sigCtx += 3;
-            // §9-50/51
-            if (log2TrafoSize == 3)
-                sigCtx += (scanIdx == 0) ? 9 : 15;
-            else
-                sigCtx += 21;
-        } else {
-            // §9-52/53
-            if (log2TrafoSize == 3)
-                sigCtx += 9;
-            else
-                sigCtx += 12;
-        }
+        // chroma: no notFirstGroup offset (HM notFirstGroupNeighbourhoodContextOffset=0)
+        int firstSigCtx = (log2TrafoSize == 3) ? 12 : 15;
+        return 28 + firstSigCtx + cnt;
     }
-
-    // Final ctxInc (§9-54/9-55): luma 0..42, chroma 27..43
-    if (cIdx == 0)
-        return sigCtx;
-    else
-        return 27 + sigCtx;
 }
 
 // ============================================================
