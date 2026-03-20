@@ -450,8 +450,24 @@ bool SPS::parse(BitstreamReader& bs) {
         skip_vui_parameters(bs);
     }
 
-    // sps_extension_present_flag — skip extensions
-    // Not needed for Main profile decoding
+    bool sps_extension_present_flag = bs.read_flag();
+    if (sps_extension_present_flag) {
+        bool sps_range_extension_flag = bs.read_flag();
+        /*bool sps_multilayer_extension_flag =*/ bs.read_flag();
+        /*bool sps_3d_extension_flag =*/ bs.read_flag();
+        /*bool sps_extension_5bits =*/ bs.read_bits(5);
+        if (sps_range_extension_flag) {
+            /*bool transform_skip_rotation_enabled_flag =*/ bs.read_flag();
+            /*bool transform_skip_context_enabled_flag =*/ bs.read_flag();
+            /*bool implicit_rdpcm_enabled_flag =*/ bs.read_flag();
+            /*bool explicit_rdpcm_enabled_flag =*/ bs.read_flag();
+            /*bool extended_precision_processing_flag =*/ bs.read_flag();
+            intra_smoothing_disabled_flag = bs.read_flag();
+            /*bool high_precision_offsets_enabled_flag =*/ bs.read_flag();
+            /*bool persistent_rice_adaptation_enabled_flag =*/ bs.read_flag();
+            /*bool cabac_bypass_alignment_enabled_flag =*/ bs.read_flag();
+        }
+    }
 
     // Compute derived values
     derive();
