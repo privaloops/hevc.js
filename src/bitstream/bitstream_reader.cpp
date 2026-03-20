@@ -1,33 +1,44 @@
 #include "bitstream/bitstream_reader.h"
 #include <cassert>
-#include <stdexcept>
 
 namespace hevc {
 
 BitstreamReader::BitstreamReader(const uint8_t* data, size_t size)
-    : data_(data), size_(size), bit_pos_(0) {}
+    : data_(data), size_(size), buffer_(0), bits_left_(0), byte_pos_(0), error_(false)
+{
+    refill();
+}
 
+// Load bytes into the 64-bit buffer until full (up to 56 bits loaded per refill,
+// leaving room for at least one more byte on next refill)
+void BitstreamReader::refill() {
+    while (bits_left_ <= 56 && byte_pos_ < size_) {
+        buffer_ |= static_cast<uint64_t>(data_[byte_pos_++]) << (56 - bits_left_);
+        bits_left_ += 8;
+    }
+}
+
+// O(1) bit extraction via shift/mask from the 64-bit buffer
 uint32_t BitstreamReader::read_bits(int n) {
     assert(n >= 0 && n <= 32);
-    assert(!eof());
+    if (n == 0) return 0;
+    if (error_) return 0;
 
-    uint32_t result = 0;
-    for (int i = 0; i < n; i++) {
-        size_t byte_idx = bit_pos_ / 8;
-        size_t bit_idx  = 7 - (bit_pos_ % 8);
-
-        if (byte_idx >= size_) {
-            throw std::runtime_error("BitstreamReader: read past end of data");
-        }
-
-        result = (result << 1) | ((data_[byte_idx] >> bit_idx) & 1);
-        bit_pos_++;
+    if (bits_left_ < n) refill();
+    if (bits_left_ < n) {
+        error_ = true;
+        return 0;
     }
+
+    uint32_t result = static_cast<uint32_t>(buffer_ >> (64 - n));
+    buffer_ <<= n;
+    bits_left_ -= n;
     return result;
 }
 
 int32_t BitstreamReader::read_i(int n) {
     uint32_t val = read_bits(n);
+    if (error_) return 0;
     // Sign extension for 2's complement
     if (val & (1u << (n - 1))) {
         val |= (~0u) << n;
@@ -43,14 +54,18 @@ uint8_t BitstreamReader::read_byte() {
 // Exp-Golomb unsigned (§9.2)
 // Reads leading zeros, then reads (leadingZeros + 1) bits
 uint32_t BitstreamReader::read_ue() {
+    if (error_) return 0;
+
     int leading_zeros = 0;
-    while (!eof() && read_bits(1) == 0) {
+    while (!eof() && !error_ && read_bits(1) == 0) {
         leading_zeros++;
         if (leading_zeros > 31) {
-            throw std::runtime_error("BitstreamReader: Exp-Golomb overflow");
+            error_ = true;
+            return 0;
         }
     }
 
+    if (error_) return 0;
     if (leading_zeros == 0) return 0;
 
     uint32_t suffix = read_bits(leading_zeros);
@@ -58,7 +73,7 @@ uint32_t BitstreamReader::read_ue() {
 }
 
 // Exp-Golomb signed (§9.2)
-// Maps: 0→0, 1→1, 2→-1, 3→2, 4→-2, ...
+// Maps: 0->0, 1->1, 2->-1, 3->2, 4->-2, ...
 int32_t BitstreamReader::read_se() {
     uint32_t code = read_ue();
     int32_t value = static_cast<int32_t>((code + 1) / 2);
@@ -66,16 +81,14 @@ int32_t BitstreamReader::read_se() {
 }
 
 bool BitstreamReader::byte_aligned() const {
-    return (bit_pos_ % 8) == 0;
+    return (bits_read() % 8) == 0;
 }
 
 void BitstreamReader::byte_alignment() {
-    // Read and discard alignment_bit_equal_to_one (1 bit)
-    // Then read alignment_bit_equal_to_zero until byte aligned
     if (!byte_aligned()) {
         read_bits(1);  // alignment_bit_equal_to_one
     }
-    while (!byte_aligned()) {
+    while (!byte_aligned() && !error_) {
         read_bits(1);  // alignment_bit_equal_to_zero
     }
 }
@@ -83,10 +96,11 @@ void BitstreamReader::byte_alignment() {
 // §7.2 — more_rbsp_data()
 // Returns true if current position is before the rbsp_stop_one_bit
 bool BitstreamReader::more_rbsp_data() const {
-    if (bit_pos_ >= size_ * 8) return false;
+    size_t pos = bits_read();
+    if (pos >= size_ * 8) return false;
 
     size_t last_one = find_last_one_bit();
-    return bit_pos_ < last_one;
+    return pos < last_one;
 }
 
 size_t BitstreamReader::find_last_one_bit() const {
@@ -102,39 +116,44 @@ size_t BitstreamReader::find_last_one_bit() const {
 }
 
 size_t BitstreamReader::bits_remaining() const {
-    return (size_ * 8 > bit_pos_) ? (size_ * 8 - bit_pos_) : 0;
+    size_t pos = bits_read();
+    return (size_ * 8 > pos) ? (size_ * 8 - pos) : 0;
 }
 
 bool BitstreamReader::eof() const {
-    return bit_pos_ >= size_ * 8;
+    return bits_left_ == 0 && byte_pos_ >= size_;
 }
 
 // Emulation prevention byte removal (§7.3.1.1)
-// In the byte stream, 0x000003 is an emulation prevention sequence.
-// Remove the 0x03 byte to produce the RBSP.
-std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size) {
-    std::vector<uint8_t> rbsp;
-    rbsp.reserve(nal_size);
+// Reusable version — clears `out` and fills it, returns output size
+size_t extract_rbsp_to(const uint8_t* nal_data, size_t nal_size, std::vector<uint8_t>& out) {
+    out.clear();
+    out.reserve(nal_size);
 
     size_t i = 0;
     while (i < nal_size) {
-        // Check for emulation prevention: 0x00 0x00 0x03
         if (i + 2 < nal_size &&
             nal_data[i] == 0x00 &&
             nal_data[i + 1] == 0x00 &&
             nal_data[i + 2] == 0x03)
         {
-            // Copy the two 0x00 bytes, skip the 0x03
-            rbsp.push_back(0x00);
-            rbsp.push_back(0x00);
+            out.push_back(0x00);
+            out.push_back(0x00);
             i += 3;  // skip emulation_prevention_three_byte
         } else {
-            rbsp.push_back(nal_data[i]);
+            out.push_back(nal_data[i]);
             i++;
         }
     }
 
-    return rbsp;
+    return out.size();
+}
+
+// Convenience version — allocates a new vector
+std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size) {
+    std::vector<uint8_t> out;
+    extract_rbsp_to(nal_data, nal_size, out);
+    return out;
 }
 
 } // namespace hevc

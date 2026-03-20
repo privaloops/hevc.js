@@ -23,3 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Renamed project from hevc-torture to hevc-decode
+- BitstreamReader: replaced bit-per-bit loop with 64-bit sliding window buffer (O(1) per read_bits call)
+- BitstreamReader: replaced exceptions with internal error state (`has_error()`) for WASM safety (AD-004)
+- CMake: added `-fno-exceptions` globally, consistent with AD-004
+- CMake WASM flags: added EXPORTED_FUNCTIONS, EXPORTED_RUNTIME_METHODS, INITIAL_MEMORY (128MB), STACK_SIZE (256KB)
+- main.cpp: uses Decoder class instead of direct BitstreamReader access
+
+### Added (WASM optimization)
+- Decoder class (`src/decoder/`) with `feed()` / `get_frame()` / `flush()` API, ready for streaming WASM integration (Phase 8)
+- `extract_rbsp_to()`: reusable buffer variant to avoid per-NAL allocation
+- Unit tests: ErrorOnReadPastEnd, ErrorOnExpGolombOverflow, BitsRead, ReusableBuffer

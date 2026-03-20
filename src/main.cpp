@@ -4,8 +4,7 @@
 #include <fstream>
 #include <vector>
 
-#include "bitstream/bitstream_reader.h"
-#include "common/types.h"
+#include "decoder/decoder.h"
 
 static void print_usage(const char* prog) {
     fprintf(stderr, "Usage: %s [options] input.265\n", prog);
@@ -63,6 +62,10 @@ int main(int argc, char* argv[]) {
     auto data = read_file(input_path);
     printf("Read %zu bytes from %s\n", data.size(), input_path);
 
+    // Create decoder and feed entire file
+    hevc::Decoder decoder;
+    decoder.feed(data.data(), data.size());
+
     // TODO: NAL unit parsing (Phase 2)
     if (dump_nals) {
         printf("--dump-nals: not yet implemented\n");
@@ -72,16 +75,30 @@ int main(int argc, char* argv[]) {
         printf("--dump-headers: not yet implemented\n");
     }
 
-    // TODO: Decode pipeline (Phase 2+)
-    // When implemented, this will:
-    // 1. Parse NAL units
-    // 2. Parse parameter sets & slice headers
-    // 3. Decode slices (CABAC + prediction + transform)
-    // 4. Apply loop filters
-    // 5. Write YUV output
+    // Decode pipeline: feed -> get_frame -> write
     if (output_path) {
-        fprintf(stderr, "Decoding to YUV not yet implemented\n");
-        return 2;  // Exit code 2 = SKIP for oracle tests
+        decoder.flush();
+
+        const hevc::Picture* frame = decoder.get_frame();
+        if (!frame) {
+            fprintf(stderr, "Decoding to YUV not yet implemented\n");
+            return 2;  // Exit code 2 = SKIP for oracle tests
+        }
+
+        int frame_count = 0;
+        while (frame) {
+            if (frame_count == 0) {
+                if (!frame->write_yuv(output_path)) {
+                    fprintf(stderr, "Error: cannot write to '%s'\n", output_path);
+                    return 1;
+                }
+            }
+            // TODO: append mode for multi-frame output
+            frame_count++;
+            frame = decoder.get_frame();
+        }
+
+        printf("Decoded %d frames\n", frame_count);
     }
 
     return 0;

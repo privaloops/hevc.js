@@ -78,7 +78,7 @@ struct CabacEngine {
 - Init simple (boucle sur le tableau)
 - Save/restore pour WPP en un memcpy
 
-## AD-006 : Intermediate buffers — Stack-allocated, taille max CTU
+## AD-006 : Intermediate buffers — Stack-allocated, taille max CTU (STACK_SIZE=256KB en WASM)
 
 **Decision** : Les buffers temporaires (prediction, residual, transform) sont alloues sur la stack avec la taille max du CTU (64x64).
 
@@ -92,4 +92,4 @@ int32_t transform_buf[64 * 64];  // precision etendue pour transform
 **Justification** :
 - Pas d'allocation dynamique dans le hot path
 - 64*64*4 = 16KB par buffer, ~48KB total — acceptable sur la stack
-- WASM a une stack par defaut de 1MB (configurable)
+- WASM STACK_SIZE configure a 256KB (defaut Emscripten = 64KB, insuffisant avec recursion quad-tree + 48KB buffers)

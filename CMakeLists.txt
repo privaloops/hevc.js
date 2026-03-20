@@ -13,6 +13,9 @@ option(HEVC_DEBUG "Enable debug logging" OFF)
 # Warnings
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
+# No exceptions (AD-004: WASM-safe, avoids ~30% .wasm size overhead)
+add_compile_options(-fno-exceptions)
+
 # Debug : AddressSanitizer
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT BUILD_WASM)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
@@ -28,6 +31,7 @@ endif()
 add_library(hevc-decode-lib
     src/bitstream/bitstream_reader.cpp
     src/common/picture.cpp
+    src/decoder/decoder.cpp
 )
 
 target_include_directories(hevc-decode-lib PUBLIC
@@ -48,10 +52,14 @@ if(BUILD_WASM)
     )
     target_compile_options(hevc-decode PRIVATE -O3)
     target_link_options(hevc-decode PRIVATE
-        -s WASM=1
-        -s ALLOW_MEMORY_GROWTH=1
-        -s MODULARIZE=1
-        -s EXPORT_NAME=HEVCDecoder
+        -sWASM=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sMODULARIZE=1
+        -sEXPORT_NAME=HEVCDecoder
+        -sEXPORTED_FUNCTIONS=['_main']
+        -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']
+        -sINITIAL_MEMORY=134217728
+        -sSTACK_SIZE=262144
     )
 endif()
 

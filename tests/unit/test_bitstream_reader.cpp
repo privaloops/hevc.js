@@ -182,3 +182,59 @@ TEST(ExtractRbsp, PreserveNonEmulation) {
 
     EXPECT_EQ(rbsp.size(), 3u);
 }
+
+// --- Error state (AD-004: no exceptions, WASM-safe) ---
+
+TEST(BitstreamReader, ErrorOnReadPastEnd) {
+    uint8_t data[] = { 0xFF };
+    BitstreamReader bs(data, sizeof(data));
+
+    EXPECT_FALSE(bs.has_error());
+    bs.read_bits(8);  // consume all
+    EXPECT_FALSE(bs.has_error());
+
+    bs.read_bits(1);  // past end
+    EXPECT_TRUE(bs.has_error());
+    EXPECT_EQ(bs.read_bits(1), 0u);  // subsequent reads return 0
+}
+
+TEST(BitstreamReader, ErrorOnExpGolombOverflow) {
+    // 32 leading zeros + no terminating 1 -> overflow
+    uint8_t data[] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
+    BitstreamReader bs(data, sizeof(data));
+
+    bs.read_ue();
+    EXPECT_TRUE(bs.has_error());
+}
+
+TEST(BitstreamReader, BitsRead) {
+    uint8_t data[] = { 0xDE, 0xAD, 0xBE, 0xEF };
+    BitstreamReader bs(data, sizeof(data));
+
+    EXPECT_EQ(bs.bits_read(), 0u);
+    bs.read_bits(4);
+    EXPECT_EQ(bs.bits_read(), 4u);
+    bs.read_bits(12);
+    EXPECT_EQ(bs.bits_read(), 16u);
+}
+
+// --- extract_rbsp_to (reusable buffer) ---
+
+TEST(ExtractRbsp, ReusableBuffer) {
+    uint8_t data1[] = { 0x00, 0x00, 0x03, 0x01 };
+    uint8_t data2[] = { 0x01, 0x02, 0x03 };
+
+    std::vector<uint8_t> buf;
+
+    // First call
+    size_t sz1 = extract_rbsp_to(data1, sizeof(data1), buf);
+    EXPECT_EQ(sz1, 3u);
+    EXPECT_EQ(buf[2], 0x01);
+
+    // Second call reuses buffer (no new allocation if capacity sufficient)
+    size_t sz2 = extract_rbsp_to(data2, sizeof(data2), buf);
+    EXPECT_EQ(sz2, 3u);
+    EXPECT_EQ(buf[0], 0x01);
+    EXPECT_EQ(buf[1], 0x02);
+    EXPECT_EQ(buf[2], 0x03);
+}
