@@ -155,7 +155,7 @@ bool NalParser::starts_new_access_unit(const NalUnit& nal, bool current_au_has_v
 }
 
 // §7.4.2.4.4 — Group NAL units into Access Units
-std::vector<AccessUnit> NalParser::group_access_units(const std::vector<NalUnit>& nals) {
+std::vector<AccessUnit> NalParser::group_access_units(std::vector<NalUnit>&& nals) {
     std::vector<AccessUnit> aus;
     if (nals.empty()) return aus;
 
@@ -163,7 +163,7 @@ std::vector<AccessUnit> NalParser::group_access_units(const std::vector<NalUnit>
     bool current_au_has_vcl = false;  // does the current AU have a VCL NAL?
     bool prev_was_vcl = false;        // was the immediately previous NAL a VCL?
 
-    for (const auto& nal : nals) {
+    for (auto& nal : nals) {
         if (starts_new_access_unit(nal, current_au_has_vcl, prev_was_vcl)) {
             // Flush current AU if it has NALs
             if (!current_au.nal_units.empty()) {
@@ -173,11 +173,12 @@ std::vector<AccessUnit> NalParser::group_access_units(const std::vector<NalUnit>
             }
         }
 
-        current_au.nal_units.push_back(nal);
-        if (is_vcl(nal.header.nal_unit_type)) {
+        bool vcl = is_vcl(nal.header.nal_unit_type);
+        current_au.nal_units.push_back(std::move(nal));
+        if (vcl) {
             current_au_has_vcl = true;
         }
-        prev_was_vcl = is_vcl(nal.header.nal_unit_type);
+        prev_was_vcl = vcl;
     }
 
     // Flush last AU

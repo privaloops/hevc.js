@@ -182,3 +182,77 @@ TEST(ExtractRbsp, PreserveNonEmulation) {
 
     EXPECT_EQ(rbsp.size(), 3u);
 }
+
+TEST(ExtractRbsp, PreserveNonEmulation_0x03FollowedByHighByte) {
+    // 00 00 03 04 — 0x03 followed by 0x04 is NOT an EP byte (spec §7.3.1.1)
+    // The 0x03 must be preserved as data
+    uint8_t data[] = { 0x00, 0x00, 0x03, 0x04 };
+    auto rbsp = extract_rbsp(data, sizeof(data));
+
+    EXPECT_EQ(rbsp.size(), 4u);
+    EXPECT_EQ(rbsp[2], 0x03);
+    EXPECT_EQ(rbsp[3], 0x04);
+}
+
+TEST(ExtractRbsp, EmulationPrevention_0x03AtEndOfNal) {
+    // 00 00 03 at end of NAL — spec says this IS an EP byte
+    uint8_t data[] = { 0xAA, 0x00, 0x00, 0x03 };
+    auto rbsp = extract_rbsp(data, sizeof(data));
+
+    EXPECT_EQ(rbsp.size(), 3u);
+    EXPECT_EQ(rbsp[0], 0xAA);
+    EXPECT_EQ(rbsp[1], 0x00);
+    EXPECT_EQ(rbsp[2], 0x00);
+}
+
+TEST(ExtractRbsp, EmulationPrevention_ValidFollowBytes) {
+    // 00 00 03 00 -> EP byte removed (followed by 0x00)
+    // 00 00 03 01 -> EP byte removed (followed by 0x01)
+    // 00 00 03 02 -> EP byte removed (followed by 0x02)
+    // 00 00 03 03 -> EP byte removed (followed by 0x03)
+    for (uint8_t follow = 0x00; follow <= 0x03; follow++) {
+        uint8_t data[] = { 0x00, 0x00, 0x03, follow };
+        auto rbsp = extract_rbsp(data, sizeof(data));
+        EXPECT_EQ(rbsp.size(), 3u) << "follow byte = " << static_cast<int>(follow);
+        EXPECT_EQ(rbsp[2], follow);
+    }
+}
+
+// --- read_bits(0) ---
+
+TEST(BitstreamReader, ReadBits_Zero) {
+    uint8_t data[] = { 0xFF };
+    BitstreamReader bs(data, sizeof(data));
+
+    EXPECT_EQ(bs.read_bits(0), 0u);
+    EXPECT_EQ(bs.bits_read(), 0u);
+    // Subsequent reads should still work normally
+    EXPECT_EQ(bs.read_bits(8), 0xFFu);
+}
+
+// --- byte_alignment always consumes bits ---
+
+TEST(BitstreamReader, ByteAlignment_WhenAligned) {
+    // When already byte-aligned, byte_alignment() must still consume
+    // the alignment_bit_equal_to_one + 7 zeros = 8 bits total
+    uint8_t data[] = { 0x80, 0xAB };
+    BitstreamReader bs(data, sizeof(data));
+
+    EXPECT_TRUE(bs.byte_aligned());
+    bs.byte_alignment();  // consumes 0x80 = 1 + 7 zeros
+    EXPECT_EQ(bs.bits_read(), 8u);
+    EXPECT_EQ(bs.read_bits(8), 0xABu);
+}
+
+TEST(BitstreamReader, ByteAlignment_WhenNotAligned) {
+    // After reading 3 bits, byte_alignment consumes 5 more (1 stop + 4 zeros)
+    uint8_t data[] = { 0b11110000, 0xCD };
+    BitstreamReader bs(data, sizeof(data));
+
+    bs.read_bits(3);  // read 111 -> 3 bits consumed
+    EXPECT_FALSE(bs.byte_aligned());
+    bs.byte_alignment();  // 1 stop bit + 4 zero bits = 5 bits
+    EXPECT_EQ(bs.bits_read(), 8u);
+    EXPECT_TRUE(bs.byte_aligned());
+    EXPECT_EQ(bs.read_bits(8), 0xCDu);
+}
