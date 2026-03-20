@@ -201,9 +201,14 @@ static void derive_mpm(const DecodingContext& ctx, int x0, int y0, int /*puSize*
     int yA = y0 - 1;
     int candB = 1; // DC default if not available
     if (yA >= 0) {
-        const auto& cuA = ctx.cu_at(x0, yA);
-        if (cuA.pred_mode == PredMode::MODE_INTRA)
-            candB = ctx.intra_mode_at(x0, yA);
+        // §8.4.2: if yPb-1 < ((yPb >> CtbLog2SizeY) << CtbLog2SizeY),
+        // the above neighbour is in a different CTB row → use DC
+        int ctbRowStart = (y0 >> ctx.sps->CtbLog2SizeY) << ctx.sps->CtbLog2SizeY;
+        if (yA >= ctbRowStart) {
+            const auto& cuA = ctx.cu_at(x0, yA);
+            if (cuA.pred_mode == PredMode::MODE_INTRA)
+                candB = ctx.intra_mode_at(x0, yA);
+        }
     }
 
     // Derive 3 MPM candidates
