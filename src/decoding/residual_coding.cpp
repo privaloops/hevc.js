@@ -5,7 +5,6 @@
 #include "common/debug.h"
 
 #include <cstring>
-#include <algorithm>
 
 namespace hevc {
 
@@ -93,81 +92,76 @@ static int derive_scan_idx(int log2TrafoSize, int intra_mode, int cIdx) {
 // This is the most complex context derivation in HEVC CABAC
 // ============================================================
 
+// §9.3.4.2.5 — Derivation of ctxInc for sig_coeff_flag
 static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
-                                      int xC, int yC, int xS, int yS,
+                                      int xC, int yC,
                                       int scanIdx,
                                       const int coded_sub_block_flag[],
-                                      int numSbPerSide, int /*prevCsbf*/) {
+                                      int numSbPerSide) {
     int sigCtx;
 
+    // Table 9-50 — ctxIdxMap for 4x4 blocks
+    static const int ctxIdxMap[16] = {
+        0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
+    };
+
     if (log2TrafoSize == 2) {
-        // 4x4 block: use position-based context
-        static const int ctxIdxMap4x4[16] = {
-            0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
-        };
-        int xP = xC;
-        int yP = yC;
-        if (scanIdx == 2) std::swap(xP, yP);
-        sigCtx = ctxIdxMap4x4[yP * 4 + xP];
-
-        if (cIdx > 0) {
-            sigCtx += 12;
-        }
+        // §9-41: sigCtx = ctxIdxMap[(yC << 2) + xC]
+        sigCtx = ctxIdxMap[(yC << 2) + xC];
+    } else if (xC + yC == 0) {
+        // §9-42
+        sigCtx = 0;
     } else {
-        // Larger blocks: context depends on coded_sub_block_flag of neighbours
-        int xPosInSb = xC & 3;
-        int yPosInSb = yC & 3;
+        // §9-43 to 9-48: derive from coded_sub_block_flag neighbours
+        int xS = xC >> 2;
+        int yS = yC >> 2;
 
-        // Neighbour coded_sub_block_flag availability
-        int csbfRight = 0, csbfBelow = 0;
-        if (xS + 1 < numSbPerSide) {
-            int idx = (yS) * numSbPerSide + (xS + 1);
-            csbfRight = coded_sub_block_flag[idx];
+        int prevCsbf = 0;
+        if (xS < numSbPerSide - 1)
+            prevCsbf += coded_sub_block_flag[yS * numSbPerSide + (xS + 1)];
+        if (yS < numSbPerSide - 1)
+            prevCsbf += coded_sub_block_flag[(yS + 1) * numSbPerSide + xS] << 1;
+
+        int xP = xC & 3;
+        int yP = yC & 3;
+
+        switch (prevCsbf) {
+            case 0:
+                sigCtx = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0;
+                break;
+            case 1: // right neighbour coded
+                sigCtx = (yP == 0) ? 2 : (yP == 1) ? 1 : 0;
+                break;
+            case 2: // below neighbour coded
+                sigCtx = (xP == 0) ? 2 : (xP == 1) ? 1 : 0;
+                break;
+            default: // both coded
+                sigCtx = 2;
+                break;
         }
-        if (yS + 1 < numSbPerSide) {
-            int idx = (yS + 1) * numSbPerSide + (xS);
-            csbfBelow = coded_sub_block_flag[idx];
-        }
 
-        int cnt = csbfRight + csbfBelow;
-
+        // §9-49: add 3 if not DC sub-block
         if (cIdx == 0) {
-            // Luma
-            if (xPosInSb + yPosInSb == 0) {
-                sigCtx = cnt > 0 ? 2 : 0;
-            } else if (xPosInSb + yPosInSb < 3) {
-                sigCtx = cnt > 1 ? 2 : (cnt == 1 ? 1 : 0);
-                sigCtx += 3;
-            } else {
-                sigCtx = cnt > 0 ? 2 : 0;
-                sigCtx += 6;
-            }
-
-            if (log2TrafoSize == 3) {
-                sigCtx += 9;
-            } else if (log2TrafoSize == 4) {
+            if (xS + yS > 0) sigCtx += 3;
+            // §9-50/51
+            if (log2TrafoSize == 3)
+                sigCtx += (scanIdx == 0) ? 9 : 15;
+            else
                 sigCtx += 21;
-            } else {
-                sigCtx += 30; // log2TrafoSize == 5
-            }
         } else {
-            // Chroma
-            if (xPosInSb + yPosInSb == 0) {
-                sigCtx = cnt > 0 ? 2 : 0;
-            } else {
-                sigCtx = cnt > 0 ? 2 : 0;
-                sigCtx += 2;
-            }
-
-            sigCtx += 12; // chroma offset after 4x4 chroma contexts
-            if (log2TrafoSize >= 4) {
-                // Merge larger chroma into single set
-                sigCtx = std::min(sigCtx, 15 + 12);
-            }
+            // §9-52/53
+            if (log2TrafoSize == 3)
+                sigCtx += 9;
+            else
+                sigCtx += 12;
         }
     }
 
-    return sigCtx;
+    // Final ctxInc: luma contexts are 0..43, chroma contexts are 44..59
+    if (cIdx == 0)
+        return sigCtx;
+    else
+        return 44 + sigCtx;  // Chroma contexts start at offset 44
 }
 
 // ============================================================
@@ -284,8 +278,8 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
             if (coded_sub_block_flag[sbIdx] &&
                 (n > 0 || !inferSbDcSigCoeffFlag)) {
                 int sigCtx = derive_sig_coeff_flag_ctx(
-                    cIdx, log2TrafoSize, xC, yC, xS, yS, scanIdx,
-                    coded_sub_block_flag, numSbPerSide, 0);
+                    cIdx, log2TrafoSize, xC, yC, scanIdx,
+                    coded_sub_block_flag, numSbPerSide);
                 sig_coeff_flag[n] = decode_sig_coeff_flag(cabac, sigCtx);
                 if (sig_coeff_flag[n])
                     inferSbDcSigCoeffFlag = false;
