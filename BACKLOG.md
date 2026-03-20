@@ -7,8 +7,8 @@ Etat d'avancement par phase et prochaines taches.
 | Phase | Statut | Progression |
 |-------|--------|-------------|
 | 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
-| 2 — Bitstream & NAL | **Prochaine** | — |
-| 3 — Parameter Sets | A faire | — |
+| 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
+| 3 — Parameter Sets | **Prochaine** | — |
 | 4 — Intra Prediction | A faire | — |
 | 5 — Inter Prediction | A faire | — |
 | 6 — Loop Filters | A faire | — |
@@ -27,15 +27,15 @@ Etat d'avancement par phase et prochaines taches.
 - [x] Script extraction CABAC reference — `tools/extract_cabac_reference.py`
 - [x] Guide agent — `docs/agent-guide.md`
 
-## Phase 2 — Prochaine
+## Phase 2 — Terminee
 
-- [ ] 2.1 Start code detection (find 0x000001/0x00000001)
-- [ ] 2.2 Emulation prevention byte removal (extract_rbsp deja fait, intégrer dans le pipeline)
-- [ ] 2.3 NAL unit header parsing (nal_unit_type, layer_id, temporal_id)
-- [ ] 2.4 Exp-Golomb (read_ue/read_se deja fait, ajouter tests vecteurs)
-- [ ] 2.5 CLI `--dump-nals` (implementer)
-- [ ] 2.6 Access Unit boundary detection (prefix/suffix SEI distinction)
-- [ ] 2.7 `more_rbsp_data()` (deja fait, ajouter tests edge cases)
+- [x] 2.1 Start code detection (find 0x000001/0x00000001)
+- [x] 2.2 Emulation prevention byte removal (extract_rbsp integre dans le pipeline NalParser)
+- [x] 2.3 NAL unit header parsing (nal_unit_type, layer_id, temporal_id, forbidden_zero_bit)
+- [x] 2.4 Exp-Golomb (tests edge cases ajoutes : large values, negative)
+- [x] 2.5 CLI `--dump-nals` (listing tabulaire + AU grouping)
+- [x] 2.6 Access Unit boundary detection (prefix/suffix SEI distinction, AUD, EOS, multi-slice)
+- [x] 2.7 `more_rbsp_data()` (tests edge cases : single byte, trailing zeros, multi-byte)
 
 ## Phase 3 — Après Phase 2
 
