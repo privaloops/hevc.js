@@ -19,7 +19,7 @@ Etat d'avancement par phase et prochaines taches.
 ## Phase 1 — Terminee
 
 - [x] CI GitHub Actions (`build.yml`, `test.yml`)
-- [ ] `tools/fetch_conformance.sh`
+- [x] `tools/fetch_conformance.sh` (edge-case conformance bitstreams par phase)
 - [x] Structure `Picture` (buffer YUV avec stride) — `src/common/picture.cpp`
 - [x] `HEVC_DEBUG` logging infrastructure — `src/common/debug.h`
 - [x] Bitstreams jouets (toy_qp10/30/45) — `tests/conformance/fixtures/toy_*.265`
@@ -49,6 +49,7 @@ Etat d'avancement par phase et prochaines taches.
 
 ## Phase 4 — Après Phase 3
 
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase4` pour generer les bitstreams edge-case (PCM, transform skip, scaling lists, QP extremes, constrained intra, dependent slices)
 - [ ] 4.1 CABAC engine (decode_decision, bypass, terminate)
 - [ ] 4.2 CABAC context init (toutes les tables)
 - [ ] 4.3 Binarization (FL, TU, TR, EGk)
@@ -62,6 +63,15 @@ Etat d'avancement par phase et prochaines taches.
 - [ ] 4.10 Reconstruction (pred + residual, clipping)
 - [ ] 4.10b PCM mode (byte alignment, CABAC reset)
 - [ ] 4.11 SAO parsing (stub)
+
+## Phase 5 — Prealables conformance
+
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5` pour generer les bitstreams edge-case (weighted pred, B hierarchique, TMVP, CRA/RASL, open GOP, AMP)
+
+## Phase 6 — Prealables conformance
+
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6` pour generer les bitstreams edge-case (deblocking bi-pred, SAO edge/band, multi-slice cross-filter, QP variable, offsets beta/tc)
+- [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC pour validation Main profile stricte (optionnel, voir docs/conformance-sources.md)
 
 ## Taches transverses
 
