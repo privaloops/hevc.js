@@ -23,3 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Renamed project from hevc-torture to hevc-decode
+- **BitstreamReader**: replaced bit-by-bit loop with 64-bit cached read (O(1) per `read_bits()` call)
+- **BitstreamReader**: `more_rbsp_data()` now O(1) — `find_last_one_bit` computed once at construction
+- **Picture::write_yuv()**: 8-bit output writes per-line instead of per-byte
+
+### Fixed
+- **DECISIONS.md**: corrected WASM default stack size (64KB, not 1MB)
