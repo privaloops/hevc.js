@@ -28,20 +28,20 @@ void perform_intra_prediction(DecodingContext& ctx, int x0, int y0,
 // ============================================================
 
 void DecodingContext::set_intra_mode(int x, int y, int size, int mode) {
-    int minCbSize = sps->MinCbSizeY;
-    int x0 = x / minCbSize;
-    int y0 = y / minCbSize;
-    int n = size / minCbSize;
+    int minTbSize = sps->MinTbSizeY;
+    int x0 = x / minTbSize;
+    int y0 = y / minTbSize;
+    int n = std::max(1, size / minTbSize);
     for (int j = 0; j < n; j++)
         for (int i = 0; i < n; i++)
             intra_pred_mode_y[(y0 + j) * intra_pred_mode_stride + (x0 + i)] = mode;
 }
 
 void DecodingContext::set_chroma_mode(int x, int y, int size, int mode) {
-    int minCbSize = sps->MinCbSizeY;
-    int x0 = x / minCbSize;
-    int y0 = y / minCbSize;
-    int n = size / minCbSize;
+    int minTbSize = sps->MinTbSizeY;
+    int x0 = x / minTbSize;
+    int y0 = y / minTbSize;
+    int n = std::max(1, size / minTbSize);
     for (int j = 0; j < n; j++)
         for (int i = 0; i < n; i++)
             intra_pred_mode_c[(y0 + j) * intra_pred_mode_stride + (x0 + i)] = mode;
@@ -657,7 +657,7 @@ void decode_prediction_unit_intra(DecodingContext& ctx, int x0, int y0,
 // ============================================================
 
 void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
-                           int /*xBase*/, int /*yBase*/,
+                           int xBase, int yBase,
                            int log2TrafoSize, int trafoDepth,
                            int blkIdx,
                            bool cbf_cb_parent, bool cbf_cr_parent) {
@@ -722,7 +722,7 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
             cbf_luma = decode_cbf_luma(cabac, trafoDepth);
         }
 
-        decode_transform_unit(ctx, x0, y0, log2TrafoSize, trafoDepth, blkIdx,
+        decode_transform_unit(ctx, x0, y0, xBase, yBase, log2TrafoSize, trafoDepth, blkIdx,
                               cbf_luma, cbf_cb, cbf_cr);
     }
 }
@@ -732,6 +732,7 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
 // ============================================================
 
 void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
+                           int xBase, int yBase,
                            int log2TrafoSize, int /*trafoDepth*/,
                            int blkIdx,
                            bool cbf_luma, bool cbf_cb, bool cbf_cr) {
@@ -808,6 +809,10 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
         // For 4:2:0 with log2TrafoSize==2, chroma is deferred to blkIdx==3
         bool processChroma = (log2TrafoSize > 2) || (blkIdx == 3);
 
+        // §7.3.8.10: chroma position uses xBase/yBase when log2TrafoSize==2
+        int xC = (sps.ChromaArrayType != 3 && log2TrafoSize == 2) ? xBase : x0;
+        int yC = (sps.ChromaArrayType != 3 && log2TrafoSize == 2) ? yBase : y0;
+
         if (processChroma) {
             for (int cIdx = 1; cIdx <= 2; cIdx++) {
                 bool cbf_c = (cIdx == 1) ? cbf_cb : cbf_cr;
@@ -822,7 +827,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                         transform_skip = decode_transform_skip_flag(cabac, cIdx);
                     }
 
-                    decode_residual_coding(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                    decode_residual_coding(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                           coefficients);
 
                     if (!cu.cu_transquant_bypass) {
@@ -838,7 +843,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                         else qPc = qPi - 6;
                         int qpPrimeC = qPc + sps.QpBdOffsetC;
 
-                        perform_dequant(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                        perform_dequant(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                        qpPrimeC, coefficients, scaled);
                         perform_transform_inverse(log2TrafoSizeC, cIdx,
                                                    cu.pred_mode == PredMode::MODE_INTRA,
@@ -850,20 +855,20 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                     }
 
                     // Chroma intra prediction
-                    int chroma_mode = ctx.chroma_mode_at(x0, y0);
+                    int chroma_mode = ctx.chroma_mode_at(xC, yC);
                     int16_t pred_samples[32 * 32] = {};
-                    perform_intra_prediction(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                    perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                             chroma_mode, pred_samples);
 
-                    reconstruct_block(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                    reconstruct_block(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                      pred_samples, residual);
                 } else if (cu.pred_mode == PredMode::MODE_INTRA) {
-                    int chroma_mode = ctx.chroma_mode_at(x0, y0);
+                    int chroma_mode = ctx.chroma_mode_at(xC, yC);
                     int16_t pred_samples[32 * 32] = {};
-                    perform_intra_prediction(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                    perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                             chroma_mode, pred_samples);
                     int16_t zero[32 * 32] = {};
-                    reconstruct_block(ctx, x0, y0, log2TrafoSizeC, cIdx,
+                    reconstruct_block(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                      pred_samples, zero);
                 }
             }

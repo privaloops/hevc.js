@@ -80,6 +80,25 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
     int curCtbX = xC / ctbSize;
     int curCtbY = yC / ctbSize;
 
+    // Z-scan address from min-CB coordinates within a CTU
+    // Interleave bits: x in even positions, y in odd positions
+    auto zscan_addr = [](int bx, int by) -> uint32_t {
+        uint32_t z = 0;
+        for (int i = 0; i < 8; i++) {
+            z |= ((bx >> i) & 1) << (2 * i);
+            z |= ((by >> i) & 1) << (2 * i + 1);
+        }
+        return z;
+    };
+
+    // Use min-TB granularity (4x4) for Z-scan to handle NxN sub-PU correctly
+    int minBlkSize = sps.MinTbSizeY;
+    int ctbOriginX = curCtbX * static_cast<int>(sps.CtbSizeY);
+    int ctbOriginY = curCtbY * static_cast<int>(sps.CtbSizeY);
+    // Current TU's Z-scan address (in min-TB units within CTU)
+    uint32_t curZScan = zscan_addr((x0 - ctbOriginX) / minBlkSize,
+                                    (y0 - ctbOriginY) / minBlkSize);
+
     auto is_reconstructed = [&](int rx, int ry) -> bool {
         if (rx < 0 || ry < 0 || rx >= picW || ry >= picH) return false;
 
@@ -87,29 +106,19 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
         int refCtbY = ry / ctbSize;
 
         // Different CTU: available if CTU was already decoded
-        // (CTU at or before current in raster scan)
         if (refCtbX != curCtbX || refCtbY != curCtbY) {
-            int refCtbAddr = refCtbY * ((cIdx > 0) ?
-                (sps.PicWidthInCtbsY) : sps.PicWidthInCtbsY) + refCtbX;
+            int refCtbAddr = refCtbY * sps.PicWidthInCtbsY + refCtbX;
             int curCtbAddr = curCtbY * sps.PicWidthInCtbsY + curCtbX;
             return refCtbAddr < curCtbAddr;
         }
 
-        // Same CTU: available if the sample precedes current TU in Z-scan
-        // Simplified: (ry < yC) or (ry >= yC and rx < xC)
-        // More precisely: check minCb-granularity Z-scan order
+        // Same CTU: compare Z-scan addresses at min-TB granularity
         int lumaRx = (cIdx > 0) ? rx * sps.SubWidthC : rx;
         int lumaRy = (cIdx > 0) ? ry * sps.SubHeightC : ry;
-        int lumaX0 = (cIdx > 0) ? x0 : x0; // x0 is already in luma coords
-        int lumaY0 = (cIdx > 0) ? y0 : y0;
 
-        // Use minCb Z-scan: compare (lumaRx, lumaRy) vs (lumaX0, lumaY0)
-        // in the recursive quad-tree order. Approximation: raster row-major.
-        if (lumaRy < lumaY0) return true;
-        if (lumaRy >= lumaY0 && lumaRy < lumaY0 + (nTbS * ((cIdx > 0) ? sps.SubHeightC : 1))) {
-            return lumaRx < lumaX0;
-        }
-        return false;
+        uint32_t refZScan = zscan_addr((lumaRx - ctbOriginX) / minBlkSize,
+                                        (lumaRy - ctbOriginY) / minBlkSize);
+        return refZScan < curZScan;
     };
 
     // Sample ordering in the reference array:

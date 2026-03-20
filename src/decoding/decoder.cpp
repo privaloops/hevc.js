@@ -85,15 +85,18 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         pic.conf_win_bottom = sps->conf_win_bottom_offset * sps->SubHeightC;
     }
 
-    // Allocate CU info grid
+    // Allocate CU info grid (min-CB granularity)
     int cuGridW = sps->PicWidthInMinCbsY;
     int cuGridH = sps->PicHeightInMinCbsY;
     cu_info_buf_.resize(cuGridW * cuGridH);
     std::fill(cu_info_buf_.begin(), cu_info_buf_.end(), CUInfo{});
 
-    intra_mode_buf_.resize(cuGridW * cuGridH);
+    // Intra mode grid uses min-TB granularity (4x4) to support NxN sub-PU
+    int modeGridW = sps->pic_width_in_luma_samples / sps->MinTbSizeY;
+    int modeGridH = sps->pic_height_in_luma_samples / sps->MinTbSizeY;
+    intra_mode_buf_.resize(modeGridW * modeGridH);
     std::fill(intra_mode_buf_.begin(), intra_mode_buf_.end(), 1); // DC default
-    chroma_mode_buf_.resize(cuGridW * cuGridH);
+    chroma_mode_buf_.resize(modeGridW * modeGridH);
     std::fill(chroma_mode_buf_.begin(), chroma_mode_buf_.end(), 0); // Planar default
 
     // Setup decoding context
@@ -108,7 +111,7 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.cu_info_stride = cuGridW;
     ctx.intra_pred_mode_y = intra_mode_buf_.data();
     ctx.intra_pred_mode_c = chroma_mode_buf_.data();
-    ctx.intra_pred_mode_stride = cuGridW;
+    ctx.intra_pred_mode_stride = modeGridW;
 
     // Create bitstream reader for slice data (RBSP already extracted by NalParser)
     BitstreamReader bs(nal.rbsp.data(), nal.rbsp.size());

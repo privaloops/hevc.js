@@ -59,15 +59,15 @@ struct DecodingContext {
         return cu_info[(y / minCbSize) * cu_info_stride + (x / minCbSize)];
     }
 
-    // Get intra mode at position (luma)
+    // Get intra mode at position (luma) — min-TB granularity for NxN support
     int intra_mode_at(int x, int y) const {
-        int minCbSize = sps->MinCbSizeY;
-        return intra_pred_mode_y[(y / minCbSize) * intra_pred_mode_stride + (x / minCbSize)];
+        int minTbSize = sps->MinTbSizeY;
+        return intra_pred_mode_y[(y / minTbSize) * intra_pred_mode_stride + (x / minTbSize)];
     }
     // Get chroma intra mode at position
     int chroma_mode_at(int x, int y) const {
-        int minCbSize = sps->MinCbSizeY;
-        return intra_pred_mode_c[(y / minCbSize) * intra_pred_mode_stride + (x / minCbSize)];
+        int minTbSize = sps->MinTbSizeY;
+        return intra_pred_mode_c[(y / minTbSize) * intra_pred_mode_stride + (x / minTbSize)];
     }
     void set_intra_mode(int x, int y, int size, int mode);
     void set_chroma_mode(int x, int y, int size, int mode);
@@ -103,6 +103,7 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
 
 // Decode a transform unit (§7.3.8.11)
 void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
+                           int xBase, int yBase,
                            int log2TrafoSize, int trafoDepth,
                            int blkIdx,
                            bool cbf_luma, bool cbf_cb, bool cbf_cr);
