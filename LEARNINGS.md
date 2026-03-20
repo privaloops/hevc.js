@@ -16,6 +16,18 @@ Evidence: bin-by-bin comparison with HM showed divergence at the first chroma si
 
 This is NOT a PDF extraction error — Table 9-29 values verified with `-layout` extraction. The spec's context assignment formulas (eq 9-40 to 9-55) simply don't match the init value organization in Table 9-29.
 
+### HM context type ordering (CRITICAL CORRECTION)
+
+**`significanceMapContextSetStart[LUMA]` = {SINGLE=0, 4x4=9, 8x8=21, NxN=27}** was WRONG interpretation!
+
+Actual HM enum: `CONTEXT_TYPE_4x4=0, CONTEXT_TYPE_8x8=1, CONTEXT_TYPE_NxN=2, CONTEXT_TYPE_SINGLE=3`. So the array maps as:
+- `[0]=4x4` → start=0 (for SINGLE, this was confused with 4x4!)
+- `[1]=8x8` → start=9
+- `[2]=NxN` → start=**21** (NOT 27!)
+- `[3]=SINGLE` → start=27
+
+This means **luma NxN (≥16x16) uses firstSigCtx=21**, which is EXACTLY what the spec formula `+21` gives. Our original code was correct all along for luma NxN. The value 27 is for transform_skip (SINGLE), not NxN.
+
 ### Context enum completeness
 
 Our context enum was missing `rqt_root_cbf` (Table 9-14, 1 context). Also found discrepancies in `NUM_CHROMA_PRED_CTX` (spec=2, ours=1) and `NUM_DELTA_QP_CTX` (HM=3, ours=2). Full audit needed against HM `ContextTables.h`.
