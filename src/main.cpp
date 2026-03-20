@@ -72,6 +72,8 @@ static void dump_sps(const hevc::SPS& sps) {
            sps.PicWidthInCtbsY, sps.PicHeightInCtbsY, sps.PicSizeInCtbsY);
     printf("  MinTbSizeY                 = %d\n", sps.MinTbSizeY);
     printf("  MaxTbSizeY                 = %d\n", sps.MaxTbSizeY);
+    printf("  max_trafo_depth_intra      = %d\n", sps.max_transform_hierarchy_depth_intra);
+    printf("  max_trafo_depth_inter      = %d\n", sps.max_transform_hierarchy_depth_inter);
     printf("  scaling_list_enabled        = %d\n", sps.scaling_list_enabled_flag ? 1 : 0);
     printf("  amp_enabled                = %d\n", sps.amp_enabled_flag ? 1 : 0);
     printf("  sao_enabled                = %d\n", sps.sample_adaptive_offset_enabled_flag ? 1 : 0);
