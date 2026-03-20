@@ -23,6 +23,12 @@ struct Picture {
     int bit_depth_chroma = 8;
     ChromaFormat chroma_format = ChromaFormat::YUV420;
 
+    // Conformance window (in luma samples, spec §7.4.3.2.1)
+    int conf_win_left = 0;
+    int conf_win_right = 0;
+    int conf_win_top = 0;
+    int conf_win_bottom = 0;
+
     // Picture Order Count
     int32_t poc = 0;
 
@@ -42,7 +48,7 @@ struct Picture {
         return planes[c][y * stride[c] + x];
     }
 
-    // Write to raw YUV file
+    // Write to raw YUV file (crops to conformance window if set)
     bool write_yuv(const char* path) const;
 
     // Is this picture a reference?

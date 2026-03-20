@@ -29,11 +29,11 @@ Aucun (première phase).
 - [ ] CMake `add_test` setup
 - [ ] Premier test trivial qui passe
 
-### 1.4 — Oracle libde265
-- [ ] Vérifier que `dec265` est installé
+### 1.4 — Oracle ffmpeg
+- [ ] Vérifier que `ffmpeg` est installé (decode la référence YUV)
+- [ ] Script `tools/oracle_test.sh` — decode avec hevc-decode, compare MD5 avec référence ffmpeg
 - [ ] Script `tools/oracle_compare.py` — comparaison YUV pixel-perfect
 - [ ] Script `tools/fetch_conformance.sh` — téléchargement bitstreams de test
-- [ ] Test CTest `oracle_smoke` qui vérifie que le script fonctionne
 
 ### 1.5 — CI GitHub Actions
 - [ ] Workflow `build.yml` : build natif (Linux, macOS)
