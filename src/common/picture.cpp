@@ -46,15 +46,28 @@ bool Picture::write_yuv(const char* path) const {
     // Determine output bit depth per plane
     int bd[3] = { bit_depth_luma, bit_depth_chroma, bit_depth_chroma };
 
+    // Conformance window crop offsets per plane (spec §7.4.3.2.1)
+    // Luma offsets are in luma samples, chroma scaled by SubWidthC/SubHeightC
+    int sub_w = SubWidthC(chroma_format);
+    int sub_h = SubHeightC(chroma_format);
+
+    int crop_left[3]   = { conf_win_left, conf_win_left / sub_w, conf_win_left / sub_w };
+    int crop_right[3]  = { conf_win_right, conf_win_right / sub_w, conf_win_right / sub_w };
+    int crop_top[3]    = { conf_win_top, conf_win_top / sub_h, conf_win_top / sub_h };
+    int crop_bottom[3] = { conf_win_bottom, conf_win_bottom / sub_h, conf_win_bottom / sub_h };
+
     for (int c = 0; c < 3; c++) {
         if (width[c] == 0 || height[c] == 0) continue;
 
-        for (int y = 0; y < height[c]; y++) {
+        int out_width  = width[c] - crop_left[c] - crop_right[c];
+        int out_height = height[c] - crop_top[c] - crop_bottom[c];
+
+        for (int y = crop_top[c]; y < crop_top[c] + out_height; y++) {
             const uint16_t* row = &planes[c][y * stride[c]];
 
             if (bd[c] <= 8) {
                 // Write as 8-bit: truncate uint16_t to uint8_t
-                for (int x = 0; x < width[c]; x++) {
+                for (int x = crop_left[c]; x < crop_left[c] + out_width; x++) {
                     uint8_t val = static_cast<uint8_t>(row[x]);
                     if (fwrite(&val, 1, 1, fp) != 1) {
                         fclose(fp);
@@ -63,8 +76,9 @@ bool Picture::write_yuv(const char* path) const {
                 }
             } else {
                 // Write as 16-bit little-endian
-                if (fwrite(row, sizeof(uint16_t), width[c], fp) !=
-                    static_cast<size_t>(width[c])) {
+                const uint16_t* start = row + crop_left[c];
+                if (fwrite(start, sizeof(uint16_t), out_width, fp) !=
+                    static_cast<size_t>(out_width)) {
                     fclose(fp);
                     return false;
                 }

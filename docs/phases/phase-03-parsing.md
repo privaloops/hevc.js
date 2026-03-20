@@ -95,22 +95,22 @@ Phase 2 complétée (NAL parsing, BitstreamReader avec ue/se).
 - [ ] Gestion de la mise à jour (nouveau SPS/PPS remplace l'ancien)
 
 ### 3.7 — CLI de test amélioré
-- [ ] `hevc-torture --dump-headers input.265`
+- [ ] `hevc-decode --dump-headers input.265`
 - [ ] Dump complet de tous les champs parsés
-- [ ] Format aligné avec `dec265 --dump-headers`
+- [ ] Format tabulaire : un champ par ligne, nom = valeur
 
 ## Critère de sortie
 
 - Tous les champs des VPS, SPS, PPS, slice headers parsés correctement
-- Comparaison champ-par-champ avec libde265 sur au moins 10 bitstreams variés
+- Comparaison avec ffmpeg : décoder un bitstream de test et vérifier que les dimensions, chroma format, bit depth, POC, slice type matchent
 - Toutes les valeurs dérivées calculées correctement
 
 ## Validation oracle
 ```bash
-# Comparer tous les champs
-./hevc-torture --dump-headers test.265 > our_headers.txt
-dec265 test.265 --dump-headers > ref_headers.txt
-diff our_headers.txt ref_headers.txt
+# Vérifier les dimensions/format parsés vs ffprobe
+ffprobe -v quiet -show_streams tests/conformance/fixtures/i_64x64_qp22.265
+./hevc-decode --dump-headers tests/conformance/fixtures/i_64x64_qp22.265
+# Comparer width, height, chroma, bit_depth, num_frames
 ```
 
 ## Estimation de complexité

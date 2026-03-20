@@ -41,7 +41,7 @@ Phase 1 complétée (BitstreamReader, infrastructure).
 ### 2.5 — CLI de test
 - [ ] Programme `hevc-torture --dump-nals input.265`
 - [ ] Affiche pour chaque NAL : offset, type, size, TemporalId
-- [ ] Format similaire à `dec265 --dump-headers` pour faciliter la comparaison
+- [ ] Format tabulaire pour chaque NAL : offset, type, size, TemporalId
 
 ### 2.6 — Access Unit Boundary Detection (§7.4.2.4.4)
 Detecter les frontieres entre Access Units (= frames) dans le flux NAL.

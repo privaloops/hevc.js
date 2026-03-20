@@ -29,8 +29,18 @@ fi
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
-# Décoder avec hevc-decode (may fail if not yet implemented)
-"$DECODER" "$BITSTREAM" -o "$TMPDIR/output.yuv" 2>/dev/null || true
+# Décoder avec hevc-decode
+# Exit code 2 = not yet implemented (SKIP), other non-zero = crash/error (FAIL)
+DECODE_EXIT=0
+"$DECODER" "$BITSTREAM" -o "$TMPDIR/output.yuv" 2>/dev/null || DECODE_EXIT=$?
+
+if [ "$DECODE_EXIT" -eq 2 ]; then
+    echo "SKIP: decoder returned exit code 2 (not yet implemented)"
+    exit 2
+elif [ "$DECODE_EXIT" -ne 0 ]; then
+    echo "FAIL: decoder crashed or errored (exit code $DECODE_EXIT)"
+    exit 1
+fi
 
 if [ ! -f "$TMPDIR/output.yuv" ] || [ ! -s "$TMPDIR/output.yuv" ]; then
     echo "SKIP: decoder did not produce output file (not yet implemented)"
