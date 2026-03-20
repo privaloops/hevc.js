@@ -406,7 +406,8 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
                 // Sign
                 int sign;
                 if (signHidden && n == firstSigScanPos) {
-                    sign = (sumAbsLevel & 1) ? -1 : 1;
+                    // §7.4.9.11: parity of sum INCLUDING current level
+                    sign = ((sumAbsLevel + absLevel) & 1) ? -1 : 1;
                 } else {
                     sign = coeff_sign_flag[n] ? -1 : 1;
                 }
