@@ -152,6 +152,10 @@ struct SPS {
     int SubWidthC = 0;
     int SubHeightC = 0;
 
+    // PCM derived (§7.4.3.2.1)
+    int Log2MinIpcmCbSizeY = 0;
+    int Log2MaxIpcmCbSizeY = 0;
+
     // Parse from bitstream
     bool parse(BitstreamReader& bs);
 

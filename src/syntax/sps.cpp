@@ -514,6 +514,13 @@ void SPS::derive() {
     MaxTbLog2SizeY = MinTbLog2SizeY + static_cast<int>(log2_diff_max_min_luma_transform_block_size);
     MinTbSizeY = 1 << MinTbLog2SizeY;
     MaxTbSizeY = 1 << MaxTbLog2SizeY;
+
+    // PCM block sizes (§7.4.3.2.1)
+    if (pcm_enabled_flag) {
+        Log2MinIpcmCbSizeY = static_cast<int>(log2_min_pcm_luma_coding_block_size_minus3) + 3;
+        Log2MaxIpcmCbSizeY = Log2MinIpcmCbSizeY +
+                              static_cast<int>(log2_diff_max_min_pcm_luma_coding_block_size);
+    }
 }
 
 } // namespace hevc
