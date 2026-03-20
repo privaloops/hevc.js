@@ -362,10 +362,8 @@ bool SliceHeader::parse(BitstreamReader& bs, const SPS& sps, const PPS& pps,
     // byte_alignment()
     bs.byte_alignment();
 
-    const char* type_str = (slice_type == SliceType::I) ? "I" :
-                           (slice_type == SliceType::P) ? "P" : "B";
-    HEVC_LOG(PARSE, "Slice: type=%s poc_lsb=%d qp=%d addr=%d first=%d dep=%d",
-             type_str, slice_pic_order_cnt_lsb, SliceQpY,
+    HEVC_LOG(PARSE, "Slice: type=%d poc_lsb=%d qp=%d addr=%d first=%d dep=%d",
+             static_cast<int>(slice_type), slice_pic_order_cnt_lsb, SliceQpY,
              slice_segment_address, first_slice_segment_in_pic_flag ? 1 : 0,
              dependent_slice_segment_flag ? 1 : 0);
 
