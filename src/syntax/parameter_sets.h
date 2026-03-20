@@ -40,16 +40,16 @@ public:
     }
 
     // Active parameter sets (set by last parsed slice header)
-    const SPS* active_sps() const { return active_sps_; }
-    const PPS* active_pps() const { return active_pps_; }
+    const SPS* active_sps() const { return (active_sps_id_ >= 0) ? get_sps(active_sps_id_) : nullptr; }
+    const PPS* active_pps() const { return (active_pps_id_ >= 0) ? get_pps(active_pps_id_) : nullptr; }
 
 private:
     std::array<std::optional<VPS>, 16> vps_;
     std::array<std::optional<SPS>, 16> sps_;
     std::array<std::optional<PPS>, 64> pps_;
 
-    const SPS* active_sps_ = nullptr;
-    const PPS* active_pps_ = nullptr;
+    int active_sps_id_ = -1;
+    int active_pps_id_ = -1;
 };
 
 } // namespace hevc
