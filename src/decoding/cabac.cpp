@@ -88,22 +88,22 @@ int CabacEngine::decode_bypass() {
     ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
 
     bin_count_++;
+    int val = 0;
     if (ivlOffset_ >= ivlCurrRange_) {
         ivlOffset_ -= ivlCurrRange_;
-        return 1;
+        val = 1;
     }
-    return 0;
+    return val;
 }
 
 // §9.3.4.3.5 — Terminate decoding
 int CabacEngine::decode_terminate() {
     ivlCurrRange_ -= 2;
-
     bin_count_++;
+
     if (ivlOffset_ >= ivlCurrRange_) {
         return 1;
     }
-
     renormalize();
     return 0;
 }
