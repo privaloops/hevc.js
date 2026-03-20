@@ -157,11 +157,11 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
         }
     }
 
-    // Final ctxInc: luma contexts are 0..43, chroma contexts are 44..59
+    // Final ctxInc (§9-54/9-55): luma 0..42, chroma 27..43
     if (cIdx == 0)
         return sigCtx;
     else
-        return 44 + sigCtx;  // Chroma contexts start at offset 44
+        return 27 + sigCtx;
 }
 
 // ============================================================
@@ -242,6 +242,13 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     // DC sub-block is always implicitly 1 if there's any coefficient
     coded_sub_block_flag[0] = 1;
 
+    // Cross-sub-block state for ctxSet derivation (§9.3.4.2.6)
+    // prevGreater1Ctx tracks greater1Ctx from the last sub-block where
+    // coeff_abs_level_greater1_flag was decoded (skipping empty sub-blocks).
+    // ctxSet++ when prevGreater1Ctx == 0 (previous sub-block had a coeff > 1).
+    int prevGreater1Ctx = 0;       // 0 = no previous sub-block yet
+    bool hasGreater1History = false;
+
     // Process sub-blocks from last to first
     for (int i = lastSubBlock; i >= 0; i--) {
         int xS = sbScan[i][0];
@@ -302,9 +309,14 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
 
         int coeff_abs_greater1[16] = {};
 
-        // Context set selection (§9.3.4.2.7)
+        // Context set selection (§9.3.4.2.6)
         int ctxSet = (i > 0 && cIdx == 0) ? 2 : 0;
-        if (i == lastSubBlock && cIdx == 0) ctxSet = 0;
+
+        // §9.3.4.2.6: increment ctxSet when the previous sub-block
+        // (where greater1 was decoded) had greater1Ctx == 0
+        if (hasGreater1History && prevGreater1Ctx == 0)
+            ctxSet++;
+
         int greater1Ctx = 1;
 
         for (int n = 15; n >= 0; n--) {
@@ -404,6 +416,13 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
                 sumAbsLevel += absLevel;
                 numSigCoeff++;
             }
+        }
+
+        // Save cross-sub-block state for next iteration (§9.3.4.2.6)
+        // Only update when greater1 flags were actually decoded
+        if (numGreater1Flag > 0) {
+            prevGreater1Ctx = greater1Ctx;
+            hasGreater1History = true;
         }
     }
 
