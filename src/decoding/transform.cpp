@@ -201,11 +201,15 @@ static void idct32(const int16_t* src, int16_t* dst, int shift, int line) {
             for (int n = 0; n < 4; n++)
                 EEO[k] += tm[4*(2*n+1)][k] * src[4*(2*n+1)*line+j];
         }
-        // Even-Even-Even
-        EEE[0] = 64 * src[0*line+j] + 64 * src[16*line+j];
-        EEE[1] = 64 * src[0*line+j] - 64 * src[16*line+j];
-        EEE[2] = EEE[1];
-        EEE[3] = EEE[0];
+        // Even-Even-Even-Even and Even-Even-Even-Odd (2-point + 2-point)
+        int EEEE0 = 64 * src[0*line+j] + 64 * src[16*line+j];
+        int EEEE1 = 64 * src[0*line+j] - 64 * src[16*line+j];
+        int EEEO0 = 83 * src[8*line+j] + 36 * src[24*line+j];
+        int EEEO1 = 36 * src[8*line+j] - 83 * src[24*line+j];
+        EEE[0] = EEEE0 + EEEO0;
+        EEE[1] = EEEE1 + EEEO1;
+        EEE[2] = EEEE1 - EEEO1;
+        EEE[3] = EEEE0 - EEEO0;
 
         // Build up
         EE[0] = EEE[0] + EEO[0]; EE[7] = EEE[0] - EEO[0];
@@ -276,6 +280,7 @@ static void inverse_transform_2d(int log2TrafoSize, bool use_dst,
     for (int y = 0; y < trSize; y++)
         for (int x = 0; x < trSize; x++)
             residual[y * trSize + x] = tmp[x * trSize + y];
+
 }
 
 // ============================================================

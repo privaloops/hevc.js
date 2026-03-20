@@ -195,14 +195,17 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
 // ============================================================
 
 static bool needs_filtering(int intra_mode, int log2BlkSize) {
-    if (log2BlkSize == 2) return false; // Never filter 4x4
+    // §8.4.4.2.3: filterFlag = 0 when DC mode or nTbS == 4
+    if (intra_mode == 1) return false; // INTRA_DC
+    if (log2BlkSize == 2) return false; // nTbS == 4
 
-    int absAngle = std::abs(intraPredAngle[intra_mode]);
-    // intraHorVerDistThres: {7, 1, 0} for log2BlkSize = {3, 4, 5}
-    if (log2BlkSize >= 3 && log2BlkSize <= 5) {
-        int thresholds[3] = { 7, 1, 0 };
-        return absAngle <= thresholds[log2BlkSize - 3];
-    }
+    // minDistVerHor = Min(|mode - 26|, |mode - 10|)
+    int minDistVerHor = std::min(std::abs(intra_mode - 26),
+                                  std::abs(intra_mode - 10));
+    // Table 8-4: intraHorVerDistThres
+    int thresholds[3] = { 7, 1, 0 }; // nTbS = 8, 16, 32
+    if (log2BlkSize >= 3 && log2BlkSize <= 5)
+        return minDistVerHor > thresholds[log2BlkSize - 3];
     return false;
 }
 
