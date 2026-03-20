@@ -291,8 +291,14 @@ static void reconstruct_block(DecodingContext& ctx, int x0, int y0,
     int xC = (cIdx > 0) ? x0 / ctx.sps->SubWidthC : x0;
     int yC = (cIdx > 0) ? y0 / ctx.sps->SubHeightC : y0;
 
+    int picW = (cIdx == 0) ? ctx.sps->pic_width_in_luma_samples :
+               ctx.sps->pic_width_in_luma_samples / ctx.sps->SubWidthC;
+    int picH = (cIdx == 0) ? ctx.sps->pic_height_in_luma_samples :
+               ctx.sps->pic_height_in_luma_samples / ctx.sps->SubHeightC;
+
     for (int j = 0; j < size; j++) {
         for (int i = 0; i < size; i++) {
+            if (xC + i >= picW || yC + j >= picH) continue;
             int val = pred[j * size + i] + residual[j * size + i];
             val = Clip3(0, maxVal, val);
             pic.sample(cIdx, xC + i, yC + j) = static_cast<uint16_t>(val);
