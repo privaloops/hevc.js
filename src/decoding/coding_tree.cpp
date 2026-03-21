@@ -1,6 +1,8 @@
 #include "decoding/coding_tree.h"
 #include "decoding/syntax_elements.h"
 #include "decoding/cabac_tables.h"
+#include "decoding/interpolation.h"
+#include "decoding/dpb.h"
 #include "common/debug.h"
 
 #include <cstring>
@@ -481,8 +483,31 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
         // §7.3.8.5: Skip mode = merge without residual
         pred_mode = PredMode::MODE_SKIP;
         HEVC_LOG(TREE, "CU (%d,%d) %dx%d SKIP", x0, y0, cbSize, cbSize);
-        // prediction_unit for skip (always 2Nx2N)
+        // prediction_unit for skip (always 2Nx2N) + motion compensation
         decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
+        {
+            PUMotionInfo mi = get_pu_motion(ctx, x0, y0);
+            int16_t pred[64*64];
+            perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, 0,
+                mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                mi.pred_flag[0], mi.pred_flag[1], pred);
+            for (int y = 0; y < cbSize; y++)
+                for (int x = 0; x < cbSize; x++)
+                    ctx.pic->sample(0, x0+x, y0+y) = static_cast<uint16_t>(pred[y*cbSize+x]);
+            if (sps.ChromaArrayType != 0) {
+                int cW = cbSize / sps.SubWidthC, cH = cbSize / sps.SubHeightC;
+                int xC = x0 / sps.SubWidthC, yC = y0 / sps.SubHeightC;
+                for (int c = 1; c <= 2; c++) {
+                    int16_t cpred[32*32];
+                    perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, c,
+                        mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                        mi.pred_flag[0], mi.pred_flag[1], cpred);
+                    for (int y = 0; y < cH; y++)
+                        for (int x = 0; x < cW; x++)
+                            ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(cpred[y*cW+x]);
+                }
+            }
+        }
     } else {
         if (sh.slice_type != SliceType::I) {
             pred_mode = decode_pred_mode_flag(cabac) ?
@@ -528,27 +553,58 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             decode_prediction_unit_intra(ctx, x0, y0, log2CbSize, part_mode);
         }
         if (pred_mode == PredMode::MODE_INTER) {
-            // §7.3.8.5: parse prediction_unit(s) based on PartMode
+            // §7.3.8.5: parse prediction_unit(s) and perform motion compensation
+            auto mc_pu = [&](int xPb, int yPb, int nPbW, int nPbH, int partIdx) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, xPb, yPb, nPbW, nPbH, partIdx);
+                // §8.5.3: motion compensation → write prediction to picture
+                PUMotionInfo mi = get_pu_motion(ctx, xPb, yPb);
+                // Luma
+                {
+                    int16_t pred[64*64];
+                    perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, 0,
+                        mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                        mi.pred_flag[0], mi.pred_flag[1], pred);
+                    for (int y = 0; y < nPbH; y++)
+                        for (int x = 0; x < nPbW; x++)
+                            ctx.pic->sample(0, xPb+x, yPb+y) = static_cast<uint16_t>(pred[y*nPbW+x]);
+                }
+                // Chroma (4:2:0)
+                if (sps.ChromaArrayType != 0) {
+                    int cW = nPbW / sps.SubWidthC;
+                    int cH = nPbH / sps.SubHeightC;
+                    int xC = xPb / sps.SubWidthC;
+                    int yC = yPb / sps.SubHeightC;
+                    for (int c = 1; c <= 2; c++) {
+                        int16_t pred[32*32];
+                        perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, c,
+                            mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                            mi.pred_flag[0], mi.pred_flag[1], pred);
+                        for (int y = 0; y < cH; y++)
+                            for (int x = 0; x < cW; x++)
+                                ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(pred[y*cW+x]);
+                    }
+                }
+            };
             if (part_mode == PartMode::PART_2Nx2N) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
+                mc_pu(x0, y0, cbSize, cbSize, 0);
             } else if (part_mode == PartMode::PART_2NxN) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize/2, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize/2, cbSize, cbSize/2, 1);
+                mc_pu( x0, y0, cbSize, cbSize/2, 0);
+                mc_pu( x0, y0+cbSize/2, cbSize, cbSize/2, 1);
             } else if (part_mode == PartMode::PART_Nx2N) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize/2, cbSize, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize/2, y0, cbSize/2, cbSize, 1);
+                mc_pu( x0, y0, cbSize/2, cbSize, 0);
+                mc_pu( x0+cbSize/2, y0, cbSize/2, cbSize, 1);
             } else if (part_mode == PartMode::PART_2NxnU) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize/4, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize/4, cbSize, cbSize*3/4, 1);
+                mc_pu( x0, y0, cbSize, cbSize/4, 0);
+                mc_pu( x0, y0+cbSize/4, cbSize, cbSize*3/4, 1);
             } else if (part_mode == PartMode::PART_2NxnD) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize*3/4, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize*3/4, cbSize, cbSize/4, 1);
+                mc_pu( x0, y0, cbSize, cbSize*3/4, 0);
+                mc_pu( x0, y0+cbSize*3/4, cbSize, cbSize/4, 1);
             } else if (part_mode == PartMode::PART_nLx2N) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize/4, cbSize, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize/4, y0, cbSize*3/4, cbSize, 1);
+                mc_pu( x0, y0, cbSize/4, cbSize, 0);
+                mc_pu( x0+cbSize/4, y0, cbSize*3/4, cbSize, 1);
             } else if (part_mode == PartMode::PART_nRx2N) {
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize*3/4, cbSize, 0);
-                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize*3/4, y0, cbSize/4, cbSize, 1);
+                mc_pu( x0, y0, cbSize*3/4, cbSize, 0);
+                mc_pu( x0+cbSize*3/4, y0, cbSize/4, cbSize, 1);
             }
         }
     }
@@ -811,12 +867,19 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
             std::memcpy(residual, coefficients, sizeof(int16_t) * trSize * trSize);
         }
 
-        // Intra prediction for luma
-        int intra_mode = ctx.intra_mode_at(x0, y0);
+        // Prediction for luma
         int16_t pred_samples[64 * 64] = {};
-        perform_intra_prediction(ctx, x0, y0, log2TrafoSize, 0, intra_mode,
-                                 pred_samples);
-
+        if (cu.pred_mode == PredMode::MODE_INTRA) {
+            int intra_mode = ctx.intra_mode_at(x0, y0);
+            perform_intra_prediction(ctx, x0, y0, log2TrafoSize, 0, intra_mode,
+                                     pred_samples);
+        } else {
+            // Inter: pred already in picture from PU-level MC, read it back
+            for (int y = 0; y < trSize; y++)
+                for (int x = 0; x < trSize; x++)
+                    pred_samples[y * trSize + x] = static_cast<int16_t>(
+                        ctx.pic->sample(0, x0 + x, y0 + y));
+        }
 
         // Reconstruct
         reconstruct_block(ctx, x0, y0, log2TrafoSize, 0, pred_samples, residual);
@@ -887,11 +950,21 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                                     sizeof(int16_t) * trSizeC * trSizeC);
                     }
 
-                    // Chroma intra prediction
-                    int chroma_mode = ctx.chroma_mode_at(xC, yC);
+                    // Chroma prediction
                     int16_t pred_samples[32 * 32] = {};
-                    perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
-                                            chroma_mode, pred_samples);
+                    if (cu.pred_mode == PredMode::MODE_INTRA) {
+                        int chroma_mode = ctx.chroma_mode_at(xC, yC);
+                        perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
+                                                chroma_mode, pred_samples);
+                    } else {
+                        // Inter: pred already written by PU-level MC
+                        int xCC = xC / sps.SubWidthC;
+                        int yCC = yC / sps.SubHeightC;
+                        for (int y = 0; y < trSizeC; y++)
+                            for (int x = 0; x < trSizeC; x++)
+                                pred_samples[y * trSizeC + x] = static_cast<int16_t>(
+                                    ctx.pic->sample(cIdx, xCC + x, yCC + y));
+                    }
 
                     reconstruct_block(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                      pred_samples, residual);
