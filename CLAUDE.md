@@ -61,14 +61,32 @@ clang-tidy src/**/*.cpp -- -std=c++17
 
 > **ABSOLU** : Chaque fonction de décodage DOIT être une transcription directe de la spec.
 
-1. **Lire le PDF** de la section correspondante (pas les notes, pas les résumés, pas HM)
-2. **Transcrire** les formules, conditions et boucles telles qu'écrites dans la spec — ne pas "simplifier", "optimiser" ou "interpréter"
-3. **Nommer** les variables comme dans la spec (ex: `scanIdx`, `LastSignificantCoeffX`, `ctxInc`)
-4. **Commenter** chaque bloc avec la référence spec exacte (ex: `// Spec eq 9-55`, `// §7.3.8.11 line 3`)
-5. **Vérifier avec HM** uniquement quand le résultat de la spec semble ambigu ou quand un test échoue — et documenter la divergence dans LEARNINGS.md
-6. **Ne jamais** combiner des parties de la spec avec des parties de HM dans la même fonction — choisir UNE source et s'y tenir
+1. **Identifier** la section spec exacte (§X.Y.Z) ET toutes ses sous-sections et processus invoqués
+2. **Lire le PDF** de la section ET des processus invoqués (pas les notes, pas les résumés, pas HM)
+3. **Lister** tous les sous-processus invoqués (ex: §7.3.8.11 invoque §9.3.4.3.6 pour l'alignment bypass)
+4. **Transcrire** les formules, conditions et boucles telles qu'écrites dans la spec — ne pas "simplifier", "optimiser" ou "interpréter"
+5. **Vérifier la checklist** : chaque sous-processus de l'étape 3 est-il implémenté ? (oui/non, pas "semble correct")
+6. **Nommer** les variables comme dans la spec (ex: `scanIdx`, `LastSignificantCoeffX`, `ctxInc`)
+7. **Commenter** chaque bloc avec la référence spec exacte (ex: `// Spec eq 9-55`, `// §7.3.8.11 line 3`)
+8. **Vérifier avec HM** uniquement quand le résultat de la spec semble ambigu ou quand un test échoue — et documenter la divergence dans LEARNINGS.md
+9. **Ne jamais** combiner des parties de la spec avec des parties de HM dans la même fonction — choisir UNE source et s'y tenir
 
 Violation type : "simplifier `if (log2TrafoSize == 2 || (log2TrafoSize == 3 && cIdx > 0))` au lieu de transcrire la vraie condition de la spec" → introduit des bugs silencieux qui se propagent dans tout le bitstream.
+
+### Règle anti-debug itératif
+
+> **INTERDIT** : boucle de debug empirique (hypothèse → trace → test → échec → nouvelle hypothèse).
+> Ce pattern a causé des heures perdues en Phase 5. Maximum **2 itérations** de debug empirique.
+
+Après 2 échecs de debug :
+1. **STOP** — arrêter le debug, ne pas ajouter de traces supplémentaires
+2. **Relire la spec** : ouvrir le PDF et lire la section COMPLÈTE correspondante à la fonction buggée, y compris les sections voisines et les processus invoqués (souvent le bug est dans un processus invoqué qu'on n'a pas implémenté, ex: §9.3.4.3.6)
+3. **Checklist des processus** : pour chaque processus invoqué par la section spec, vérifier qu'il est implémenté dans le code (pas "semble implémenté" — vérifier ligne par ligne)
+4. **Si toujours bloqué** → demander à l'utilisateur avant de continuer
+
+Exemples de bugs trouvés par relecture de spec (pas par debug) :
+- §9.3.4.3.6 : alignment bypass (`ivlCurrRange = 256`) avant `coeff_sign_flag` et `coeff_abs_level_remaining` — une seule ligne dans la spec, invisible au debug empirique
+- §9.2.2 : WPP context save/restore au 2e CTU de chaque rangée — jamais visible en comparant des pixels
 
 ### Tests oracle — comment ça marche
 
@@ -98,33 +116,26 @@ Les tests `oracle_bbb1080_50f` et `oracle_bbb4k_25f` valident sur du contenu ré
 
 ### Debugging d'un oracle FAIL
 
-Quand un test oracle échoue (MD5 mismatch) :
+> **IMPORTANT** : Appliquer la règle anti-debug itératif ci-dessus. Ne PAS partir en boucle de traces.
 
+**Étape 1 — Localiser** (1 itération max) :
 ```bash
-# 1. Décoder avec hevc-decode
-./build/hevc-decode tests/conformance/fixtures/i_64x64_qp22.265 -o /tmp/test.yuv
-
-# 2. Décoder la référence avec ffmpeg
-ffmpeg -y -i tests/conformance/fixtures/i_64x64_qp22.265 -pix_fmt yuv420p /tmp/ref.yuv
-
-# 3. Comparer pixel par pixel
-python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv 64 64
-
-# Output exemple :
-# FAIL: 1/1 frames differ
-#   Frame 0: 42 pixels differ, max_diff=3, PSNR=45.2dB
-
-# 4. Identifier le premier pixel faux -> localiser le CTU/CU
-# 5. Ajouter du debug logging (HEVC_DEBUG) pour ce CU
-# 6. Comparer les valeurs intermédiaires :
-#    - prediction samples (avant résidu)
-#    - residual (après transform inverse)
-#    - reconstruction (avant filtres)
-#    - après deblocking
-#    - après SAO
+./build/hevc-decode <input> -o /tmp/test.yuv
+ffmpeg -y -i <input> -pix_fmt yuv420p /tmp/ref.yuv
+python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv <W> <H>
 ```
 
-Voir `docs/oracle/oracle-strategy.md` pour la stratégie complète de debugging.
+**Étape 2 — Relire la spec** (PAS debugger) :
+1. Identifier quelle fonction produit le premier pixel faux (prediction? transform? CABAC?)
+2. Ouvrir le PDF de la section spec correspondante
+3. Lister TOUS les processus invoqués par cette section
+4. Vérifier que chaque processus est implémenté (checklist oui/non)
+5. Le bug est presque toujours un processus invoqué non implémenté ou mal transcrit
+
+**Étape 3 — Comparer avec HM** (seulement si étape 2 ne suffit pas) :
+- HM est dans `/tmp/HM/`, binaire : `/tmp/HM/bin/umake/clang-17.0/x86_64/release/TAppDecoder`
+- Comparer les decision bins CABAC (pas les bypass, ils sont trop nombreux)
+- Si les decisions divergent, le bug est dans le parsing. Si elles matchent, le bug est dans la reconstruction.
 
 ## Structure
 
