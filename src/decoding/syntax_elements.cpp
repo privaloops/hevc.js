@@ -104,10 +104,9 @@ int decode_cbf_luma(CabacEngine& cabac, int trafoDepth) {
     return cabac.decode_decision(ctxIdx);
 }
 
-// §7.3.8.11 — cbf_cb, cbf_cr (shared contexts)
+// §7.3.8.11 — cbf_cb, cbf_cr (shared contexts) — Table 9-48: ctxInc = trafoDepth
 int decode_cbf_chroma(CabacEngine& cabac, int trafoDepth) {
-    int ctxIdx = CTX_CBF_CHROMA + trafoDepth;
-    if (ctxIdx > CTX_CBF_CHROMA + 3) ctxIdx = CTX_CBF_CHROMA + 3;
+    int ctxIdx = CTX_CBF_CHROMA + std::min(trafoDepth, 4);
     return cabac.decode_decision(ctxIdx);
 }
 

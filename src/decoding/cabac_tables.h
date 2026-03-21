@@ -122,18 +122,18 @@ enum CabacCtxOffset {
     CTX_MVP_FLAG                = 25,   // 1 context
     CTX_SPLIT_TRANSFORM_FLAG    = 26,   // 3 contexts
     CTX_CBF_LUMA                = 29,   // 2 contexts
-    CTX_CBF_CHROMA              = 31,   // 4 contexts (cb+cr share)
-    CTX_ABS_MVD_GREATER0        = 35,   // 1 context
-    CTX_ABS_MVD_GREATER1        = 36,   // 1 context
-    CTX_CU_QP_DELTA_ABS         = 37,   // 2 contexts
-    CTX_TRANSFORM_SKIP_FLAG     = 39,   // 2 contexts
-    CTX_LAST_SIG_COEFF_X        = 41,   // 18 contexts
-    CTX_LAST_SIG_COEFF_Y        = 59,   // 18 contexts
-    CTX_CODED_SUB_BLOCK_FLAG    = 77,   // 4 contexts
-    CTX_SIG_COEFF_FLAG          = 81,   // 44 contexts (shared luma/chroma per §9-54/9-55)
-    CTX_COEFF_ABS_LEVEL_GREATER1 = 125, // 24 contexts
-    CTX_COEFF_ABS_LEVEL_GREATER2 = 149, // 6 contexts
-    NUM_CABAC_CONTEXTS          = 155,
+    CTX_CBF_CHROMA              = 31,   // 5 contexts (cb+cr share) — Table 9-22
+    CTX_ABS_MVD_GREATER0        = 36,   // 1 context
+    CTX_ABS_MVD_GREATER1        = 37,   // 1 context
+    CTX_CU_QP_DELTA_ABS         = 38,   // 2 contexts
+    CTX_TRANSFORM_SKIP_FLAG     = 40,   // 2 contexts
+    CTX_LAST_SIG_COEFF_X        = 42,   // 18 contexts
+    CTX_LAST_SIG_COEFF_Y        = 60,   // 18 contexts
+    CTX_CODED_SUB_BLOCK_FLAG    = 78,   // 4 contexts
+    CTX_SIG_COEFF_FLAG          = 82,   // 44 contexts (shared luma/chroma per §9-54/9-55)
+    CTX_COEFF_ABS_LEVEL_GREATER1 = 126, // 24 contexts
+    CTX_COEFF_ABS_LEVEL_GREATER2 = 150, // 6 contexts
+    NUM_CABAC_CONTEXTS          = 156,
 };
 
 // All init values packed: [ctxOffset][3] where columns are I/P/B
@@ -171,15 +171,16 @@ static const ContextInitEntry cabacInitValues[NUM_CABAC_CONTEXTS] = {
     {{ 0, 153, 153 }}, {{ 0, 153, 153 }},
     // CTX_MVP_FLAG (25) — Table 9-18
     {{ 0, 168, 168 }},
-    // CTX_SPLIT_TRANSFORM_FLAG (26-28) — Table 9-19
-    {{ 153, 124, 124 }}, {{ 138, 138, 138 }}, {{ 138, 94, 94 }},
-    // CTX_CBF_LUMA (29-30) — Table 9-20
+    // CTX_SPLIT_TRANSFORM_FLAG (26-28) — Table 9-20
+    {{ 153, 124, 224 }}, {{ 138, 138, 167 }}, {{ 138, 94, 122 }},
+    // CTX_CBF_LUMA (29-30) — Table 9-21
     {{ 111, 153, 153 }}, {{ 141, 111, 111 }},
-    // CTX_CBF_CHROMA (31-34) — Table 9-21
+    // CTX_CBF_CHROMA (31-35) — Table 9-22 (5 contexts, not 4)
     {{ 94, 149, 149 }}, {{ 138, 107, 92 }}, {{ 182, 167, 167 }}, {{ 154, 154, 154 }},
-    // CTX_ABS_MVD_GREATER0 (35) — Table 9-22
+    {{ 154, 154, 154 }},
+    // CTX_ABS_MVD_GREATER0 (36) — Table 9-23
     {{ 0, 140, 169 }},
-    // CTX_ABS_MVD_GREATER1 (36) — Table 9-23
+    // CTX_ABS_MVD_GREATER1 (37) — Table 9-23
     {{ 0, 198, 198 }},
     // CTX_CU_QP_DELTA_ABS (37-38) — Table 9-24
     {{ 154, 154, 154 }}, {{ 154, 154, 154 }},
