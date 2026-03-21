@@ -104,9 +104,11 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
                                       const int coded_sub_block_flag[],
                                       int numSbPerSide,
                                       bool transformSkipOrBypass) {
-    // Table 9-50
+    // Table 9-50 — spec has only 15 entries (i=0..14), position 15 is never accessed
+    // (it's always lastScanPos which is implicitly significant).
+    // Ref: libde265 slice.cc:1983 — uses 99 as sentinel for position 15.
     static const int ctxIdxMap[16] = {
-        0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
+        0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 99
     };
 
     int sigCtx;
@@ -160,12 +162,11 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
     }
 
     // eq 9-54, 9-55: ctxInc derivation
-    // Note: spec says 27 for chroma (eq 9-55) but Table 9-29 init values use 28.
-    // Using 28 to match init value layout. See LEARNINGS.md.
+    // Ref: libde265 slice.cc:2129 — uses 27 for chroma, conformant with spec eq 9-55.
     if (cIdx == 0)
         return sigCtx;                                            // eq 9-54
     else
-        return 28 + sigCtx;                                       // eq 9-55 (adjusted: 28 not 27)
+        return 27 + sigCtx;                                       // eq 9-55
 }
 
 // ============================================================
