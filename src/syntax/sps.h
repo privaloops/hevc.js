@@ -123,6 +123,7 @@ struct SPS {
 
     bool sps_temporal_mvp_enabled_flag = false;
     bool strong_intra_smoothing_enabled_flag = false;
+    bool intra_smoothing_disabled_flag = false;
 
     bool vui_parameters_present_flag = false;
 

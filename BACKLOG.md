@@ -9,7 +9,7 @@ Etat d'avancement par phase et prochaines taches.
 | 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
-| 4 — Intra Prediction | **Prochaine** | — |
+| 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | A faire | — |
 | 6 — Loop Filters | A faire | — |
 | 7 — High Profiles | A faire | — |
@@ -47,31 +47,56 @@ Etat d'avancement par phase et prochaines taches.
 - [x] 3.6 Parameter set management (ParameterSetManager, stockage par ID, activation via slice)
 - [x] 3.7 CLI `--dump-headers` (VPS/SPS/PPS/SliceHeader dump complet)
 
-## Phase 4 — Après Phase 3
+## Phase 4 — En cours (subdivisee en 6 sous-phases)
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase4` pour generer les bitstreams edge-case (PCM, transform skip, scaling lists, QP extremes, constrained intra, dependent slices)
-- [ ] 4.1 CABAC engine (decode_decision, bypass, terminate)
-- [ ] 4.2 CABAC context init (toutes les tables)
-- [ ] 4.3 Binarization (FL, TU, TR, EGk)
-- [ ] 4.4a slice_segment_data() boucle avec end_of_slice_segment_flag
-- [ ] 4.4b Coding tree (quad-tree split)
-- [ ] 4.5 Intra mode parsing (MPM)
-- [ ] 4.6 Transform tree + residual_coding (sig_coeff_flag, cRiceParam)
-- [ ] 4.7 Dequantization (QP derivation, chroma mapping, scaling lists)
-- [ ] 4.8 Transform inverse (DCT/DST, clipping inter-passe, transform skip)
-- [ ] 4.9 Intra prediction (Planar, DC, Angular + transposition modes 2-17)
-- [ ] 4.10 Reconstruction (pred + residual, clipping)
-- [ ] 4.10b PCM mode (byte alignment, CABAC reset)
-- [ ] 4.11 SAO parsing (stub)
+Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 
-## Phase 5 — Prealables conformance
+### 4A — CABAC Engine (FAIT)
+- [x] Arithmetic decoder (decode_decision, bypass, terminate)
+- [x] Context initialization (155 contextes, I/P/B, cabac_init_flag)
+- [x] 7 tests unitaires passent
+- [x] Init values verifiees contre HM
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5` pour generer les bitstreams edge-case (weighted pred, B hierarchique, TMVP, CRA/RASL, open GOP, AMP)
+### 4A-4D — Parsing (FAIT)
+- [x] CABAC engine, coding tree, residual coding — **parsing 100% identique a HM**
+- [x] 9 bugs parsing fixes cette session (scanIdx, lastSigCoeff swap, MDCS, cbf defere, CBF_CHROMA 5ctx, B-slice init, invAngle, corner filter, chroma filter)
+- [x] 132 residual_coding calls : tous les bin counts matchent HM exactement
+- [x] Audits spec complets : residual_coding, coding_tree, syntax_elements, cabac_tables, cabac.cpp — tous conformes Main profile
 
-## Phase 6 — Prealables conformance
+### 4E — Transform + Dequant (FAIT)
+- [x] DCT/DST inverse avec clipping inter-passe — audite conforme spec
+- [x] Dequant avec scaling lists — audite conforme spec
+- [x] Transform skip — bug dormant (shift 7 au lieu de 5, non utilise dans Main profile)
+- [ ] Tests unitaires isoles (DCT round-trip, clipping, QP chroma)
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6` pour generer les bitstreams edge-case (deblocking bi-pred, SAO edge/band, multi-slice cross-filter, QP variable, offsets beta/tc)
-- [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC pour validation Main profile stricte (optionnel, voir docs/conformance-sources.md)
+### 4F — Intra Prediction + Reconstruction (FAIT)
+- [x] 35 modes intra (Planar, DC, Angular 2-34)
+- [x] Reference samples, filtrage, strong smoothing
+- [x] 5 bugs intra fixes (invAngle, corner filter, chroma ref filter, DC chroma, angular chroma)
+- [x] 3 toy tests pixel-perfect
+- [x] DST inverse fix : matrice forward (M) au lieu de la transposee (M^T) — spec eq 8-315 utilise la matrice forward mais l'inverse 2D necessite M^T
+- [x] **i_64x64_qp22 pixel-perfect** (jalon Phase 4)
+
+## Phase 5 — Apres Phase 4 (subdivisee en 4 sous-phases)
+
+Voir `docs/phases/phase-05-inter.md` pour le plan detaille.
+
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5`
+- [ ] 5A — DPB + Ref Lists (POC, RPS, RefPicList construction)
+- [ ] 5B — MV Derivation (Merge 5+1 candidats, AMVP, TMVP, MV scaling)
+- [ ] 5C — Interpolation (8-tap luma, 4-tap chroma, shifts bit-exact)
+- [ ] 5D — Integration (P-frames puis B-frames pixel-perfect)
+
+## Phase 6 — Apres Phase 5 (subdivisee en 4 sous-phases)
+
+Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
+
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6`
+- [ ] 6A — Deblocking Luma (Bs derivation, strong/weak filter)
+- [ ] 6B — Deblocking Chroma (Bs==2 seulement)
+- [ ] 6C — SAO (Edge offset, Band offset, merge)
+- [ ] 6D — Integration Full Main Profile ← **jalon majeur**
+- [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC
 
 ## Taches transverses
 

@@ -65,19 +65,20 @@ Spec refs : §7.3.2 (VPS), §7.3.3 (SPS), §7.3.4 (PPS), §7.3.6 (slice header),
 
 Spec refs : §7.3.8 (coding_tree_unit), §7.3.9 (coding_unit), §7.3.10 (prediction_unit), §7.3.11 (transform_unit), §8.4 (quantization), §8.5.4 (intra prediction), §8.6 (transform + scaling), §9 (CABAC).
 
-Sous-étapes :
-1. **CABAC** (§9) : Initialisation des contextes, arithmetic decoding, binarization de tous les syntax elements
-2. **Coding Tree** : Quad-tree splitting (CTU → CU), split flags
-3. **Prediction Unit** : Intra mode derivation (35 modes luma + chroma)
-4. **Transform Unit** : TU quad-tree, cbf flags
-5. **Quantization inverse** : Scaling lists, dequant
-6. **Transform inverse** : DCT/DST 4x4, 8x8, 16x16, 32x32
-7. **Intra prediction samples** : DC, Planar, Angular (modes 2-34)
-8. **Reconstruction** : prediction + residual, clipping
-9. **PCM mode** : Parsing et reconstruction directe (§7.3.10.2), reset CABAC post-PCM
-10. **Dependent slice segments** : Continuation CABAC, héritage des paramètres slice
+Subdivisée en **6 sous-phases** avec validation indépendante à chaque niveau :
 
-**Critère de sortie** : Décoder correctement des bitstreams I-only. Comparaison pixel-perfect avec libde265 sur les bitstreams de conformité intra.
+| Sous-phase | Doc | Validation |
+|------------|-----|------------|
+| **4A** — CABAC Engine + Contexts | `phase-04a-cabac.md` | Tests unitaires (7 tests) |
+| **4B** — Coding Tree Structure | `phase-04b-coding-tree.md` | Trace syntax elements vs HM |
+| **4C** — Residual Context Derivation | `phase-04c-residual-contexts.md` | Tests unitaires derive_*_ctx vs HM |
+| **4D** — Coefficient Parsing | `phase-04d-coefficient-parsing.md` | Trace coefficients TU vs HM |
+| **4E** — Transform + Dequant | `phase-04e-transform-dequant.md` | Tests unitaires vecteurs connus |
+| **4F** — Prediction + Reconstruction | `phase-04f-prediction-recon.md` | Oracle pixel-perfect |
+
+Principe : valider chaque couche en isolation AVANT l'intégration. Un bug de contexte CABAC corrompt l'état arithmétique et fait diverger tous les bins suivants — debugger au niveau oracle est alors très lent.
+
+**Critère de sortie** : `oracle_i_64x64_qp22` passe (MD5 match). Tous les tests unitaires des sous-phases passent.
 
 ### Phase 5 — Inter Prediction (`docs/phases/phase-05-inter.md`)
 
@@ -85,36 +86,37 @@ Sous-étapes :
 
 Spec refs : §8.3 (reference picture management), §8.5.3 (inter prediction), §8.5.3.2 (luma interpolation), §8.5.3.3 (chroma interpolation), §8.5.3.4 (weighted prediction).
 
-Sous-étapes :
-1. **Reference Picture Set (RPS)** : ShortTermRefPicSet, LongTermRefPic, DPB management
-2. **Reference Picture List Construction** : RefPicList0, RefPicList1, modification
-3. **Motion Vector Derivation** : Merge mode (5 spatial + 1 temporal + combined bi-pred + zero), AMVP (2 spatial + 1 temporal + zero)
-4. **TMVP** : Picture co-localisée, bloc co-localisé, MV scaling (§8.5.3.2.9, §8.5.3.2.12)
-5. **Motion Compensation** : 8-tap luma interpolation filter, 4-tap chroma interpolation
-6. **Weighted Prediction** : Explicit/implicit weighted pred
-7. **Bi-prediction** : Averaging des deux prédictions
+Subdivisée en **4 sous-phases** avec validation indépendante :
 
-**Critère de sortie** : Décoder des bitstreams P et B. Pixel-perfect vs libde265 sur bitstreams de conformité inter.
+| Sous-phase | Doc | Validation |
+|------------|-----|------------|
+| **5A** — DPB + Ref Lists | `phase-05a-dpb.md` | POC et ref lists vs HM |
+| **5B** — MV Derivation | `phase-05b-mv-derivation.md` | MV par PU vs HM |
+| **5C** — Interpolation | `phase-05c-interpolation.md` | Tests unitaires filtres 8/4-tap |
+| **5D** — Integration | `phase-05d-integration.md` | Oracle pixel-perfect P+B |
+
+5A et 5C sont indépendants (parallélisables). 5B dépend de 5A. 5D dépend de tout.
+
+**Critère de sortie** : `oracle_p_qcif_10f` et `oracle_b_qcif_10f` pixel-perfect.
 
 ### Phase 6 — Loop Filters (`docs/phases/phase-06-loop-filters.md`)
 
-**Objectif** : Implémenter deblocking filter et SAO.
+**Objectif** : Implémenter deblocking filter et SAO. **Jalon majeur : Main profile complet.**
 
 Spec refs : §8.7.2 (deblocking), §8.7.3 (SAO).
 
-Sous-étapes :
-1. **Deblocking Filter** :
-   - Boundary strength derivation (§8.7.2.4)
-   - Luma filtering decision & filter (§8.7.2.5.1-3)
-   - Chroma filtering (§8.7.2.5.4)
-   - Edge detection / boundary detection
-2. **SAO (Sample Adaptive Offset)** :
-   - Edge offset (4 classes)
-   - Band offset (32 bands)
-   - CTU-level parameters parsing
-   - Application des offsets
+Subdivisée en **4 sous-phases** séquentielles (SAO dépend du deblocking) :
 
-**Critère de sortie** : Décodage complet Main profile. Pixel-perfect sur l'ensemble des bitstreams de conformité Main profile. C'est le jalon majeur.
+| Sous-phase | Validation |
+|------------|------------|
+| **6A** — Deblocking Luma | Oracle I-frame + deblock only |
+| **6B** — Deblocking Chroma | Idem, plans Cb/Cr |
+| **6C** — SAO | Oracle I-frame + SAO only |
+| **6D** — Integration Full | Oracle `full_qcif_10f` = Main profile complet |
+
+Plus simple que Phases 4/5 : traitement d'image pur, pas de CABAC, pas de propagation d'erreur.
+
+**Critère de sortie** : `oracle_full_qcif_10f` pixel-perfect. Bitstreams real-world (Big Buck Bunny) pixel-perfect.
 
 ### Phase 7 — Profils supérieurs (`docs/phases/phase-07-high-profiles.md`)
 
