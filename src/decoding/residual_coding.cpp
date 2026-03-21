@@ -76,15 +76,14 @@ static void get_coeff_scan(int scanIdx, int coeffScan[][2]) {
 }
 
 // Derive scan index from intra mode and TU size (§8.4.4.2.1)
-static int derive_scan_idx(int log2TrafoSize, int intra_mode, int /*cIdx*/) {
-    // Mode-dependent coefficient scan (MDCS) applies for blocks <= 8x8 pixels
-    // For 4:2:0 chroma with log2TrafoSize==3, chroma block is 4x4 (also <= 8)
-    // HM: MDCS_MAXIMUM_WIDTH/HEIGHT = 8, VER_IDX=26, HOR_IDX=10, ANGLE_LIMIT=4
-    if (log2TrafoSize <= 3) {
-        if (intra_mode >= 6 && intra_mode <= 14)
-            return 2; // vertical scan (mode near horizontal → scan columns first)
-        if (intra_mode >= 22 && intra_mode <= 30)
-            return 1; // horizontal scan (mode near vertical → scan rows first)
+// §7.4.9.11 — scanIdx derivation
+// scanIdx: 0=up-right diagonal, 1=horizontal, 2=vertical
+static int derive_scan_idx(int predModeIntra, bool modeDependent) {
+    if (modeDependent) {
+        if (predModeIntra >= 6 && predModeIntra <= 14)
+            return 2; // vertical scan
+        if (predModeIntra >= 22 && predModeIntra <= 30)
+            return 1; // horizontal scan
     }
     return 0; // diagonal
 }
@@ -170,10 +169,17 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     int trSize = 1 << log2TrafoSize;
     std::memset(coefficients, 0, sizeof(int16_t) * trSize * trSize);
 
-    // Derive scan index — use chroma mode for chroma components (§8.4.4.2.1)
-    int intra_mode = (cIdx == 0) ? ctx.intra_mode_at(x0, y0)
-                                 : ctx.chroma_mode_at(x0, y0);
-    int scanIdx = derive_scan_idx(log2TrafoSize, intra_mode, cIdx);
+    // §7.4.9.11 — scanIdx derivation
+    auto& cu = ctx.cu_at(x0, y0);
+    int scanIdx = 0;
+    if (cu.pred_mode == PredMode::MODE_INTRA &&
+        (log2TrafoSize == 2 ||
+         (log2TrafoSize == 3 && cIdx == 0) ||
+         (log2TrafoSize == 3 && ctx.sps->ChromaArrayType == 3))) {
+        int predModeIntra = (cIdx == 0) ? ctx.intra_mode_at(x0, y0)
+                                        : ctx.chroma_mode_at(x0, y0);
+        scanIdx = derive_scan_idx(predModeIntra, true);
+    }
 
     int bins_start = cabac.bin_count();
     HEVC_LOG(CABAC, "residual_coding (%d,%d) log2=%d cIdx=%d scanIdx=%d bins_at=%d",
