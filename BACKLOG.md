@@ -10,7 +10,7 @@ Etat d'avancement par phase et prochaines taches.
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
-| 5 — Inter Prediction | **En cours** | 5A-5D codes mais buggues. Restructure en 11 etapes (5.0-5.10). Bloqueur : bug sig_coeff_flag multi-CTU (5.0). |
+| 5 — Inter Prediction | **En cours** | 5.0 FAIT (multi-CTU pixel-perfect). 5A-5D codes, audit en cours. Etapes 5.1-5.10 a valider. |
 | 6 — Loop Filters | A faire | — |
 | 7 — High Profiles | A faire | — |
 | 8 — WASM Integration | A faire | — |
@@ -82,10 +82,10 @@ Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 Voir `docs/phases/phase-05-inter.md` pour le plan detaille.
 Code existant a auditer : `inter_prediction.cpp`, `interpolation.cpp`, `dpb.cpp`.
 
-### 5.0 — Fix parsing I-frame multi-CTU (BLOQUANT)
-- [ ] Identifier le bug `derive_sig_coeff_flag_ctx` au bin 1402 de CTU 2
-- [ ] Fix et test oracle I-frame QCIF 176x144 pixel-perfect
-- [ ] Non-regression `oracle_i_64x64_qp22`
+### 5.0 — Fix parsing I-frame multi-CTU (FAIT)
+- [x] Bug identifie : MPM candModeList[1] eq 8-25, `candA-2+29` → `candA+29`
+- [x] I-frame QCIF 176x144 pixel-perfect (0 pixels faux)
+- [x] Non-regression `oracle_i_64x64_qp22` pixel-perfect
 
 ### 5.1 — DPB + POC
 - [ ] Audit `dpb.cpp` POC derivation vs spec S8.3.1

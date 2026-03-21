@@ -155,3 +155,24 @@ Reecrit pour suivre la spec: tracking de `isScaledFlagLX`, scaling B-group seule
 11. **CABAC bypass alignment conditionnel** — `align_bypass()` inconditionnel → conditionnel sur `cabac_bypass_alignment_enabled_flag`
 12. **TMVP colList inversion** — `collocated_from_l0_flag ? 0 : 1` → `collocated_from_l0_flag`
 13. **AMVP rewrite §8.5.3.2.7** — isScaledFlagLX, §6.4.2 availability, LongTermRefPic check
+
+## Session 2026-03-21d — Fix multi-CTU I-frame (pixel-perfect!)
+
+### MPM candModeList[1] formula — off-by-2 (CRITICAL)
+
+La spec eq 8-25 dit: `candModeList[1] = 2 + ((candIntraPredModeA + 29) % 32)`.
+Notre code avait: `2 + ((candA - 2 + 29) % 32)` — un `-2` en trop.
+
+**Impact**: quand candA==candB >= 2, le 2e candidat MPM était décalé de 2 (ex: 29 au lieu de 31 pour candA=32). Cela causait un mode intra incorrect (mode 31 au lieu de 30) pour certains CUs dans les CTU 2+. Mode 31 est hors [22,30] → scanIdx=0 (diagonal) au lieu de scanIdx=1 (horizontal) → sig_coeff_flag contexts faux → divergence CABAC → 21593 pixels faux.
+
+**Méthode de découverte**: trace bin-par-bin avec ctxIdx ajouté à HM. La divergence au bin 18323 a révélé un mauvais scan type. Remonté au mode intra 31 vs 30. Comparaison MPM HM preds=[32,31,33] vs nôtre [32,29,33] → formule eq 8-25 fausse.
+
+**Leçon**: les formules modulaires de la spec (avec `% 32`) sont faciles à mal transcrire. Toujours vérifier le résultat numérique pour quelques valeurs de candA (ex: candA=2, 10, 26, 32) contre HM.
+
+### Bug #14
+
+14. **MPM candModeList[1]** — `candA-2+29` au lieu de `candA+29` (spec eq 8-25). Causait 21593 pixels faux dans la frame I multi-CTU 176x144.
+
+### Milestone atteint
+
+**I-frame multi-CTU 176x144 = pixel-perfect** (bloqueur Phase 5 levé).
