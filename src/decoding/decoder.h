@@ -48,7 +48,6 @@ private:
     std::vector<int> intra_mode_buf_;
     std::vector<int> chroma_mode_buf_;
     std::vector<PUMotionInfo> motion_info_buf_;
-    std::vector<Picture::PUMotionInfoCompact> pic_motion_buf_;  // stored in Picture for TMVP
 };
 
 } // namespace hevc

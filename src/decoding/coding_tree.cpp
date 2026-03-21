@@ -605,6 +605,13 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             } else if (part_mode == PartMode::PART_nRx2N) {
                 mc_pu( x0, y0, cbSize*3/4, cbSize, 0);
                 mc_pu( x0+cbSize*3/4, y0, cbSize/4, cbSize, 1);
+            } else if (part_mode == PartMode::PART_NxN) {
+                // §7.3.8.5: NxN inter (only at min CB size)
+                int half = cbSize / 2;
+                mc_pu( x0,      y0,      half, half, 0);
+                mc_pu( x0+half, y0,      half, half, 1);
+                mc_pu( x0,      y0+half, half, half, 2);
+                mc_pu( x0+half, y0+half, half, half, 3);
             }
         }
     }

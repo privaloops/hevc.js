@@ -118,9 +118,10 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     // Motion info grid at min-PU (4x4) granularity for inter MV storage
     motion_info_buf_.resize(modeGridW * modeGridH);
     std::fill(motion_info_buf_.begin(), motion_info_buf_.end(), PUMotionInfo{});
-    // Also allocate compact motion info for TMVP (stored in Picture after decoding)
-    pic_motion_buf_.resize(modeGridW * modeGridH);
-    std::fill(pic_motion_buf_.begin(), pic_motion_buf_.end(), Picture::PUMotionInfoCompact{});
+    // Allocate compact motion info in the Picture itself (for TMVP by future frames)
+    pic->motion_info_buf.resize(modeGridW * modeGridH);
+    std::fill(pic->motion_info_buf.begin(), pic->motion_info_buf.end(), Picture::PUMotionInfoCompact{});
+    pic->motion_info_stride = modeGridW;
 
     // Setup decoding context
     CabacEngine cabac;
@@ -164,11 +165,9 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     }
 
     // Store motion info in the Picture for TMVP access by future frames
-    pic->motion_info = pic_motion_buf_.data();
-    pic->motion_info_stride = modeGridW;
     for (int i = 0; i < modeGridW * modeGridH; i++) {
         auto& src = motion_info_buf_[i];
-        auto& dst = pic_motion_buf_[i];
+        auto& dst = pic->motion_info_buf[i];
         dst.mv_x[0] = src.mv[0].x; dst.mv_y[0] = src.mv[0].y;
         dst.mv_x[1] = src.mv[1].x; dst.mv_y[1] = src.mv[1].y;
         dst.ref_idx[0] = src.ref_idx[0]; dst.ref_idx[1] = src.ref_idx[1];
