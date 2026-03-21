@@ -58,6 +58,8 @@ public:
     // Bin counter for debugging
     int bin_count() const { return bin_count_; }
     void reset_bin_count() { bin_count_ = 0; }
+    uint16_t dbg_range() const { return ivlCurrRange_; }
+    uint16_t dbg_offset() const { return ivlOffset_; }
 
 private:
     void renormalize();  // §9.3.4.3.3
