@@ -86,36 +86,37 @@ Principe : valider chaque couche en isolation AVANT l'intégration. Un bug de co
 
 Spec refs : §8.3 (reference picture management), §8.5.3 (inter prediction), §8.5.3.2 (luma interpolation), §8.5.3.3 (chroma interpolation), §8.5.3.4 (weighted prediction).
 
-Sous-étapes :
-1. **Reference Picture Set (RPS)** : ShortTermRefPicSet, LongTermRefPic, DPB management
-2. **Reference Picture List Construction** : RefPicList0, RefPicList1, modification
-3. **Motion Vector Derivation** : Merge mode (5 spatial + 1 temporal + combined bi-pred + zero), AMVP (2 spatial + 1 temporal + zero)
-4. **TMVP** : Picture co-localisée, bloc co-localisé, MV scaling (§8.5.3.2.9, §8.5.3.2.12)
-5. **Motion Compensation** : 8-tap luma interpolation filter, 4-tap chroma interpolation
-6. **Weighted Prediction** : Explicit/implicit weighted pred
-7. **Bi-prediction** : Averaging des deux prédictions
+Subdivisée en **4 sous-phases** avec validation indépendante :
 
-**Critère de sortie** : Décoder des bitstreams P et B. Pixel-perfect vs libde265 sur bitstreams de conformité inter.
+| Sous-phase | Doc | Validation |
+|------------|-----|------------|
+| **5A** — DPB + Ref Lists | `phase-05a-dpb.md` | POC et ref lists vs HM |
+| **5B** — MV Derivation | `phase-05b-mv-derivation.md` | MV par PU vs HM |
+| **5C** — Interpolation | `phase-05c-interpolation.md` | Tests unitaires filtres 8/4-tap |
+| **5D** — Integration | `phase-05d-integration.md` | Oracle pixel-perfect P+B |
+
+5A et 5C sont indépendants (parallélisables). 5B dépend de 5A. 5D dépend de tout.
+
+**Critère de sortie** : `oracle_p_qcif_10f` et `oracle_b_qcif_10f` pixel-perfect.
 
 ### Phase 6 — Loop Filters (`docs/phases/phase-06-loop-filters.md`)
 
-**Objectif** : Implémenter deblocking filter et SAO.
+**Objectif** : Implémenter deblocking filter et SAO. **Jalon majeur : Main profile complet.**
 
 Spec refs : §8.7.2 (deblocking), §8.7.3 (SAO).
 
-Sous-étapes :
-1. **Deblocking Filter** :
-   - Boundary strength derivation (§8.7.2.4)
-   - Luma filtering decision & filter (§8.7.2.5.1-3)
-   - Chroma filtering (§8.7.2.5.4)
-   - Edge detection / boundary detection
-2. **SAO (Sample Adaptive Offset)** :
-   - Edge offset (4 classes)
-   - Band offset (32 bands)
-   - CTU-level parameters parsing
-   - Application des offsets
+Subdivisée en **4 sous-phases** séquentielles (SAO dépend du deblocking) :
 
-**Critère de sortie** : Décodage complet Main profile. Pixel-perfect sur l'ensemble des bitstreams de conformité Main profile. C'est le jalon majeur.
+| Sous-phase | Validation |
+|------------|------------|
+| **6A** — Deblocking Luma | Oracle I-frame + deblock only |
+| **6B** — Deblocking Chroma | Idem, plans Cb/Cr |
+| **6C** — SAO | Oracle I-frame + SAO only |
+| **6D** — Integration Full | Oracle `full_qcif_10f` = Main profile complet |
+
+Plus simple que Phases 4/5 : traitement d'image pur, pas de CABAC, pas de propagation d'erreur.
+
+**Critère de sortie** : `oracle_full_qcif_10f` pixel-perfect. Bitstreams real-world (Big Buck Bunny) pixel-perfect.
 
 ### Phase 7 — Profils supérieurs (`docs/phases/phase-07-high-profiles.md`)
 

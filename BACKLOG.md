@@ -87,14 +87,26 @@ Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 - [x] 3 toy tests pixel-perfect
 - [ ] i_64x64_qp22 pixel-perfect (bloque par 4B/4C/4D)
 
-## Phase 5 — Prealables conformance
+## Phase 5 — Apres Phase 4 (subdivisee en 4 sous-phases)
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5` pour generer les bitstreams edge-case (weighted pred, B hierarchique, TMVP, CRA/RASL, open GOP, AMP)
+Voir `docs/phases/phase-05-inter.md` pour le plan detaille.
 
-## Phase 6 — Prealables conformance
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5`
+- [ ] 5A — DPB + Ref Lists (POC, RPS, RefPicList construction)
+- [ ] 5B — MV Derivation (Merge 5+1 candidats, AMVP, TMVP, MV scaling)
+- [ ] 5C — Interpolation (8-tap luma, 4-tap chroma, shifts bit-exact)
+- [ ] 5D — Integration (P-frames puis B-frames pixel-perfect)
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6` pour generer les bitstreams edge-case (deblocking bi-pred, SAO edge/band, multi-slice cross-filter, QP variable, offsets beta/tc)
-- [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC pour validation Main profile stricte (optionnel, voir docs/conformance-sources.md)
+## Phase 6 — Apres Phase 5 (subdivisee en 4 sous-phases)
+
+Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
+
+- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6`
+- [ ] 6A — Deblocking Luma (Bs derivation, strong/weak filter)
+- [ ] 6B — Deblocking Chroma (Bs==2 seulement)
+- [ ] 6C — SAO (Edge offset, Band offset, merge)
+- [ ] 6D — Integration Full Main Profile ← **jalon majeur**
+- [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC
 
 ## Taches transverses
 
