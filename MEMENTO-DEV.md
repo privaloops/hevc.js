@@ -160,8 +160,11 @@ C'est ici que l'histoire devient intéressante. Après le commit initial de Phas
 | `ce851b5` | Scan tables diagonales : x/y swappés | Coefficients lus dans le mauvais ordre |
 | `fa061e4` | 3 bugs residual_coding | Scan index, lastSigCoeff swap, MDCS range |
 | `8997b30` | scanIdx derivation | Réécrit verbatim depuis §7.4.9.11 |
+| `7d8c9aa` | **DST-VII inverse : M au lieu de M^T** | **2023 pixels luma faux** — dernier bug Phase 4 |
 
 **Enseignement n°9 — Les scan tables** : Les coefficients dans un bloc de transform ne sont pas lus en raster scan mais en diagonale (z-scan). Les tables de parcours diagonal avaient x et y inversés sur les diagonales paires. Ce bug est invisible sur les blocs 4x4 (trop petits pour que ça importe beaucoup) mais catastrophique sur les blocs 8x8+.
+
+**Enseignement n°13 — La spec donne la matrice forward, pas l'inverse** : Le bug le plus pernicieux du projet. La spec §8.6.4.2 eq 8-315 définit `transMatrix` pour la DST-VII 4x4 et écrit `y[i] = Σⱼ transMatrix[i][j] · x[j]`. On a transcrit ça fidèlement. Mais cette matrice est la matrice **forward** (analyse). Pour l'inverse (synthèse), il faut la transposée M^T, car DST-VII n'est PAS symétrique. Le piège : DCT-II (qui couvre 95% des blocs) utilise un butterfly auto-transposant — la distinction forward/inverse n'existe pas. Seul DST-VII (4x4 luma intra, ~5% des blocs) utilise une multiplication matricielle explicite, et c'est le seul endroit où ça casse. HM contourne le problème dans `fastInverseDst` via un indexing `c[row] * M[row][column]` qui calcule implicitement M^T · x, même en stockant la matrice forward. **Une transcription parfaite de la formule de la spec peut produire un résultat faux.** C'est la limite ultime du "spec-first".
 
 #### D. Bugs de structure (coding tree, TU, chroma)
 
@@ -208,7 +211,19 @@ C'est ici que l'histoire devient intéressante. Après le commit initial de Phas
 
 **Enseignement n°11 — Ne jamais debugger au mauvais niveau d'abstraction** : Quand l'oracle échoue, la tentation est de regarder les pixels. Mais si le bug est dans CABAC (niveau bits), chaque couche au-dessus (coefficients, transform, prediction, reconstruction) est contaminée. Il faut debugger de bas en haut : d'abord les bins, puis les syntax elements, puis les coefficients, puis les pixels. La subdivision en sous-phases formalise cette intuition.
 
-### Pivot 3 : L'ajout de la règle "ABSOLU" dans CLAUDE.md
+### Pivot 3 : La spec peut être fidèlement transcrite et quand même fausse (21 mars)
+
+**Contexte** : 2023 pixels luma faux restants. Le parsing CABAC est 100% identique à HM (vérifié bin par bin). Les reference samples de prédiction intra sont identiques. La prédiction angulaire donne le même résultat. Mais les résidus après inverse transform sont complètement différents.
+
+**La traque** : Instrumentation de HM pour dumper coefficients, scaled (dequant), et résidus au bloc (60,0). Résultat : coefficients et dequant identiques, mais le DST inverse produit des valeurs différentes.
+
+**Le bug** : La spec eq 8-315 écrit `y[i] = Σⱼ transMatrix[i][j] · x[j]` avec une matrice qui est en fait la matrice DST forward. Pour l'inverse 2D, il faut M^T (la transposée). On a transcrit la formule au pied de la lettre → forward au lieu d'inverse. Ce bug est invisible pour DCT (butterfly auto-transposant, 95% des blocs) et ne frappe que DST (4x4 luma intra, 5% des blocs).
+
+**L'ironie** : C'est le seul bug du projet où une transcription **fidèle** de la spec produit un résultat **faux**. Tous les autres bugs venaient de transcriptions infidèles (simplifications, omissions, inversions). Celui-ci est le contraire : on a trop bien suivi la spec.
+
+**Après** : La règle "spec-first" reste valide pour 99% des cas, mais avec un nouveau corollaire : **quand la spec donne une matrice de transform, vérifier si c'est la forward ou l'inverse**. Si le butterfly DCT fonctionne mais la multiplication matricielle DST échoue, c'est probablement une transposition manquante.
+
+### Pivot 4 : L'ajout de la règle "ABSOLU" dans CLAUDE.md
 
 Le commit `6a32e79` est un tournant dans la relation humain-agent. Après avoir constaté que Claude avait tendance à "simplifier" les conditions de la spec (fusionner des if, réorganiser des boucles), une règle a été ajoutée :
 
@@ -332,7 +347,7 @@ La spec ordonne les contextes d'une certaine façon dans les formules. HM les or
 |------|---------|------|
 | 19 mars | 11 | Setup, documentation, tables, oracle |
 | 20 mars | 34 | Phases 1-4 + 15 bug fixes |
-| 21 mars | 10 | 7 bug fixes + 3 docs (sous-phases, règle spec-first) |
+| 21 mars | 13 | 10 bug fixes + docs + **Phase 4 pixel-perfect** (DST fix) |
 
 ### Pull Requests
 
@@ -356,23 +371,27 @@ La spec ordonne les contextes d'une certaine façon dans les formules. HM les or
 ### Ce qui fonctionne
 
 - **Phases 1-3** : complètes, auditées, mergées dans main
-- **Phase 4A** (CABAC Engine) : 7 tests unitaires passent
-- **Phase 4E** (Transform + Dequant) : fonctionnel, DCT/DST/scaling lists
-- **Phase 4F** (Prediction + Reconstruction) : 3 toy tests pixel-perfect
+- **Phase 4** : **COMPLÈTE** — `oracle_i_64x64_qp22` pixel-perfect (jalon Phase 4)
+  - 4A (CABAC) : 100% identique à HM bin par bin
+  - 4B-4D (Parsing) : 132 residual_coding calls matchent HM exactement
+  - 4E (Transform) : DST/DCT/dequant corrects (DST fix = bug n°30)
+  - 4F (Prediction) : 35 modes + reconstruction = 0 erreur luma/chroma
+- **11 tests oracle Phase 4 passent** (dont 8 edge-case conformance)
+- **2 tests edge-case échouent** : `conf_i_scaling_64` (scaling list issue connue), `conf_i_multislice_256` (slice boundary)
 
-### Ce qui bloque
+### Progression pixels faux (i_64x64_qp22)
 
-- **Phase 4B** (Coding Tree) : 3 bins manquants pour CU 8x8 dans le transform tree. Probable split_transform_flag ou CBF au mauvais depth.
-- **Phase 4C** (Residual Contexts) : 4 bugs fixés mais pas encore validés par tests unitaires
-- **Phase 4D** (Coefficient Parsing) : dépend de 4B et 4C
+```
+5608 → 4239 → 2674 → 2023 → 0 (pixel-perfect)
+```
 
 ### Prochaine étape
 
-1. Ajouter un trace de syntax elements (type + numéro de bin) dans notre décodeur et dans HM
-2. Comparer les traces pour identifier les 3 bins manquants
-3. Fixer le bug dans `decode_transform_tree()`
-4. Écrire les tests unitaires pour les contextes (30+ cas)
-5. Lancer l'oracle `oracle_i_64x64_qp22` — il devrait passer
+**Phase 5 — Inter Prediction** : P-frames et B-frames.
+1. DPB + Reference Picture Lists
+2. Merge/AMVP MV derivation
+3. Luma/chroma interpolation (8-tap/4-tap)
+4. Oracle: `oracle_p_qcif_10f`, `oracle_b_qcif_10f`
 
 ---
 
@@ -400,6 +419,8 @@ La spec ordonne les contextes d'une certaine façon dans les formules. HM les or
 12. **Le PDF spec de 716 pages est navigable** avec un bon index de pages dans le CLAUDE.md.
 13. **3 niveaux de bitstreams** (toy/conformance/real-world) permettent de debugger à la bonne granularité.
 14. **Phases 1-3 en une journée, Phase 4 bloquée depuis 2 jours** : la complexité n'est pas linéaire. CABAC + intra prédiction est un ordre de grandeur plus difficile que tout le reste.
+15. **Une transcription parfaite de la spec peut être fausse** : la spec DST eq 8-315 donne la matrice forward, pas l'inverse. Transcrire fidèlement `y[i] = Σ M[i][j]·x[j]` donne la forward transform. L'inverse est `Σ M[j][i]·x[j]` (la transposée). HM le fait implicitement. C'est la limite de l'approche "spec-first".
+16. **Instrumenter HM est le dernier recours mais le plus efficace** : quand le parsing match, les ref samples matchent, et la prédiction match — mais le résultat final diverge — il faut ajouter des fprintf dans HM et comparer les valeurs intermédiaires étape par étape. C'est ce qui a révélé que le DST donnait des résidus différents avec les mêmes coefficients dequantisés.
 
 ---
 
@@ -438,6 +459,9 @@ Pour chaque bug : commit, catégorie, description, comment trouvé, temps estim�
 | 27 | `a9f696e` | Structure | Chroma CBF héritage parent pour TU 4x4 déférée | §7.3.8.8 | Chroma CBF perdu |
 | 28 | `2f0c7e3` | CABAC | CBF_CHROMA 5 contextes (pas 4) + B-slice init | §9.2, Table 9-22 | Init mismatch |
 | 29 | `b8c6c1d` | Intra | 5 bugs intra prediction (spec audit §8.4.4) | §8.4.4 | Audit systématique |
+| 30 | `7d8c9aa` | **Transform** | **DST-VII inverse : matrice forward M au lieu de M^T** | §8.6.4.2 | Instrumentation HM (dequant identique, résidu différent) |
+
+**Bug n°30 — Le dernier et le plus subtil** : 2023 pixels luma faux, tous dans des blocs 4x4 intra utilisant DST. Le parsing CABAC, le dequant, la prédiction, les reference samples — tout était correct. Seul le DST inverse donnait un résultat différent de HM avec les mêmes coefficients dequantisés en entrée. Root cause : la spec eq 8-315 donne la matrice DST forward et la formule `y[i] = Σⱼ M[i][j]·x[j]` qui est le forward transform. L'inverse correct est M^T·x. HM le fait implicitement via `c[row] * M[row][column]`. Fix : 4 lignes dans `idst4()` — transposer les coefficients. Progression : 5608 → 4239 → 2674 → 2023 → **0 (pixel-perfect)**.
 
 ---
 
