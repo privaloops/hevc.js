@@ -57,35 +57,25 @@ Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 - [x] 7 tests unitaires passent
 - [x] Init values verifiees contre HM
 
-### 4B — Coding Tree Structure (A VALIDER) ← **priorite 1**
-- [x] coding_quadtree, coding_unit, prediction_unit, transform_tree implementes
-- [x] PCM mode, SAO parsing stub, dependent slices
-- [ ] **BUG** : 3 bins manquants pour CU 8x8 — probable split_transform_flag ou cbf
-- [ ] Trace comparative syntax elements vs HM
-- [ ] Test : sequence de SE identique a HM pour 500 bins
-
-### 4C — Residual Coding Contexts (A VALIDER) ← **priorite 2**
-- [x] derive_sig_coeff_flag_ctx implemente (layout HM)
-- [x] 4 bugs de contexte trouves et fixes (chroma offsets, firstSigCtx)
-- [ ] Test unitaire : 30+ cas derive_sig_coeff_flag_ctx vs valeurs HM
-- [ ] Test unitaire : greater1/greater2/last_sig/coded_sub_block contexts
-
-### 4D — Coefficient Parsing (A VALIDER)
-- [x] residual_coding implemente (scan, levels, sign, cRiceParam)
-- [ ] Trace coefficients vs HM : premiere TU differente
-- [ ] Test : coefficients identiques a HM pour toutes les TU de i_64x64_qp22
+### 4A-4D — Parsing (FAIT)
+- [x] CABAC engine, coding tree, residual coding — **parsing 100% identique a HM**
+- [x] 9 bugs parsing fixes cette session (scanIdx, lastSigCoeff swap, MDCS, cbf defere, CBF_CHROMA 5ctx, B-slice init, invAngle, corner filter, chroma filter)
+- [x] 132 residual_coding calls : tous les bin counts matchent HM exactement
+- [x] Audits spec complets : residual_coding, coding_tree, syntax_elements, cabac_tables, cabac.cpp — tous conformes Main profile
 
 ### 4E — Transform + Dequant (FAIT)
-- [x] DCT/DST inverse avec clipping inter-passe
-- [x] Dequant avec scaling lists
-- [x] Transform skip
+- [x] DCT/DST inverse avec clipping inter-passe — audite conforme spec
+- [x] Dequant avec scaling lists — audite conforme spec
+- [x] Transform skip — bug dormant (shift 7 au lieu de 5, non utilise dans Main profile)
 - [ ] Tests unitaires isoles (DCT round-trip, clipping, QP chroma)
 
-### 4F — Intra Prediction + Reconstruction (FAIT)
+### 4F — Intra Prediction + Reconstruction (EN COURS)
 - [x] 35 modes intra (Planar, DC, Angular 2-34)
 - [x] Reference samples, filtrage, strong smoothing
+- [x] 5 bugs intra fixes (invAngle, corner filter, chroma ref filter, DC chroma, angular chroma)
 - [x] 3 toy tests pixel-perfect
-- [ ] i_64x64_qp22 pixel-perfect (bloque par 4B/4C/4D)
+- [ ] **BUG RESTANT** : 2023 pixels luma faux a x+y>=60, source pixel (60,0) dans CU NxN (56,0) PU mode 27. Probleme probable dans `build_reference_samples()` / `is_reconstructed()` z-scan availability
+- [ ] i_64x64_qp22 pixel-perfect
 
 ## Phase 5 — Apres Phase 4 (subdivisee en 4 sous-phases)
 
