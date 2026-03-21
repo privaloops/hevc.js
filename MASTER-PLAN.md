@@ -65,19 +65,20 @@ Spec refs : §7.3.2 (VPS), §7.3.3 (SPS), §7.3.4 (PPS), §7.3.6 (slice header),
 
 Spec refs : §7.3.8 (coding_tree_unit), §7.3.9 (coding_unit), §7.3.10 (prediction_unit), §7.3.11 (transform_unit), §8.4 (quantization), §8.5.4 (intra prediction), §8.6 (transform + scaling), §9 (CABAC).
 
-Sous-étapes :
-1. **CABAC** (§9) : Initialisation des contextes, arithmetic decoding, binarization de tous les syntax elements
-2. **Coding Tree** : Quad-tree splitting (CTU → CU), split flags
-3. **Prediction Unit** : Intra mode derivation (35 modes luma + chroma)
-4. **Transform Unit** : TU quad-tree, cbf flags
-5. **Quantization inverse** : Scaling lists, dequant
-6. **Transform inverse** : DCT/DST 4x4, 8x8, 16x16, 32x32
-7. **Intra prediction samples** : DC, Planar, Angular (modes 2-34)
-8. **Reconstruction** : prediction + residual, clipping
-9. **PCM mode** : Parsing et reconstruction directe (§7.3.10.2), reset CABAC post-PCM
-10. **Dependent slice segments** : Continuation CABAC, héritage des paramètres slice
+Subdivisée en **6 sous-phases** avec validation indépendante à chaque niveau :
 
-**Critère de sortie** : Décoder correctement des bitstreams I-only. Comparaison pixel-perfect avec libde265 sur les bitstreams de conformité intra.
+| Sous-phase | Doc | Validation |
+|------------|-----|------------|
+| **4A** — CABAC Engine + Contexts | `phase-04a-cabac.md` | Tests unitaires (7 tests) |
+| **4B** — Coding Tree Structure | `phase-04b-coding-tree.md` | Trace syntax elements vs HM |
+| **4C** — Residual Context Derivation | `phase-04c-residual-contexts.md` | Tests unitaires derive_*_ctx vs HM |
+| **4D** — Coefficient Parsing | `phase-04d-coefficient-parsing.md` | Trace coefficients TU vs HM |
+| **4E** — Transform + Dequant | `phase-04e-transform-dequant.md` | Tests unitaires vecteurs connus |
+| **4F** — Prediction + Reconstruction | `phase-04f-prediction-recon.md` | Oracle pixel-perfect |
+
+Principe : valider chaque couche en isolation AVANT l'intégration. Un bug de contexte CABAC corrompt l'état arithmétique et fait diverger tous les bins suivants — debugger au niveau oracle est alors très lent.
+
+**Critère de sortie** : `oracle_i_64x64_qp22` passe (MD5 match). Tous les tests unitaires des sous-phases passent.
 
 ### Phase 5 — Inter Prediction (`docs/phases/phase-05-inter.md`)
 
