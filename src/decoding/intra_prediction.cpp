@@ -282,7 +282,7 @@ static void predict_planar(const int16_t* refTop, const int16_t* refLeft,
 // ============================================================
 
 static void predict_dc(const int16_t* refTop, const int16_t* refLeft,
-                        int nTbS, int log2BlkSize, int16_t* pred) {
+                        int nTbS, int log2BlkSize, int cIdx, int16_t* pred) {
     int sum = 0;
     for (int i = 1; i <= nTbS; i++) {
         sum += refTop[i] + refLeft[i];
@@ -293,8 +293,8 @@ static void predict_dc(const int16_t* refTop, const int16_t* refLeft,
         for (int x = 0; x < nTbS; x++)
             pred[y * nTbS + x] = static_cast<int16_t>(dcVal);
 
-    // DC boundary filter (only for luma, size <= 32)
-    if (nTbS < 32) {
+    // §8.4.4.2.5 eq 8-48..8-51: DC boundary filter (cIdx == 0 only, nTbS < 32)
+    if (cIdx == 0 && nTbS < 32) {
         pred[0] = static_cast<int16_t>((refTop[1] + refLeft[1] + 2 * dcVal + 2) >> 2);
 
         for (int x = 1; x < nTbS; x++)
@@ -310,7 +310,7 @@ static void predict_dc(const int16_t* refTop, const int16_t* refLeft,
 // ============================================================
 
 static void predict_angular(const int16_t* refTop, const int16_t* refLeft,
-                             int nTbS, int intra_mode, int bitDepth,
+                             int nTbS, int intra_mode, int cIdx, int bitDepth,
                              int16_t* pred) {
     int angle = intraPredAngle[intra_mode];
     bool isVertical = (intra_mode >= 18);
@@ -341,10 +341,10 @@ static void predict_angular(const int16_t* refTop, const int16_t* refLeft,
         for (int i = 0; i <= 2 * nTbS; i++)
             refMainExt[offset + i] = refMain[i];
 
-        // Project side reference into negative positions
+        // §8.4.4.2.6 eq 8-54/8-62: project side reference into negative positions
+        // spec uses negative invAngle, we store positive → use (-i) to compensate
         for (int i = -1; i >= -numNeg; i--) {
-            int sideIdx = ((i * invA + 128) >> 8);
-            if (sideIdx < 0) sideIdx = 0;
+            int sideIdx = ((-i * invA + 128) >> 8);
             if (sideIdx > 2 * nTbS) sideIdx = 2 * nTbS;
             refMainExt[offset + i] = refSide[sideIdx];
         }
@@ -388,15 +388,15 @@ static void predict_angular(const int16_t* refTop, const int16_t* refLeft,
         }
     }
 
-    // Post-filtering for exactly horizontal (mode 10) and vertical (mode 26)
-    if (intra_mode == 26 && nTbS < 32) {
+    // §8.4.4.2.6 eq 8-60/8-68: post-filtering for exact H/V (cIdx == 0 only)
+    if (cIdx == 0 && intra_mode == 26 && nTbS < 32) {
         // Vertical: filter first column with left reference
         for (int y = 0; y < nTbS; y++) {
             pred[y * nTbS + 0] = static_cast<int16_t>(
                 Clip3(0, (1 << bitDepth) - 1,
                       pred[y * nTbS + 0] + ((refLeft[y + 1] - refLeft[0]) >> 1)));
         }
-    } else if (intra_mode == 10 && nTbS < 32) {
+    } else if (cIdx == 0 && intra_mode == 10 && nTbS < 32) {
         // Horizontal: filter first row with top reference
         for (int x = 0; x < nTbS; x++) {
             pred[0 * nTbS + x] = static_cast<int16_t>(
@@ -422,8 +422,11 @@ void perform_intra_prediction(DecodingContext& ctx, int x0, int y0,
 
     build_reference_samples(ctx, x0, y0, nTbS, cIdx, refTop, refLeft);
 
-    // Filter reference samples if needed (§8.4.4.2.1 step 1 + §8.4.4.2.3)
+    // §8.4.4.2.3: Reference sample filtering
+    // Spec: filtering applies when intra_smoothing_disabled_flag == 0 AND
+    //        (cIdx == 0 OR ChromaArrayType == 3)
     bool doFilter = !ctx.sps->intra_smoothing_disabled_flag &&
+                     (cIdx == 0 || ctx.sps->ChromaArrayType == 3) &&
                      needs_filtering(intra_mode, log2PredSize);
     if (doFilter) {
         // §8.4.4.2.3: biIntFlag requires ALL conditions:
@@ -433,24 +436,32 @@ void perform_intra_prediction(DecodingContext& ctx, int x0, int y0,
         if (ctx.sps->strong_intra_smoothing_enabled_flag &&
             cIdx == 0 && nTbS == 32) {
             int threshold = 1 << (bitDepth - 5);
-            int topLeft = refTop[0]; // = refLeft[0] = p[-1][-1]
+            int topLeft = refTop[0];
             bool topSmooth = std::abs(topLeft + refTop[2 * nTbS] -
                                        2 * refTop[nTbS]) < threshold;
             bool leftSmooth = std::abs(topLeft + refLeft[2 * nTbS] -
                                         2 * refLeft[nTbS]) < threshold;
             biIntFlag = topSmooth && leftSmooth;
         }
+        // §8.4.4.2.3 eq 8-41: corner sample filtered using both neighbours
+        int16_t filteredCorner = static_cast<int16_t>(
+            (refLeft[1] + 2 * refTop[0] + refTop[1] + 2) >> 2);
         filter_reference_samples(refTop, nTbS, biIntFlag, bitDepth);
         filter_reference_samples(refLeft, nTbS, biIntFlag, bitDepth);
+        // Apply cross-filtered corner to both arrays
+        if (!biIntFlag) {
+            refTop[0] = filteredCorner;
+            refLeft[0] = filteredCorner;
+        }
     }
 
     // Dispatch to prediction mode
     if (intra_mode == 0) {
         predict_planar(refTop, refLeft, nTbS, pred_samples);
     } else if (intra_mode == 1) {
-        predict_dc(refTop, refLeft, nTbS, log2PredSize, pred_samples);
+        predict_dc(refTop, refLeft, nTbS, log2PredSize, cIdx, pred_samples);
     } else {
-        predict_angular(refTop, refLeft, nTbS, intra_mode, bitDepth, pred_samples);
+        predict_angular(refTop, refLeft, nTbS, intra_mode, cIdx, bitDepth, pred_samples);
     }
 }
 
