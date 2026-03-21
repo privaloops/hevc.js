@@ -127,6 +127,9 @@ struct SPS {
 
     bool vui_parameters_present_flag = false;
 
+    // SPS range extension flags (§7.3.2.2.2) — inferred 0 for Main profile
+    bool cabac_bypass_alignment_enabled_flag = false;
+
     // ---- Derived values (§7.4.3.2.1) ----
     int ChromaArrayType = 0;
     int BitDepthY = 8;

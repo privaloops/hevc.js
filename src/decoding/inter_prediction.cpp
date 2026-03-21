@@ -191,8 +191,8 @@ static bool derive_temporal_mv(const DecodingContext& ctx,
         if (noBackward) {
             colList = listX;
         } else {
-            // Use collocated_from_l0_flag to determine N
-            colList = ctx.sh->collocated_from_l0_flag ? 0 : 1;
+            // §8.5.3.2.9: "with N being the value of collocated_from_l0_flag"
+            colList = ctx.sh->collocated_from_l0_flag;
         }
     }
 
@@ -456,102 +456,212 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
 // §8.5.3.2.6 — AMVP mode (MV prediction + MVD)
 // ============================================================
 
-// §8.5.3.2.7 helper: check a neighbor position for AMVP
-// Pass 1: same list + same ref. Pass 2: any list, same POC, with optional scaling.
-static bool amvp_check_neighbor(const DecodingContext& ctx,
-                                 int xNb, int yNb, int refIdxLX, int listX,
-                                 bool allowScaling, MV& outMV) {
+// §6.4.2 availability check for AMVP neighbor positions
+static bool is_amvp_nb_available(const DecodingContext& ctx,
+                                  int /*xCb*/, int /*yCb*/, int /*nCbS*/,
+                                  int xPb, int yPb, int /*nPbW*/, int /*nPbH*/,
+                                  int xNb, int yNb, int /*partIdx*/) {
     int picW = static_cast<int>(ctx.sps->pic_width_in_luma_samples);
     int picH = static_cast<int>(ctx.sps->pic_height_in_luma_samples);
     if (xNb < 0 || yNb < 0 || xNb >= picW || yNb >= picH) return false;
-    if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) return false;
 
-    PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
-    Picture* currRef = (listX == 0) ? ctx.dpb->ref_pic_list0(refIdxLX)
-                                     : ctx.dpb->ref_pic_list1(refIdxLX);
-    if (!currRef) return false;
-    int currRefPOC = currRef->poc;
-
-    // §8.5.3.2.7: try both lists
-    for (int l = 0; l < 2; l++) {
-        int tryList = (l == 0) ? listX : (1 - listX);
-        if (!mi.pred_flag[tryList]) continue;
-        Picture* nbRef = (tryList == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[tryList])
-                                         : ctx.dpb->ref_pic_list1(mi.ref_idx[tryList]);
-        if (!nbRef) continue;
-
-        if (nbRef->poc == currRefPOC) {
-            outMV = mi.mv[tryList];
-            return true;
-        }
-        if (allowScaling) {
-            // §8.5.3.2.7: scale MV when POC differs (both short-term)
-            outMV = scale_mv(mi.mv[tryList], ctx.pic->poc, currRefPOC,
-                              ctx.pic->poc, nbRef->poc);
-            return true;
-        }
+    // §6.4.1 z-scan availability (cross-CTU check)
+    int ctbSize = static_cast<int>(ctx.sps->CtbSizeY);
+    int curCtbX = xPb / ctbSize, curCtbY = yPb / ctbSize;
+    int nbCtbX = xNb / ctbSize, nbCtbY = yNb / ctbSize;
+    if (nbCtbX != curCtbX || nbCtbY != curCtbY) {
+        int nbAddr = nbCtbY * ctx.sps->PicWidthInCtbsY + nbCtbX;
+        int curAddr = curCtbY * ctx.sps->PicWidthInCtbsY + curCtbX;
+        if (nbAddr > curAddr) return false;
+    } else {
+        // Same CTU — z-scan check
+        int minTb = ctx.sps->MinTbSizeY;
+        auto zscan = [](int bx, int by) -> uint32_t {
+            uint32_t z = 0;
+            for (int i = 0; i < 8; i++) {
+                z |= ((bx >> i) & 1) << (2 * i);
+                z |= ((by >> i) & 1) << (2 * i + 1);
+            }
+            return z;
+        };
+        int ctbOrgX = curCtbX * ctbSize, ctbOrgY = curCtbY * ctbSize;
+        uint32_t curZ = zscan((xPb - ctbOrgX) / minTb, (yPb - ctbOrgY) / minTb);
+        uint32_t nbZ = zscan((xNb - ctbOrgX) / minTb, (yNb - ctbOrgY) / minTb);
+        if (nbZ > curZ) return false;
     }
-    return false;
+
+    // Must not be intra
+    if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) return false;
+    return true;
 }
 
+// §8.5.3.2.7 — Derivation process for motion vector predictor candidates
 static MV derive_amvp_predictor(const DecodingContext& ctx,
-                                 int /*xCb*/, int /*yCb*/, int /*nCbS*/,
+                                 int xCb, int yCb, int nCbS,
                                  int xPb, int yPb, int nPbW, int nPbH,
-                                 int refIdxLX, int listX, int /*partIdx*/,
+                                 int refIdxLX, int listX, int partIdx,
                                  int mvpFlag) {
-    // §8.5.3.2.6 + §8.5.3.2.7: AMVP candidate derivation
-    MV mvA = {}, mvB = {};
-    bool availA = false, availB = false;
+    int X = listX;
+    int Y = 1 - X;
+    Picture* currRef = (X == 0) ? ctx.dpb->ref_pic_list0(refIdxLX)
+                                 : ctx.dpb->ref_pic_list1(refIdxLX);
+    int currRefPOC = currRef ? currRef->poc : 0;
+    int currPOC = ctx.pic->poc;
 
-    // §8.5.3.2.7: Left group (A): A0 then A1
-    // Pass 1: same POC (no scaling). Pass 2: different POC (with scaling).
-    int leftPos[][2] = {{xPb - 1, yPb + nPbH}, {xPb - 1, yPb + nPbH - 1}};
-    // Pass 1: no scaling
-    for (auto& pos : leftPos) {
-        if (availA) break;
-        availA = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, false, mvA);
-    }
-    // Pass 2: with scaling
-    if (!availA) {
-        for (auto& pos : leftPos) {
-            if (availA) break;
-            availA = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, true, mvA);
+    // §8.5.3.2.7 step 1: positions
+    int xNbA0 = xPb - 1,         yNbA0 = yPb + nPbH;
+    int xNbA1 = xPb - 1,         yNbA1 = yPb + nPbH - 1;
+    int xNbB0 = xPb + nPbW,      yNbB0 = yPb - 1;
+    int xNbB1 = xPb + nPbW - 1,  yNbB1 = yPb - 1;
+    int xNbB2 = xPb - 1,         yNbB2 = yPb - 1;
+
+    // §8.5.3.2.7 step 2: init
+    MV mvLXA = {}, mvLXB = {};
+    bool availFlagA = false, availFlagB = false;
+    bool isScaledFlagLX = false;
+
+    // §8.5.3.2.7 steps 3-4: check A0, A1 availability
+    bool availableA0 = is_amvp_nb_available(ctx, xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH, xNbA0, yNbA0, partIdx);
+    bool availableA1 = is_amvp_nb_available(ctx, xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH, xNbA1, yNbA1, partIdx);
+
+    // §8.5.3.2.7 step 5: isScaledFlagLX
+    if (availableA0 || availableA1)
+        isScaledFlagLX = true;
+
+    // §8.5.3.2.7 step 6: A group — same POC match (no scaling)
+    int aPos[][2] = {{xNbA0, yNbA0}, {xNbA1, yNbA1}};
+    bool aAvail[] = {availableA0, availableA1};
+    for (int k = 0; k < 2 && !availFlagA; k++) {
+        if (!aAvail[k]) continue;
+        PUMotionInfo mi = get_pu_motion(ctx, aPos[k][0], aPos[k][1]);
+        // Try same list X first, then other list Y
+        if (mi.pred_flag[X]) {
+            Picture* nbRef = (X == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[X])
+                                       : ctx.dpb->ref_pic_list1(mi.ref_idx[X]);
+            if (nbRef && nbRef->poc == currRefPOC) {
+                mvLXA = mi.mv[X];   // eq 8-171
+                availFlagA = true;
+                continue;
+            }
+        }
+        if (mi.pred_flag[Y]) {
+            Picture* nbRef = (Y == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[Y])
+                                       : ctx.dpb->ref_pic_list1(mi.ref_idx[Y]);
+            if (nbRef && nbRef->poc == currRefPOC) {
+                mvLXA = mi.mv[Y];   // eq 8-172
+                availFlagA = true;
+            }
         }
     }
 
-    // §8.5.3.2.7: Above group (B): B0, B1, B2
-    int abovePos[][2] = {{xPb + nPbW, yPb - 1}, {xPb + nPbW - 1, yPb - 1}, {xPb - 1, yPb - 1}};
-    // Pass 1: no scaling
-    for (auto& pos : abovePos) {
-        if (availB) break;
-        availB = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, false, mvB);
-    }
-    // Pass 2: with scaling (only if isScaledFlagLX was not set)
-    if (!availB) {
-        for (auto& pos : abovePos) {
-            if (availB) break;
-            availB = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, true, mvB);
+    // §8.5.3.2.7 step 7: A group — scaling pass (only if step 6 failed)
+    if (!availFlagA) {
+        for (int k = 0; k < 2 && !availFlagA; k++) {
+            if (!aAvail[k]) continue;
+            PUMotionInfo mi = get_pu_motion(ctx, aPos[k][0], aPos[k][1]);
+            for (int l = 0; l < 2 && !availFlagA; l++) {
+                int tryL = (l == 0) ? X : Y;
+                if (!mi.pred_flag[tryL]) continue;
+                Picture* nbRef = (tryL == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[tryL])
+                                              : ctx.dpb->ref_pic_list1(mi.ref_idx[tryL]);
+                if (!nbRef) continue;
+                if (nbRef->used_for_long_term_ref != (currRef && currRef->used_for_long_term_ref))
+                    continue;
+                availFlagA = true;
+                if (nbRef->poc != currRefPOC && nbRef->used_for_short_term_ref &&
+                    currRef && currRef->used_for_short_term_ref) {
+                    mvLXA = scale_mv(mi.mv[tryL], currPOC, currRefPOC,
+                                      currPOC, nbRef->poc);
+                } else {
+                    mvLXA = mi.mv[tryL];
+                }
+            }
         }
     }
 
-    // §8.5.3.2.6 step 2-3: Build AMVP list (eq 8-170)
+    // §8.5.3.2.7 B group step 3: B0, B1, B2 — same POC match (no scaling)
+    int bPos[][2] = {{xNbB0, yNbB0}, {xNbB1, yNbB1}, {xNbB2, yNbB2}};
+    bool bAvailArr[3];
+    for (int k = 0; k < 3; k++)
+        bAvailArr[k] = is_amvp_nb_available(ctx, xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH, bPos[k][0], bPos[k][1], partIdx);
+
+    for (int k = 0; k < 3 && !availFlagB; k++) {
+        if (!bAvailArr[k]) continue;
+        PUMotionInfo mi = get_pu_motion(ctx, bPos[k][0], bPos[k][1]);
+        if (mi.pred_flag[X]) {
+            Picture* nbRef = (X == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[X])
+                                       : ctx.dpb->ref_pic_list1(mi.ref_idx[X]);
+            if (nbRef && nbRef->poc == currRefPOC) {
+                mvLXB = mi.mv[X];   // eq 8-184
+                availFlagB = true;
+                continue;
+            }
+        }
+        if (mi.pred_flag[Y]) {
+            Picture* nbRef = (Y == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[Y])
+                                       : ctx.dpb->ref_pic_list1(mi.ref_idx[Y]);
+            if (nbRef && nbRef->poc == currRefPOC) {
+                mvLXB = mi.mv[Y];   // eq 8-185
+                availFlagB = true;
+            }
+        }
+    }
+
+    // §8.5.3.2.7 step 4: when isScaledFlagLX == 0 and B found, copy B→A
+    if (!isScaledFlagLX && availFlagB) {
+        availFlagA = true;
+        mvLXA = mvLXB;  // eq 8-186
+    }
+
+    // §8.5.3.2.7 step 5: B group scaling — ONLY when isScaledFlagLX == 0
+    if (!isScaledFlagLX) {
+        availFlagB = false;
+        for (int k = 0; k < 3 && !availFlagB; k++) {
+            if (!bAvailArr[k]) continue;
+            PUMotionInfo mi = get_pu_motion(ctx, bPos[k][0], bPos[k][1]);
+            for (int l = 0; l < 2 && !availFlagB; l++) {
+                int tryL = (l == 0) ? X : Y;
+                if (!mi.pred_flag[tryL]) continue;
+                Picture* nbRef = (tryL == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[tryL])
+                                              : ctx.dpb->ref_pic_list1(mi.ref_idx[tryL]);
+                if (!nbRef) continue;
+                if (nbRef->used_for_long_term_ref != (currRef && currRef->used_for_long_term_ref))
+                    continue;
+                availFlagB = true;
+                if (nbRef->poc != currRefPOC && nbRef->used_for_short_term_ref &&
+                    currRef && currRef->used_for_short_term_ref) {
+                    mvLXB = scale_mv(mi.mv[tryL], currPOC, currRefPOC,
+                                      currPOC, nbRef->poc);
+                } else {
+                    mvLXB = mi.mv[tryL];
+                }
+            }
+        }
+    }
+
+    // §8.5.3.2.6 step 2: temporal candidate
+    bool availFlagCol = false;
+    MV mvCol = {};
+    if (availFlagA && availFlagB && mvLXA.x == mvLXB.x && mvLXA.y == mvLXB.y) {
+        availFlagCol = false;
+    } else if (!availFlagA || !availFlagB) {
+        if (ctx.sh->slice_temporal_mvp_enabled_flag)
+            availFlagCol = derive_temporal_mv(ctx, xPb, yPb, nPbW, nPbH, refIdxLX, listX, mvCol);
+    }
+
+    // §8.5.3.2.6 step 3: Build AMVP list (eq 8-170)
     MV mvpList[2] = {};
     int numMvp = 0;
 
-    if (availA) mvpList[numMvp++] = mvA;
-    if (availB && (!availA || mvB.x != mvA.x || mvB.y != mvA.y))
-        mvpList[numMvp++] = mvB;
-    else if (!availA && availB)
-        mvpList[numMvp++] = mvB;
-
-    // §8.5.3.2.6 step 2: temporal candidate only if < 2 spatial
-    if (numMvp < 2 && ctx.sh->slice_temporal_mvp_enabled_flag) {
-        MV mvCol = {};
-        if (derive_temporal_mv(ctx, xPb, yPb, nPbW, nPbH, refIdxLX, listX, mvCol))
-            mvpList[numMvp++] = mvCol;
+    if (availFlagA) {
+        mvpList[numMvp++] = mvLXA;
+        if (availFlagB && (mvLXA.x != mvLXB.x || mvLXA.y != mvLXB.y))
+            mvpList[numMvp++] = mvLXB;
+    } else if (availFlagB) {
+        mvpList[numMvp++] = mvLXB;
     }
-
-    // Zero padding
+    if (numMvp < 2 && availFlagCol)
+        mvpList[numMvp++] = mvCol;
     while (numMvp < 2) {
         mvpList[numMvp] = {0, 0};
         numMvp++;

@@ -375,10 +375,11 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
                 decode_coeff_abs_level_greater2_flag(cabac, ctxSet, cIdx);
         }
 
-        // §9.3.4.3.6: Alignment process prior to aligned bypass decoding
-        // "ivlCurrRange is set equal to 256" before coeff_sign_flag and
-        // coeff_abs_level_remaining
-        cabac.align_bypass();
+        // §7.3.8.11 + SPS RExt §7.4.3.2.2: alignment only when
+        // cabac_bypass_alignment_enabled_flag is 1 (RExt profiles).
+        // Main profile infers this flag as 0 — no alignment performed.
+        if (ctx.sps->cabac_bypass_alignment_enabled_flag)
+            cabac.align_bypass();
 
         // Sign flags — read for all sig coeffs (except hidden one)
         int coeff_sign_flag[16] = {};
