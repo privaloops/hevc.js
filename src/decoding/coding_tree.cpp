@@ -478,9 +478,11 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
     PartMode part_mode = PartMode::PART_2Nx2N;
 
     if (cu_skip) {
-        // Skip mode — inter prediction (Phase 5)
+        // §7.3.8.5: Skip mode = merge without residual
         pred_mode = PredMode::MODE_SKIP;
         HEVC_LOG(TREE, "CU (%d,%d) %dx%d SKIP", x0, y0, cbSize, cbSize);
+        // prediction_unit for skip (always 2Nx2N)
+        decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
     } else {
         if (sh.slice_type != SliceType::I) {
             pred_mode = decode_pred_mode_flag(cabac) ?
@@ -525,7 +527,30 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             // Intra prediction
             decode_prediction_unit_intra(ctx, x0, y0, log2CbSize, part_mode);
         }
-        // Inter prediction handled in Phase 5
+        if (pred_mode == PredMode::MODE_INTER) {
+            // §7.3.8.5: parse prediction_unit(s) based on PartMode
+            if (part_mode == PartMode::PART_2Nx2N) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
+            } else if (part_mode == PartMode::PART_2NxN) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize/2, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize/2, cbSize, cbSize/2, 1);
+            } else if (part_mode == PartMode::PART_Nx2N) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize/2, cbSize, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize/2, y0, cbSize/2, cbSize, 1);
+            } else if (part_mode == PartMode::PART_2NxnU) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize/4, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize/4, cbSize, cbSize*3/4, 1);
+            } else if (part_mode == PartMode::PART_2NxnD) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize*3/4, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0+cbSize*3/4, cbSize, cbSize/4, 1);
+            } else if (part_mode == PartMode::PART_nLx2N) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize/4, cbSize, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize/4, y0, cbSize*3/4, cbSize, 1);
+            } else if (part_mode == PartMode::PART_nRx2N) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize*3/4, cbSize, 0);
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0+cbSize*3/4, y0, cbSize/4, cbSize, 1);
+            }
+        }
     }
 
     // Store CU info in grid
@@ -544,8 +569,12 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
     if (!cu_skip) {
         bool rqt_root_cbf = true;
         if (pred_mode != PredMode::MODE_INTRA) {
-            // For inter: parse rqt_root_cbf if not merge-2Nx2N
-            // Phase 5 — for now assume cbf=1
+            // §7.3.8.5: rqt_root_cbf parsed when NOT (PART_2Nx2N && merge_flag)
+            bool is_merge_2Nx2N = (part_mode == PartMode::PART_2Nx2N &&
+                                    ctx.cu_at(x0, y0).merge_flag);
+            if (!is_merge_2Nx2N) {
+                rqt_root_cbf = decode_rqt_root_cbf(cabac);
+            }
         }
 
         if (rqt_root_cbf) {

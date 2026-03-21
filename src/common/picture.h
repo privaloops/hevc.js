@@ -37,6 +37,19 @@ struct Picture {
     bool used_for_long_term_ref = false;
     bool needed_for_output = false;
 
+    // Inter: per-PU motion info for TMVP (stored after decoding)
+    struct PUMotionInfoCompact {
+        int16_t mv_x[2] = {};
+        int16_t mv_y[2] = {};
+        int8_t ref_idx[2] = {-1, -1};
+        bool pred_flag[2] = {};
+    };
+    PUMotionInfoCompact* motion_info = nullptr;  // owned externally (by decoder)
+    int motion_info_stride = 0;
+
+    // Ref POC lists (snapshot at decode time, for TMVP MV scaling)
+    std::vector<int32_t> ref_poc[2];  // ref_poc[0] = L0 POCs, ref_poc[1] = L1 POCs
+
     // Allocate planes based on dimensions and chroma format
     void allocate(int width, int height, ChromaFormat fmt, int bd_luma, int bd_chroma);
 
