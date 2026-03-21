@@ -130,11 +130,11 @@ enum CabacCtxOffset {
     CTX_LAST_SIG_COEFF_X        = 42,   // 18 contexts
     CTX_LAST_SIG_COEFF_Y        = 60,   // 18 contexts
     CTX_CODED_SUB_BLOCK_FLAG    = 78,   // 4 contexts
-    CTX_SIG_COEFF_FLAG          = 82,   // 44 contexts (shared luma/chroma per §9-54/9-55)
-    CTX_COEFF_ABS_LEVEL_GREATER1 = 126, // 24 contexts
-    CTX_COEFF_ABS_LEVEL_GREATER2 = 150, // 6 contexts
-    CTX_RQT_ROOT_CBF             = 156, // 1 context — Table 9-14
-    NUM_CABAC_CONTEXTS           = 157,
+    CTX_SIG_COEFF_FLAG          = 82,   // 42 contexts (27 luma + 15 chroma, spec Table 9-29)
+    CTX_COEFF_ABS_LEVEL_GREATER1 = 124, // 24 contexts
+    CTX_COEFF_ABS_LEVEL_GREATER2 = 148, // 6 contexts
+    CTX_RQT_ROOT_CBF             = 154, // 1 context — Table 9-14
+    NUM_CABAC_CONTEXTS           = 155,
 };
 
 // All init values packed: [ctxOffset][3] where columns are I/P/B
@@ -201,22 +201,21 @@ static const ContextInitEntry cabacInitValues[NUM_CABAC_CONTEXTS] = {
     {{ 123, 123, 123 }}, {{ 63, 108, 108 }},
     // CTX_CODED_SUB_BLOCK_FLAG (77-80) — Table 9-28
     {{ 91, 121, 121 }}, {{ 171, 140, 140 }}, {{ 134, 61, 61 }}, {{ 141, 154, 154 }},
-    // CTX_SIG_COEFF_FLAG (81-124) — 28 luma + 16 chroma = 44 contexts
-    // Init values from HM ContextTables.h: I/P/B_SLICE_LUMA/CHROMA_SIGNIFICANCE_CONTEXT
-    // Note: HM layout differs from spec eq 9-55 formula — see LEARNINGS.md
-    // Luma (28 contexts: DC, 4x4[9], 8x8_diag[6], 8x8_nondiag+NxN[6], transform_skip[1])
+    // CTX_SIG_COEFF_FLAG — 27 luma + 15 chroma = 42 contexts (spec Table 9-29)
+    // Ref: libde265 contextmodel.cc:232 — 42 init values per initType, offset 27 for chroma
+    // Luma (27 contexts: 4x4[9], 8x8_diag[6], 8x8_nondiag[6], NxN[6])
     {{ 111, 155, 170 }}, {{ 111, 154, 154 }}, {{ 125, 139, 139 }}, {{ 110, 153, 153 }},
     {{ 110, 139, 139 }}, {{  94, 123, 123 }}, {{ 124, 123, 123 }}, {{ 108,  63,  63 }},
     {{ 124, 153, 124 }}, {{ 107, 166, 166 }}, {{ 125, 183, 183 }}, {{ 141, 140, 140 }},
     {{ 179, 136, 136 }}, {{ 153, 153, 153 }}, {{ 125, 154, 154 }}, {{ 107, 166, 166 }},
     {{ 125, 183, 183 }}, {{ 141, 140, 140 }}, {{ 179, 136, 136 }}, {{ 153, 153, 153 }},
     {{ 125, 154, 154 }}, {{ 107, 166, 166 }}, {{ 125, 183, 183 }}, {{ 141, 140, 140 }},
-    {{ 179, 136, 136 }}, {{ 153, 153, 153 }}, {{ 125, 154, 154 }}, {{ 141, 140, 140 }},
-    // Chroma (16 contexts: DC, 4x4[3], 8x8[3], NxN[1], ...)
+    {{ 179, 136, 136 }}, {{ 153, 153, 153 }}, {{ 125, 154, 154 }},
+    // Chroma (15 contexts)
     {{ 140, 170, 170 }}, {{ 139, 153, 153 }}, {{ 182, 123, 138 }}, {{ 182, 123, 138 }},
     {{ 152, 107, 122 }}, {{ 136, 121, 121 }}, {{ 152, 107, 122 }}, {{ 136, 121, 121 }},
     {{ 153, 167, 167 }}, {{ 136, 151, 151 }}, {{ 139, 183, 183 }}, {{ 111, 140, 140 }},
-    {{ 136, 151, 151 }}, {{ 139, 183, 183 }}, {{ 111, 140, 140 }}, {{ 111, 140, 140 }},
+    {{ 136, 151, 151 }}, {{ 139, 183, 183 }}, {{ 111, 140, 140 }},
     // CTX_COEFF_ABS_LEVEL_GREATER1 (125-148) — Table 9-30
     {{ 140, 154, 154 }}, {{ 92, 196, 196 }}, {{ 137, 196, 167 }}, {{ 138, 167, 167 }},
     {{ 140, 154, 154 }}, {{ 152, 152, 152 }}, {{ 138, 167, 167 }}, {{ 139, 182, 182 }},

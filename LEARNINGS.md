@@ -108,3 +108,50 @@ La spec §8.6.4.2 eq 8-315 definit la 1D transform comme `y[i] = sum_j transMatr
 ### Milestone atteint
 
 **oracle_i_64x64_qp22 = pixel-perfect** (jalon Phase 4). Progression pixels faux: 5608 → 4239 → 2674 → 2023 → **0**.
+
+## Session 2026-03-21c — Phase 5 spec audit + CABAC bypass fix + multi-CTU investigation
+
+### cabac_bypass_alignment_enabled_flag — RExt only (CRITICAL)
+
+Le commit `71f86ab` avait ajoute `cabac.align_bypass()` (ivlCurrRange=256) avant les coeff_sign_flag et coeff_abs_level_remaining de facon **inconditionnelle**. Or `cabac_bypass_alignment_enabled_flag` est un flag SPS RExt (§7.4.3.2.2), infere a 0 pour Main profile. Forcer ivlCurrRange=256 corrompait l'etat CABAC pour TOUS les bypass bins, causant un decodage de 52 minutes et des coefficients aberrants.
+
+**Fix**: conditionner `align_bypass()` sur `ctx.sps->cabac_bypass_alignment_enabled_flag`. Stocker le flag dans le SPS (il etait parse mais ignore).
+
+**Resultat**: oracle_i_64x64_qp22 pixel-perfect restaure.
+
+### TMVP collocated_from_l0_flag inversion (§8.5.3.2.9)
+
+Le code avait `colList = collocated_from_l0_flag ? 0 : 1` — inversé. La spec dit "with N being the value of collocated_from_l0_flag", donc `colList = collocated_from_l0_flag` directement.
+
+### AMVP rewrite (§8.5.3.2.7)
+
+Reecrit pour suivre la spec: tracking de `isScaledFlagLX`, scaling B-group seulement quand `isScaledFlagLX==0`, disponibilite §6.4.2 (z-scan + cross-CTU), check `LongTermRefPic` dans le pass scaling.
+
+### Multi-CTU I-frame mismatch — investigation exhaustive sans resolution
+
+**Symptome**: oracle_i_64x64_qp22 (1 CTU) pixel-perfect, mais p_qcif_10f I-frame (176x144, 9 CTUs) a 21593 pixels faux. Premier pixel faux a (160,0) dans CTU 2.
+
+**Audit spec-first effectue** (toutes sections conformes):
+- §7.3.8.1 slice_segment_data (boucle CTU)
+- §9.2.2 CABAC context propagation
+- §6.4.1 z-scan availability (cross-CTU)
+- §8.4.4.2.2 ref sample construction + substitution
+- §9.3.4.2.2 split_cu_flag context
+- §9.3.4.2.4 coded_sub_block_flag context
+- §9.3.4.2.5 sig_coeff_flag context (eq 9-40 a 9-55)
+- §7.3.8.8 transform_tree (split, cbf)
+- §7.3.8.10 transform_unit (chroma deferred)
+- §8.4.2 MPM derivation
+- §8.4.3 chroma mode derivation
+
+**Comparaison bin-par-bin avec HM**: 18322 decision bins identiques (val, range, offset), divergence au bin 18323. Le contexte ctx=90 (sig_coeff_flag ctxInc=8, 4x4 luma) a pStateIdx=62 (sature) chez nous vs pStateIdx ~31 chez HM. Cause: certains bins que nous assignons a ctx=90 sont assignes a un autre contexte dans HM, malgre des r/o identiques (les deux contextes ont le meme etat par coincidence).
+
+**Conclusion**: le bug est dans le mapping sig_coeff_flag pour les 4x4 TUs. La spec (eq 9-41 + ctxIdxMap + Table 9-50) et notre code sont conformes en apparence, mais HM utilise un mapping subtillement different. L'audit spec n'a pas pu le trouver car le spec et HM sont incoherents sur ce point (deja documente dans LEARNINGS Session 2025-03-20).
+
+**Decision**: consulter libde265 comme source de verite alternative pour identifier le mapping exact que les decodeurs conformes utilisent. Ce n'est pas du debug iteratif — c'est une consultation de reference d'implementation.
+
+### Bugs corriges cette session (3 bugs)
+
+11. **CABAC bypass alignment conditionnel** — `align_bypass()` inconditionnel → conditionnel sur `cabac_bypass_alignment_enabled_flag`
+12. **TMVP colList inversion** — `collocated_from_l0_flag ? 0 : 1` → `collocated_from_l0_flag`
+13. **AMVP rewrite §8.5.3.2.7** — isScaledFlagLX, §6.4.2 availability, LongTermRefPic check
