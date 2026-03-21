@@ -9,7 +9,7 @@ Etat d'avancement par phase et prochaines taches.
 | 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
-| 4 — Intra Prediction | **Prochaine** | — |
+| 4 — Intra Prediction | **En cours** | 4A fait, 4B-4D a valider, 4E-4F fait (toy tests) |
 | 5 — Inter Prediction | A faire | — |
 | 6 — Loop Filters | A faire | — |
 | 7 — High Profiles | A faire | — |
@@ -47,22 +47,45 @@ Etat d'avancement par phase et prochaines taches.
 - [x] 3.6 Parameter set management (ParameterSetManager, stockage par ID, activation via slice)
 - [x] 3.7 CLI `--dump-headers` (VPS/SPS/PPS/SliceHeader dump complet)
 
-## Phase 4 — Après Phase 3
+## Phase 4 — En cours (subdivisee en 6 sous-phases)
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase4` pour generer les bitstreams edge-case (PCM, transform skip, scaling lists, QP extremes, constrained intra, dependent slices)
-- [ ] 4.1 CABAC engine (decode_decision, bypass, terminate)
-- [ ] 4.2 CABAC context init (toutes les tables)
-- [ ] 4.3 Binarization (FL, TU, TR, EGk)
-- [ ] 4.4a slice_segment_data() boucle avec end_of_slice_segment_flag
-- [ ] 4.4b Coding tree (quad-tree split)
-- [ ] 4.5 Intra mode parsing (MPM)
-- [ ] 4.6 Transform tree + residual_coding (sig_coeff_flag, cRiceParam)
-- [ ] 4.7 Dequantization (QP derivation, chroma mapping, scaling lists)
-- [ ] 4.8 Transform inverse (DCT/DST, clipping inter-passe, transform skip)
-- [ ] 4.9 Intra prediction (Planar, DC, Angular + transposition modes 2-17)
-- [ ] 4.10 Reconstruction (pred + residual, clipping)
-- [ ] 4.10b PCM mode (byte alignment, CABAC reset)
-- [ ] 4.11 SAO parsing (stub)
+Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
+
+### 4A — CABAC Engine (FAIT)
+- [x] Arithmetic decoder (decode_decision, bypass, terminate)
+- [x] Context initialization (155 contextes, I/P/B, cabac_init_flag)
+- [x] 7 tests unitaires passent
+- [x] Init values verifiees contre HM
+
+### 4B — Coding Tree Structure (A VALIDER) ← **priorite 1**
+- [x] coding_quadtree, coding_unit, prediction_unit, transform_tree implementes
+- [x] PCM mode, SAO parsing stub, dependent slices
+- [ ] **BUG** : 3 bins manquants pour CU 8x8 — probable split_transform_flag ou cbf
+- [ ] Trace comparative syntax elements vs HM
+- [ ] Test : sequence de SE identique a HM pour 500 bins
+
+### 4C — Residual Coding Contexts (A VALIDER) ← **priorite 2**
+- [x] derive_sig_coeff_flag_ctx implemente (layout HM)
+- [x] 4 bugs de contexte trouves et fixes (chroma offsets, firstSigCtx)
+- [ ] Test unitaire : 30+ cas derive_sig_coeff_flag_ctx vs valeurs HM
+- [ ] Test unitaire : greater1/greater2/last_sig/coded_sub_block contexts
+
+### 4D — Coefficient Parsing (A VALIDER)
+- [x] residual_coding implemente (scan, levels, sign, cRiceParam)
+- [ ] Trace coefficients vs HM : premiere TU differente
+- [ ] Test : coefficients identiques a HM pour toutes les TU de i_64x64_qp22
+
+### 4E — Transform + Dequant (FAIT)
+- [x] DCT/DST inverse avec clipping inter-passe
+- [x] Dequant avec scaling lists
+- [x] Transform skip
+- [ ] Tests unitaires isoles (DCT round-trip, clipping, QP chroma)
+
+### 4F — Intra Prediction + Reconstruction (FAIT)
+- [x] 35 modes intra (Planar, DC, Angular 2-34)
+- [x] Reference samples, filtrage, strong smoothing
+- [x] 3 toy tests pixel-perfect
+- [ ] i_64x64_qp22 pixel-perfect (bloque par 4B/4C/4D)
 
 ## Phase 5 — Prealables conformance
 
