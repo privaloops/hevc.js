@@ -43,6 +43,35 @@ uint32_t BitstreamReader::read_bits(int n) {
     return result;
 }
 
+// Same as read_bits but returns 0 past end instead of throwing.
+// Used by CABAC renormalization which may read past the last byte.
+uint32_t BitstreamReader::read_bits_safe(int n) {
+    assert(n >= 0 && n <= 32);
+    if (n == 0) return 0;
+
+    if (cache_bits_ < n) {
+        refill();
+    }
+
+    if (cache_bits_ < n) {
+        // Past end — return zero-padded
+        uint32_t result = 0;
+        if (cache_bits_ > 0) {
+            result = static_cast<uint32_t>(cache_ >> (64 - n));
+        }
+        cache_ = 0;
+        bit_pos_ += n;
+        cache_bits_ = 0;
+        return result;
+    }
+
+    uint32_t result = static_cast<uint32_t>(cache_ >> (64 - n));
+    cache_ <<= n;
+    cache_bits_ -= n;
+    bit_pos_ += n;
+    return result;
+}
+
 int32_t BitstreamReader::read_i(int n) {
     uint32_t val = read_bits(n);
     // Sign extension for 2's complement
