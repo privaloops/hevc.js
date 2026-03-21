@@ -334,7 +334,11 @@ static void predict_angular(const int16_t* refTop, const int16_t* refLeft,
     // Build extended main reference for negative angles
     if (angle < 0) {
         int invA = invAngle[intra_mode];
-        int numNeg = -((nTbS * angle) >> 5); // number of negative positions needed
+        // §8.4.4.2.6 eq 8-54/8-62: range is x = -1 .. floor((nTbS * angle) / 32)
+        // C++ right-shift of negative values truncates toward zero, but the spec
+        // requires floor division. Use explicit floor: -((-n + 31) >> 5) for n < 0
+        int nTimesAngle = nTbS * angle; // negative
+        int numNeg = (-nTimesAngle + 31) >> 5; // ceil(|nTimesAngle| / 32) = floor division magnitude
 
         // Copy main reference to extended array (offset so index 0 = refMain[0])
         int offset = numNeg;

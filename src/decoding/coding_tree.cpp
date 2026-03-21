@@ -357,10 +357,17 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
     HEVC_LOG(TREE, "slice_segment_data: addr=%d type=%d QP=%d",
              sh.slice_segment_address, static_cast<int>(sh.slice_type), sh.SliceQpY);
 
+    // WPP context storage: save CABAC contexts after the 2nd CTU of each row
+    // §9.2.2: at the start of a new CTU row (WPP), contexts are restored from
+    // the saved state after the 2nd CTU of the previous row
+    CabacContext wppSavedContexts[NUM_CABAC_CONTEXTS];
+    bool wppContextsAvailable = false;
+
     bool end_of_slice = false;
     while (!end_of_slice) {
         int xCtb = (CtbAddrInRs % sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
         int yCtb = (CtbAddrInRs / sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
+        int ctuCol = CtbAddrInRs % sps.PicWidthInCtbsY;
 
         size_t bits_before = bs.bits_read();
         HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu bins=%d",
@@ -370,6 +377,12 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
         HEVC_LOG(TREE, "CTU addr_rs=%d consumed %zu bits, remaining=%zu",
                  CtbAddrInRs, bs.bits_read() - bits_before, bs.bits_remaining());
 
+        // §9.2.2: WPP — save contexts after the 2nd CTU of each row (col index 1)
+        if (pps.entropy_coding_sync_enabled_flag && ctuCol == 1) {
+            cabac.save_contexts(wppSavedContexts);
+            wppContextsAvailable = true;
+        }
+
         end_of_slice = decode_end_of_slice_segment_flag(cabac);
 
         if (!end_of_slice) {
@@ -377,12 +390,33 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
             if (CtbAddrInTs >= sps.PicSizeInCtbsY) break;
             CtbAddrInRs = pps.CtbAddrTsToRs[CtbAddrInTs];
 
-            // Tile/WPP boundary: skip subset end bit + byte alignment
+            // Tile boundary: subset end + byte alignment + CABAC reinit
             if (pps.tiles_enabled_flag &&
                 pps.TileId[CtbAddrInTs] != pps.TileId[CtbAddrInTs - 1]) {
                 cabac.decode_terminate(); // end_of_subset_one_bit
                 bs.byte_alignment();
                 cabac.init_decoder(bs);
+            }
+
+            // WPP boundary (§9.3.4.3.6): at end of each CTU row, decode
+            // end_of_subset_one_bit + byte alignment + reinit CABAC + restore contexts
+            if (pps.entropy_coding_sync_enabled_flag) {
+                int prevRs = pps.CtbAddrTsToRs[CtbAddrInTs - 1];
+                int prevRow = prevRs / sps.PicWidthInCtbsY;
+                int curRow  = CtbAddrInRs / sps.PicWidthInCtbsY;
+                if (curRow != prevRow) {
+                    cabac.decode_terminate(); // end_of_subset_one_bit
+                    bs.byte_alignment();
+                    cabac.init_decoder(bs);
+                    // §9.2.2: restore contexts from 2nd CTU of previous row
+                    if (wppContextsAvailable) {
+                        cabac.load_contexts(wppSavedContexts);
+                    } else {
+                        // First row had < 2 CTUs: re-init from slice
+                        cabac.init_contexts(static_cast<int>(sh.slice_type),
+                                            sh.SliceQpY, sh.cabac_init_flag);
+                    }
+                }
             }
         }
     }
@@ -532,7 +566,7 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                  static_cast<int>(part_mode));
 
         if (pred_mode == PredMode::MODE_INTRA) {
-            // Check PCM
+            // Check PCM — §7.3.8.5
             bool is_pcm = false;
             if (part_mode == PartMode::PART_2Nx2N && sps.pcm_enabled_flag &&
                 log2CbSize >= sps.Log2MinIpcmCbSizeY &&
