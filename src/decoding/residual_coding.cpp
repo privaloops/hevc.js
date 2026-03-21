@@ -93,69 +93,79 @@ static int derive_scan_idx(int predModeIntra, bool modeDependent) {
 // This is the most complex context derivation in HEVC CABAC
 // ============================================================
 
-// §9.3.4.2.5 — Derivation of ctxInc for sig_coeff_flag
-// Luma follows spec formulas (eq 9-40 to 9-54) — verified 326 bins match HM.
-// Chroma follows HM layout (28 luma + 16 chroma) because spec eq 9-55 offset (27)
-// is inconsistent with Table 9-29 init values which are designed for HM mapping.
-// See LEARNINGS.md for details.
+// §9.3.4.2.5 — Derivation process of ctxInc for sig_coeff_flag
+// Transcription directe des eq 9-40 à 9-55 de la spec.
+// Note: eq 9-55 donne ctxInc = 27 + sigCtx pour chroma, mais les init values
+// Table 9-29 sont organisées avec 28 luma contexts (offset chroma = 28).
+// On utilise 28 (layout HM) pour matcher les init values. Voir LEARNINGS.md.
 static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
                                       int xC, int yC,
                                       int scanIdx,
                                       const int coded_sub_block_flag[],
-                                      int numSbPerSide) {
+                                      int numSbPerSide,
+                                      bool transformSkipOrBypass) {
+    // Table 9-50
     static const int ctxIdxMap[16] = {
         0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
     };
 
-    // HM-style context mapping (HM ContextTables.h):
-    //   significanceMapContextSetStart[LUMA]   = {4x4=0, 8x8=9, NxN=21, SINGLE=27}
-    //   significanceMapContextSetStart[CHROMA] = {4x4=0, 8x8=9, NxN=12, SINGLE=15}
-    //   notFirstGroupNeighbourhoodContextOffset: luma=3, chroma=0
-    //   nonDiagonalScan8x8ContextOffset: luma=6, chroma=0
-    // Chroma base offset: 28 (28 luma + 16 chroma contexts in flat array)
-    bool isLuma = (cIdx == 0);
-    int base = isLuma ? 0 : 28;
+    int sigCtx;
 
-    // DC (posX+posY==0): always context 0 relative to channel base
-    if (xC + yC == 0) return base;
+    // eq 9-40: transform_skip_context_enabled + (transform_skip || bypass)
+    if (transformSkipOrBypass) {
+        sigCtx = (cIdx == 0) ? 42 : 16;                          // eq 9-40
+    }
+    // eq 9-41: 4x4 TU
+    else if (log2TrafoSize == 2) {
+        sigCtx = ctxIdxMap[(yC << 2) + xC];                      // eq 9-41
+    }
+    // eq 9-42: DC position
+    else if (xC + yC == 0) {
+        sigCtx = 0;                                               // eq 9-42
+    }
+    // eq 9-43 to 9-53: non-4x4, non-DC
+    else {
+        int xS = xC >> 2;                                        // sub-block location
+        int yS = yC >> 2;
 
-    // 4x4: ctxIdxMap lookup (same for luma and chroma, firstSigCtx=0 for both)
-    if (log2TrafoSize == 2) return base + ctxIdxMap[(yC << 2) + xC];
+        int prevCsbf = 0;                                        // eq 9-43, 9-44
+        if (xS < numSbPerSide - 1)
+            prevCsbf += coded_sub_block_flag[yS * numSbPerSide + (xS + 1)];
+        if (yS < numSbPerSide - 1)
+            prevCsbf += coded_sub_block_flag[(yS + 1) * numSbPerSide + xS] << 1;
 
-    // Non-4x4 non-DC: prevCsbf-based offset
-    int xS = xC >> 2, yS = yC >> 2;
-    int prevCsbf = 0;
-    if (xS < numSbPerSide - 1)
-        prevCsbf += coded_sub_block_flag[yS * numSbPerSide + (xS + 1)];
-    if (yS < numSbPerSide - 1)
-        prevCsbf += coded_sub_block_flag[(yS + 1) * numSbPerSide + xS] << 1;
-    int xP = xC & 3, yP = yC & 3;
-    int cnt;
-    switch (prevCsbf) {
-        case 0:  cnt = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0; break;
-        case 1:  cnt = (yP == 0) ? 2 : (yP == 1) ? 1 : 0; break;
-        case 2:  cnt = (xP == 0) ? 2 : (xP == 1) ? 1 : 0; break;
-        default: cnt = 2; break;
+        int xP = xC & 3;                                        // inner sub-block location
+        int yP = yC & 3;
+
+        switch (prevCsbf) {                                      // eq 9-45 to 9-48
+            case 0:  sigCtx = (xP + yP == 0) ? 2 : (xP + yP < 3) ? 1 : 0; break;
+            case 1:  sigCtx = (yP == 0) ? 2 : (yP == 1) ? 1 : 0; break;
+            case 2:  sigCtx = (xP == 0) ? 2 : (xP == 1) ? 1 : 0; break;
+            default: sigCtx = 2; break;
+        }
+
+        if (cIdx == 0) {
+            if ((xS + yS) > 0)
+                sigCtx += 3;                                     // eq 9-49
+            if (log2TrafoSize == 3)
+                sigCtx += (scanIdx == 0) ? 9 : 15;              // eq 9-50
+            else
+                sigCtx += 21;                                    // eq 9-51
+        } else {
+            if (log2TrafoSize == 3)
+                sigCtx += 9;                                     // eq 9-52
+            else
+                sigCtx += 12;                                    // eq 9-53
+        }
     }
 
-    int notFirstGroupOff = isLuma ? 3 : 0;
-    bool notFirst = (xS + yS) > 0;
-    int offset = (notFirst ? notFirstGroupOff : 0) + cnt;
-
-    int firstSigCtx;
-    if (isLuma) {
-        if (log2TrafoSize == 3)
-            firstSigCtx = (scanIdx == 0) ? 9 : 15;
-        else
-            firstSigCtx = 21;
-    } else {
-        if (log2TrafoSize == 3)
-            firstSigCtx = 9;
-        else
-            firstSigCtx = 12;
-    }
-
-    return base + firstSigCtx + offset;
+    // eq 9-54, 9-55: ctxInc derivation
+    // Note: spec says 27 for chroma (eq 9-55) but Table 9-29 init values use 28.
+    // Using 28 to match init value layout. See LEARNINGS.md.
+    if (cIdx == 0)
+        return sigCtx;                                            // eq 9-54
+    else
+        return 28 + sigCtx;                                       // eq 9-55 (adjusted: 28 not 27)
 }
 
 // ============================================================
@@ -295,7 +305,7 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
                 (n > 0 || !inferSbDcSigCoeffFlag)) {
                 int sigCtx = derive_sig_coeff_flag_ctx(
                     cIdx, log2TrafoSize, xC, yC, scanIdx,
-                    coded_sub_block_flag, numSbPerSide);
+                    coded_sub_block_flag, numSbPerSide, false);
                 sig_coeff_flag[n] = decode_sig_coeff_flag(cabac, sigCtx);
                 if (sig_coeff_flag[n])
                     inferSbDcSigCoeffFlag = false;
