@@ -56,22 +56,43 @@ Principe : **un test par etape, on ne passe pas a la suivante tant que ca echoue
 
 5.0, 5.1, 5.3, 5.7 sont independants (parallelisables).
 
-## Lecons de la Phase 4 appliquees
+## Lecons de la Phase 4+5 appliquees
 
 1. **Audit spec AVANT le code** -- lire le PDF spec, transcrire directement
-2. **Comparaison HM bin-par-bin** pour le parsing CABAC
+2. **Lister TOUS les processus invoques** -- chaque section spec invoque d'autres processus (ex: §7.3.8.11 invoque §9.3.4.3.6). Les oublier = bug silencieux
 3. **Valider chaque couche en isolation** avant integration
 4. **Ne jamais "simplifier" la spec** -- transcrire les formules telles quelles
 5. **Audit systematique > debug incremental** -- auditer tout le code avant de tracer
+6. **Max 2 iterations de debug** -- apres 2 echecs, relire la spec au lieu d'ajouter des traces
+
+## Checklist spec par etape
+
+Avant de coder chaque etape, lire EN ENTIER ces sections du PDF :
+
+| Etape | Sections spec (lire dans le PDF, pas les resumes) |
+|-------|---------------------------------------------------|
+| **5.0** | §9.3.4.3.1-6 (CABAC engine COMPLET — init, decision, renorm, bypass, terminate, **alignment §9.3.4.3.6**) |
+| **5.1** | §8.3.1 (POC), §8.3.2 (RPS) |
+| **5.2** | §8.3.4 (RefPicList construction) |
+| **5.3** | §8.5.3.2.2-3 (merge spatial), §6.4.2 (PU availability) |
+| **5.4** | §8.5.3.2.8-9 (TMVP collocated MV), §8.5.3.2.12 (MV scaling) |
+| **5.5** | §8.5.3.2.4 (combined bi-pred), §8.5.3.2.5 (zero MV) |
+| **5.6** | §8.5.3.2.6-7 (AMVP), §7.3.8.6 (prediction_unit syntax) |
+| **5.7** | §8.5.3.3.3 (luma 8-tap interp, chroma 4-tap), §8.5.3.3.2 (chroma MV derivation) |
+| **5.8** | §8.5.3.3.4 (weighted prediction — default + explicit) |
+| **5.9** | §7.3.8.1 (slice_segment_data — boucle CTU + end_of_slice), §9.2.2 (WPP context) |
+| **5.10** | §8.3.5 (collocated picture, NoBackwardPredFlag) |
 
 ## Etat actuel du code
 
-Le code Phase 5 existe deja (5A-5D implementes) mais contient des bugs :
-- `inter_prediction.cpp` (662 lignes) : merge, AMVP, TMVP, MC
-- `interpolation.cpp` (303 lignes) : filtres 8-tap/4-tap
-- `dpb.cpp` (437 lignes) : DPB, POC, RPS, ref lists
-- Bug connu : desync `sig_coeff_flag` context au bin 1402 de CTU 2 (non-64-aligned)
-- SAO parsing : 2 bugs fixes (cIdx==2 type, sao_offset_sign conditionnel)
+Le code Phase 5 existe deja (5A-5D implementes). Bugs fixes cette session :
+- **§9.3.4.3.6** : alignment bypass (`ivlCurrRange = 256`) manquant avant `coeff_sign_flag` et `coeff_abs_level_remaining` — causait desync bypass bins des le 14e bin
+- **WPP** : `entropy_coding_sync` boundary handling manquant (end_of_subset + byte align + context save/restore)
+- **numNeg** : floor division pour l'extension negative des references angulaires
 
-Le travail de chaque etape est donc : **auditer le code existant contre la spec,
-corriger les bugs, ajouter des tests de validation**.
+Fichiers source :
+- `inter_prediction.cpp` (~660 lignes) : merge, AMVP, TMVP, MC
+- `interpolation.cpp` (~300 lignes) : filtres 8-tap/4-tap
+- `dpb.cpp` (~440 lignes) : DPB, POC, RPS, ref lists
+
+Le travail restant : **auditer le code existant contre la spec (avec la checklist ci-dessus), corriger les bugs, valider par oracle test**.
