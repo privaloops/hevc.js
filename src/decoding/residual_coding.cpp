@@ -106,27 +106,20 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
         0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8
     };
 
-    // Unified HM-style context mapping for both luma and chroma
-    // HM ContextTables.h context set starts:
-    //   Luma:   {SINGLE=0, 4x4=9, 8x8=21, NxN=27}  (28 contexts, indices 0-27)
-    //   Chroma: {SINGLE=0, 4x4=9, 8x8=12, NxN=15}  (16 contexts, indices 0-15)
-    // Chroma base offset: 28 (separate context models in flat array)
-    // notFirstGroupNeighbourhoodContextOffset: luma=3, chroma=0
-    // nonDiagonalScan8x8ContextOffset: luma=6, chroma=0
+    // HM-style context mapping (HM ContextTables.h):
+    //   significanceMapContextSetStart[LUMA]   = {4x4=0, 8x8=9, NxN=21, SINGLE=27}
+    //   significanceMapContextSetStart[CHROMA] = {4x4=0, 8x8=9, NxN=12, SINGLE=15}
+    //   notFirstGroupNeighbourhoodContextOffset: luma=3, chroma=0
+    //   nonDiagonalScan8x8ContextOffset: luma=6, chroma=0
+    // Chroma base offset: 28 (28 luma + 16 chroma contexts in flat array)
     bool isLuma = (cIdx == 0);
     int base = isLuma ? 0 : 28;
 
-    if (isLuma) {
-        // Luma 4x4: spec formula (ctxIdxMap includes DC at index 0)
-        if (log2TrafoSize == 2) return ctxIdxMap[(yC << 2) + xC];
-        // Luma non-4x4 DC
-        if (xC + yC == 0) return 0;
-    } else {
-        // Chroma: DC always context 0 relative to chroma base
-        if (xC + yC == 0) return base;
-        // Chroma 4x4: HM firstSigCtx=9
-        if (log2TrafoSize == 2) return base + 9 + ctxIdxMap[(yC << 2) + xC];
-    }
+    // DC (posX+posY==0): always context 0 relative to channel base
+    if (xC + yC == 0) return base;
+
+    // 4x4: ctxIdxMap lookup (same for luma and chroma, firstSigCtx=0 for both)
+    if (log2TrafoSize == 2) return base + ctxIdxMap[(yC << 2) + xC];
 
     // Non-4x4 non-DC: prevCsbf-based offset
     int xS = xC >> 2, yS = yC >> 2;
@@ -151,11 +144,14 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
     int firstSigCtx;
     if (isLuma) {
         if (log2TrafoSize == 3)
-            firstSigCtx = (scanIdx == 0) ? 21 : 27;
+            firstSigCtx = (scanIdx == 0) ? 9 : 15;
         else
-            firstSigCtx = 21; // spec +21 for luma NxN (toy tests verified)
+            firstSigCtx = 21;
     } else {
-        firstSigCtx = (log2TrafoSize == 3) ? 12 : 15;
+        if (log2TrafoSize == 3)
+            firstSigCtx = 9;
+        else
+            firstSigCtx = 12;
     }
 
     return base + firstSigCtx + offset;
