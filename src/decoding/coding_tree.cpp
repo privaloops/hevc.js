@@ -688,15 +688,20 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
                 (intraSplitFlag && trafoDepth == 0);
     }
 
-    // Chroma CBF (only when log2TrafoSize > 2 for 4:2:0)
-    bool cbf_cb = false, cbf_cr = false;
+    // §7.3.8.8: Chroma CBF parsed when log2TrafoSize > 2 (4:2:0) or ChromaArrayType == 3
+    // When not parsed, inherit parent values for deferred chroma (§7.3.8.10 cbfDepthC)
+    bool cbf_cb = cbf_cb_parent, cbf_cr = cbf_cr_parent;
     if ((log2TrafoSize > 2 && sps.ChromaArrayType != 0) ||
         sps.ChromaArrayType == 3) {
         if (trafoDepth == 0 || cbf_cb_parent) {
             cbf_cb = decode_cbf_chroma(cabac, trafoDepth);
+        } else {
+            cbf_cb = false;
         }
         if (trafoDepth == 0 || cbf_cr_parent) {
             cbf_cr = decode_cbf_chroma(cabac, trafoDepth);
+        } else {
+            cbf_cr = false;
         }
     }
 
