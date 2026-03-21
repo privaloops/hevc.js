@@ -26,6 +26,8 @@ struct CUInfo {
     bool cu_transquant_bypass = false;
 };
 
+class DPB;  // forward declaration
+
 // Decoding context passed through the coding tree
 struct DecodingContext {
     const SPS* sps = nullptr;
@@ -33,6 +35,7 @@ struct DecodingContext {
     const SliceHeader* sh = nullptr;
     CabacEngine* cabac = nullptr;
     Picture* pic = nullptr;
+    DPB* dpb = nullptr;  // Phase 5: access to ref pictures
 
     // CU info grid: indexed by min-CB position (x >> log2MinCbSize, y >> log2MinCbSize)
     CUInfo* cu_info = nullptr;    // flat array [PicWidthInMinCbs * PicHeightInMinCbs]

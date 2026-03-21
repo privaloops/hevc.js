@@ -10,6 +10,7 @@
 #include "common/picture.h"
 #include "syntax/parameter_sets.h"
 #include "decoding/coding_tree.h"
+#include "decoding/dpb.h"
 
 namespace hevc {
 
@@ -27,15 +28,20 @@ public:
     DecodeStatus decode(const uint8_t* data, size_t size);
 
     // Get decoded pictures (in output order)
-    const std::vector<Picture>& pictures() const { return pictures_; }
-    std::vector<Picture>& pictures() { return pictures_; }
+    std::vector<Picture*> output_pictures();
+
+    // Get DPB (for testing)
+    const DPB& dpb() const { return dpb_; }
 
 private:
     DecodeStatus decode_picture(const std::vector<NalUnit>& nals,
                                  size_t first_vcl_idx);
 
     ParameterSetManager ps_mgr_;
-    std::vector<Picture> pictures_;
+    DPB dpb_;
+
+    // Output pictures (accumulated across all decoded pictures)
+    std::vector<Picture*> output_pics_;
 
     // Decoding context allocations (per-picture)
     std::vector<CUInfo> cu_info_buf_;

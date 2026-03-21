@@ -70,19 +70,35 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
              sps->pic_width_in_luma_samples, sps->pic_height_in_luma_samples,
              static_cast<int>(sh.slice_type), sh.SliceQpY);
 
-    // Allocate picture
-    Picture pic;
+    // §8.3.1 — POC derivation
+    int32_t poc = dpb_.derive_poc(sh, *sps, nal.header.nal_unit_type,
+                                   nal.header.TemporalId());
+
+    // Allocate picture in DPB
     ChromaFormat fmt = static_cast<ChromaFormat>(sps->chroma_format_idc);
-    pic.allocate(static_cast<int>(sps->pic_width_in_luma_samples),
-                 static_cast<int>(sps->pic_height_in_luma_samples),
-                 fmt, sps->BitDepthY, sps->BitDepthC);
+    Picture* pic = dpb_.alloc_picture(
+        static_cast<int>(sps->pic_width_in_luma_samples),
+        static_cast<int>(sps->pic_height_in_luma_samples),
+        fmt, sps->BitDepthY, sps->BitDepthC);
+    pic->poc = poc;
+    pic->needed_for_output = sh.pic_output_flag;
 
     // Set conformance window
     if (sps->conformance_window_flag) {
-        pic.conf_win_left = sps->conf_win_left_offset * sps->SubWidthC;
-        pic.conf_win_right = sps->conf_win_right_offset * sps->SubWidthC;
-        pic.conf_win_top = sps->conf_win_top_offset * sps->SubHeightC;
-        pic.conf_win_bottom = sps->conf_win_bottom_offset * sps->SubHeightC;
+        pic->conf_win_left = sps->conf_win_left_offset * sps->SubWidthC;
+        pic->conf_win_right = sps->conf_win_right_offset * sps->SubWidthC;
+        pic->conf_win_top = sps->conf_win_top_offset * sps->SubHeightC;
+        pic->conf_win_bottom = sps->conf_win_bottom_offset * sps->SubHeightC;
+    }
+
+    // §8.3.2 — RPS derivation and picture marking
+    dpb_.derive_rps(sh, *sps, nal.header.nal_unit_type, poc);
+
+    // §8.3.4 — Reference picture list construction (P and B slices)
+    if (sh.slice_type != SliceType::I) {
+        dpb_.construct_ref_pic_lists(sh, *sps, *pps);
+        // §8.3.5 — Collocated picture derivation
+        dpb_.derive_colpic(sh);
     }
 
     // Allocate CU info grid (min-CB granularity)
@@ -106,7 +122,8 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.pps = pps;
     ctx.sh = &sh;
     ctx.cabac = &cabac;
-    ctx.pic = &pic;
+    ctx.pic = pic;
+    ctx.dpb = &dpb_;
     ctx.cu_info = cu_info_buf_.data();
     ctx.cu_info_stride = cuGridW;
     ctx.intra_pred_mode_y = intra_mode_buf_.data();
@@ -137,10 +154,21 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         return DecodeStatus::ERROR;
     }
 
-    // Store decoded picture
-    pictures_.push_back(std::move(pic));
+    // §8.1 step 4: mark current picture as short-term reference
+    dpb_.mark_current_as_short_term_ref();
 
     return DecodeStatus::OK;
+}
+
+std::vector<Picture*> Decoder::output_pictures() {
+    // Collect all pictures from the DPB, return in POC order
+    std::vector<Picture*> out;
+    for (auto& pic : dpb_.pictures()) {
+        out.push_back(pic.get());
+    }
+    std::sort(out.begin(), out.end(),
+              [](const Picture* a, const Picture* b) { return a->poc < b->poc; });
+    return out;
 }
 
 } // namespace hevc

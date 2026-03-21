@@ -41,6 +41,7 @@ add_library(hevc-decode-lib
     src/decoding/residual_coding.cpp
     src/decoding/transform.cpp
     src/decoding/intra_prediction.cpp
+    src/decoding/dpb.cpp
     src/decoding/decoder.cpp
 )
 
