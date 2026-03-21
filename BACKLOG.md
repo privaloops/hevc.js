@@ -9,7 +9,7 @@ Etat d'avancement par phase et prochaines taches.
 | 1 — Infrastructure | **Terminee** | CMake, BitstreamReader, types, tests, oracle script, Picture, debug logging, CI GitHub Actions, bitstreams real-world. |
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
-| 4 — Intra Prediction | **En cours** | 4A fait, 4B-4D a valider, 4E-4F fait (toy tests) |
+| 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | A faire | — |
 | 6 — Loop Filters | A faire | — |
 | 7 — High Profiles | A faire | — |
@@ -69,13 +69,13 @@ Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 - [x] Transform skip — bug dormant (shift 7 au lieu de 5, non utilise dans Main profile)
 - [ ] Tests unitaires isoles (DCT round-trip, clipping, QP chroma)
 
-### 4F — Intra Prediction + Reconstruction (EN COURS)
+### 4F — Intra Prediction + Reconstruction (FAIT)
 - [x] 35 modes intra (Planar, DC, Angular 2-34)
 - [x] Reference samples, filtrage, strong smoothing
 - [x] 5 bugs intra fixes (invAngle, corner filter, chroma ref filter, DC chroma, angular chroma)
 - [x] 3 toy tests pixel-perfect
-- [ ] **BUG RESTANT** : 2023 pixels luma faux a x+y>=60, source pixel (60,0) dans CU NxN (56,0) PU mode 27. Probleme probable dans `build_reference_samples()` / `is_reconstructed()` z-scan availability
-- [ ] i_64x64_qp22 pixel-perfect
+- [x] DST inverse fix : matrice forward (M) au lieu de la transposee (M^T) — spec eq 8-315 utilise la matrice forward mais l'inverse 2D necessite M^T
+- [x] **i_64x64_qp22 pixel-perfect** (jalon Phase 4)
 
 ## Phase 5 — Apres Phase 4 (subdivisee en 4 sous-phases)
 

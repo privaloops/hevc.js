@@ -88,3 +88,23 @@ Le debug bin-par-bin a trouvé 3 bugs en 1h. L'audit systématique (3 agents par
 7. **invAngle projection** — `i*invA` au lieu de `(-i)*invA` (spec eq 8-54)
 8. **Corner sample filter** — p[-1][-1] non cross-filtré (spec eq 8-41)
 9. **Chroma filtering** — ref filter, DC filter, angular filter appliqués au chroma (spec dit cIdx==0)
+
+## Session 2026-03-21b — Phase 4 DST inverse fix (pixel-perfect!)
+
+### DST-VII inverse uses M^T, not M (CRITICAL)
+
+La spec §8.6.4.2 eq 8-315 definit la 1D transform comme `y[i] = sum_j transMatrix[i][j] * x[j]`. La matrice `transMatrix` est la matrice DST-VII **forward** (valeurs: {29,55,74,84}, {74,74,0,-74}, ...). Pour l'inverse 2D, il faut utiliser la **transposee** M^T car DST-VII n'est PAS symetrique (contrairement a DCT-II qui utilise un butterfly symetrique).
+
+**Evidence**: Coefficients dequantises identiques entre HM et nous, mais residus completement differents. HM's `fastInverseDst` utilise `c[row] * M[row][column]` (= M^T · x), pas `M[i][k] * c[k]` (= M · x). La verification numerique confirme: M^T donne le bon resultat (match HM), M donne un resultat faux.
+
+**Pourquoi DCT n'a pas ce probleme**: Les fonctions `idct4/8/16/32` utilisent un butterfly decomposition qui est intrinsequement symetrique (le butterfly pour DCT-II est auto-transposant). Seul DST-VII (4x4 luma intra) utilise une multiplication matricielle explicite, et c'est la que l'erreur se produit.
+
+**Regle**: Quand la spec donne une matrice de transform, verifier si c'est la matrice forward ou inverse. Pour DST-VII, la spec donne la forward → l'inverse est la transposee. Pour DCT, le butterfly est auto-transposant.
+
+### Bug found and fixed session 2026-03-21b (1 bug)
+
+10. **DST inverse matrix** — utilisait la matrice forward M au lieu de M^T (spec eq 8-315 + HM fastInverseDst). Causait 2023 pixels luma faux dans i_64x64_qp22. Fix: transposer la matrice dans `idst4()`.
+
+### Milestone atteint
+
+**oracle_i_64x64_qp22 = pixel-perfect** (jalon Phase 4). Progression pixels faux: 5608 → 4239 → 2674 → 2023 → **0**.
