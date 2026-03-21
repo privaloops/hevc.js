@@ -241,4 +241,89 @@ int decode_coeff_abs_level_remaining(CabacEngine& cabac, int cRiceParam) {
     }
 }
 
+// ============================================================
+// Phase 5 — Inter prediction syntax elements
+// ============================================================
+
+// §9.3.3.7 — inter_pred_idc: spec Table 9-36
+// 0=PRED_L0, 1=PRED_L1, 2=PRED_BI
+int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctbLog2Size) {
+    // §9.3.4.2.3: ctxInc = (nPbW + nPbH != (1 << ctbLog2Size)) ? ctxDepth : 4
+    // For simplicity: if PU is full CTB size → ctxInc=4, else ctxInc depends on CU depth
+    int ctxInc = (nPbW + nPbH == (1 << ctbLog2Size)) ? 4 : 0; // simplified
+    int bin0 = cabac.decode_decision(CTX_INTER_PRED_IDC + ctxInc);
+    if (bin0 == 0) return 0; // PRED_L0
+    if (nPbW + nPbH == 12) return 2; // PRED_BI for smallest PU
+    int bin1 = cabac.decode_decision(CTX_INTER_PRED_IDC + 4);
+    return bin1 ? 2 : 1; // PRED_BI or PRED_L1
+}
+
+// §9.3.3.5 — ref_idx: TU binarization, max=numRefIdxActive
+int decode_ref_idx(CabacEngine& cabac, int numRefIdxActive) {
+    if (numRefIdxActive == 0) return 0;
+    int bin0 = cabac.decode_decision(CTX_REF_IDX + 0);
+    if (bin0 == 0) return 0;
+    int idx = 1;
+    if (numRefIdxActive > 1) {
+        int bin1 = cabac.decode_decision(CTX_REF_IDX + 1);
+        if (bin1 == 0) return 1;
+        idx = 2;
+        // Remaining bins: bypass (TU)
+        for (int i = 2; i < numRefIdxActive; i++) {
+            if (cabac.decode_bypass() == 0) break;
+            idx++;
+        }
+    }
+    return idx;
+}
+
+// §7.3.8.10 — mvd_coding: abs_mvd_greater0, abs_mvd_greater1, abs_mvd_minus2, sign
+MV decode_mvd(CabacEngine& cabac) {
+    // §9.3.3.9: Two components (horizontal, vertical)
+    MV mvd = {};
+
+    // Step 1: abs_mvd_greater0_flag for both components
+    int g0_h = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+    int g0_v = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+
+    // Step 2: abs_mvd_greater1_flag (only if greater0 is 1)
+    int g1_h = 0, g1_v = 0;
+    if (g0_h) g1_h = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+    if (g0_v) g1_v = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+
+    // Step 3: abs_mvd_minus2 (bypass, EG1) — only if greater1 is 1
+    int abs_h = 0, abs_v = 0;
+    if (g0_h) {
+        abs_h = g1_h + 1;
+        if (g1_h) {
+            // EG1 bypass: read prefix (unary), then suffix
+            int prefix = 0;
+            while (cabac.decode_bypass()) prefix++;
+            int suffix = (prefix > 0) ? cabac.decode_bypass_bins(prefix) : 0;
+            abs_h += (1 << prefix) - 1 + suffix;
+        }
+    }
+    if (g0_v) {
+        abs_v = g1_v + 1;
+        if (g1_v) {
+            int prefix = 0;
+            while (cabac.decode_bypass()) prefix++;
+            int suffix = (prefix > 0) ? cabac.decode_bypass_bins(prefix) : 0;
+            abs_v += (1 << prefix) - 1 + suffix;
+        }
+    }
+
+    // Step 4: sign flags (bypass)
+    if (abs_h) {
+        int sign = cabac.decode_bypass();
+        mvd.x = static_cast<int16_t>(sign ? -abs_h : abs_h);
+    }
+    if (abs_v) {
+        int sign = cabac.decode_bypass();
+        mvd.y = static_cast<int16_t>(sign ? -abs_v : abs_v);
+    }
+
+    return mvd;
+}
+
 } // namespace hevc

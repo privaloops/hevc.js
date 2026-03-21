@@ -12,6 +12,7 @@
 #include "syntax/pps.h"
 #include "syntax/slice_header.h"
 #include "decoding/cabac.h"
+#include "decoding/inter_prediction.h"
 
 namespace hevc {
 
@@ -24,6 +25,7 @@ struct CUInfo {
     int qp_y = 26;
     bool is_pcm = false;
     bool cu_transquant_bypass = false;
+    bool merge_flag = false;  // Phase 5: for rqt_root_cbf condition
 };
 
 class DPB;  // forward declaration
@@ -51,6 +53,10 @@ struct DecodingContext {
     int* intra_pred_mode_y = nullptr;
     int* intra_pred_mode_c = nullptr;
     int intra_pred_mode_stride = 0;
+
+    // Inter: per-PU motion info at min-PU (4x4) granularity
+    PUMotionInfo* motion_info = nullptr;
+    int motion_info_stride = 0;  // = pic_width / MinTbSizeY
 
     // Helper: get CU info at luma sample position
     CUInfo& cu_at(int x, int y) {

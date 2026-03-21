@@ -133,7 +133,8 @@ enum CabacCtxOffset {
     CTX_SIG_COEFF_FLAG          = 82,   // 44 contexts (shared luma/chroma per §9-54/9-55)
     CTX_COEFF_ABS_LEVEL_GREATER1 = 126, // 24 contexts
     CTX_COEFF_ABS_LEVEL_GREATER2 = 150, // 6 contexts
-    NUM_CABAC_CONTEXTS          = 156,
+    CTX_RQT_ROOT_CBF             = 156, // 1 context — Table 9-14
+    NUM_CABAC_CONTEXTS           = 157,
 };
 
 // All init values packed: [ctxOffset][3] where columns are I/P/B
@@ -226,6 +227,8 @@ static const ContextInitEntry cabacInitValues[NUM_CABAC_CONTEXTS] = {
     // CTX_COEFF_ABS_LEVEL_GREATER2 (149-154) — Table 9-31
     {{ 138, 107, 107 }}, {{ 153, 167, 167 }}, {{ 136, 91, 91 }}, {{ 167, 122, 107 }},
     {{ 152, 107, 107 }}, {{ 152, 167, 167 }},
+    // CTX_RQT_ROOT_CBF (156) — Table 9-14
+    {{ 79, 79, 79 }},
 };
 
 // Scan order tables — spec §6.5.3

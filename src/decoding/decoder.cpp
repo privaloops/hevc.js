@@ -115,6 +115,13 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     chroma_mode_buf_.resize(modeGridW * modeGridH);
     std::fill(chroma_mode_buf_.begin(), chroma_mode_buf_.end(), 0); // Planar default
 
+    // Motion info grid at min-PU (4x4) granularity for inter MV storage
+    motion_info_buf_.resize(modeGridW * modeGridH);
+    std::fill(motion_info_buf_.begin(), motion_info_buf_.end(), PUMotionInfo{});
+    // Also allocate compact motion info for TMVP (stored in Picture after decoding)
+    pic_motion_buf_.resize(modeGridW * modeGridH);
+    std::fill(pic_motion_buf_.begin(), pic_motion_buf_.end(), Picture::PUMotionInfoCompact{});
+
     // Setup decoding context
     CabacEngine cabac;
     DecodingContext ctx;
@@ -129,6 +136,8 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.intra_pred_mode_y = intra_mode_buf_.data();
     ctx.intra_pred_mode_c = chroma_mode_buf_.data();
     ctx.intra_pred_mode_stride = modeGridW;
+    ctx.motion_info = motion_info_buf_.data();
+    ctx.motion_info_stride = modeGridW;
 
     // Create bitstream reader for slice data (RBSP already extracted by NalParser)
     BitstreamReader bs(nal.rbsp.data(), nal.rbsp.size());
@@ -152,6 +161,29 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     if (!decode_slice_segment_data(ctx, bs)) {
         fprintf(stderr, "Error: failed to decode slice data\n");
         return DecodeStatus::ERROR;
+    }
+
+    // Store motion info in the Picture for TMVP access by future frames
+    pic->motion_info = pic_motion_buf_.data();
+    pic->motion_info_stride = modeGridW;
+    for (int i = 0; i < modeGridW * modeGridH; i++) {
+        auto& src = motion_info_buf_[i];
+        auto& dst = pic_motion_buf_[i];
+        dst.mv_x[0] = src.mv[0].x; dst.mv_y[0] = src.mv[0].y;
+        dst.mv_x[1] = src.mv[1].x; dst.mv_y[1] = src.mv[1].y;
+        dst.ref_idx[0] = src.ref_idx[0]; dst.ref_idx[1] = src.ref_idx[1];
+        dst.pred_flag[0] = src.pred_flag[0]; dst.pred_flag[1] = src.pred_flag[1];
+    }
+    // Store ref POC lists for TMVP MV scaling
+    pic->ref_poc[0].clear();
+    pic->ref_poc[1].clear();
+    for (int i = 0; i < dpb_.num_ref_list0(); i++) {
+        auto* ref = dpb_.ref_pic_list0(i);
+        pic->ref_poc[0].push_back(ref ? ref->poc : 0);
+    }
+    for (int i = 0; i < dpb_.num_ref_list1(); i++) {
+        auto* ref = dpb_.ref_pic_list1(i);
+        pic->ref_poc[1].push_back(ref ? ref->poc : 0);
     }
 
     // §8.1 step 4: mark current picture as short-term reference
