@@ -41,6 +41,10 @@ public:
     // Multi-bin bypass decoding (convenience)
     int decode_bypass_bins(int numBins);
 
+    // §9.3.4.3.6: Alignment prior to bypass decoding of coeff_sign_flag
+    // and coeff_abs_level_remaining. Sets ivlCurrRange to 256.
+    void align_bypass() { ivlCurrRange_ = 256; }
+
     // Context access
     CabacContext& context(int ctxIdx) { return contexts_[ctxIdx]; }
     const CabacContext& context(int ctxIdx) const { return contexts_[ctxIdx]; }
