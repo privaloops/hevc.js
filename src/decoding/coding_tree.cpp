@@ -788,6 +788,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
         perform_intra_prediction(ctx, x0, y0, log2TrafoSize, 0, intra_mode,
                                  pred_samples);
 
+
         // Reconstruct
         reconstruct_block(ctx, x0, y0, log2TrafoSize, 0, pred_samples, residual);
 

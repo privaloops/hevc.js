@@ -79,7 +79,6 @@ int CabacEngine::decode_decision(int ctxIdx) {
     }
 
     renormalize();
-
     bin_count_++;
     return binVal;
 }

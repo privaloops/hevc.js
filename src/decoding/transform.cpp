@@ -27,10 +27,13 @@ static void idst4(const int16_t* src, int16_t* dst, int shift, int line) {
         int c2 = src[2 * line + j];
         int c3 = src[3 * line + j];
 
-        int s0 = 29 * c0 + 55 * c1 + 74 * c2 + 84 * c3;
-        int s1 = 74 * c0 + 74 * c1 +  0 * c2 - 74 * c3;
-        int s2 = 84 * c0 - 29 * c1 - 74 * c2 + 55 * c3;
-        int s3 = 55 * c0 - 84 * c1 + 74 * c2 - 29 * c3;
+        // DST-VII inverse uses M^T (columns of forward matrix as rows)
+        // Forward matrix rows: {29,55,74,84}, {74,74,0,-74}, {84,-29,-74,55}, {55,-84,74,-29}
+        // Transpose (columns become rows): {29,74,84,55}, {55,74,-29,-84}, {74,0,-74,74}, {84,-74,55,-29}
+        int s0 = 29 * c0 + 74 * c1 + 84 * c2 + 55 * c3;
+        int s1 = 55 * c0 + 74 * c1 - 29 * c2 - 84 * c3;
+        int s2 = 74 * c0 +  0 * c1 - 74 * c2 + 74 * c3;
+        int s3 = 84 * c0 - 74 * c1 + 55 * c2 - 29 * c3;
 
         dst[0 * line + j] = static_cast<int16_t>(Clip3(-32768, 32767, (s0 + add) >> shift));
         dst[1 * line + j] = static_cast<int16_t>(Clip3(-32768, 32767, (s1 + add) >> shift));
