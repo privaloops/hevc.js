@@ -94,19 +94,24 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry,
 
     if (!sao_merge_left_flag && !sao_merge_up_flag) {
         int numComp = (ctx.sps->ChromaArrayType != 0) ? 3 : 1;
+        int sao_type_idx_chroma = 0; // §7.4.9.3: SaoTypeIdx[2] = SaoTypeIdx[1]
         for (int cIdx = 0; cIdx < numComp; cIdx++) {
             if ((sh.slice_sao_luma_flag && cIdx == 0) ||
                 (sh.slice_sao_chroma_flag && cIdx > 0)) {
                 int sao_type_idx = 0;
-                if (cIdx == 0 || cIdx == 1) {
+                if (cIdx == 0) {
                     sao_type_idx = decode_sao_type_idx(cabac);
-                }
-                if (cIdx == 2) {
-                    // chroma shares type with Cb
+                } else if (cIdx == 1) {
+                    sao_type_idx = decode_sao_type_idx(cabac);
+                    sao_type_idx_chroma = sao_type_idx; // save for cIdx==2
+                } else {
+                    // §7.4.9.3: SaoTypeIdx[2][rx][ry] = SaoTypeIdx[1][rx][ry]
+                    sao_type_idx = sao_type_idx_chroma;
                 }
                 if (sao_type_idx != 0) {
                     int bitDepth = (cIdx == 0) ? ctx.sps->BitDepthY : ctx.sps->BitDepthC;
                     int maxOff = (1 << (std::min(bitDepth, 10) - 5)) - 1;
+                    int sao_offset_abs_val[4] = {};
                     for (int i = 0; i < 4; i++) {
                         // sao_offset_abs: TR cMax=maxOff, bypass
                         int val = 0;
@@ -114,12 +119,14 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry,
                             if (cabac.decode_bypass() == 0) break;
                             val++;
                         }
-                        (void)val;
+                        sao_offset_abs_val[i] = val;
                     }
                     if (sao_type_idx == 1) {
                         // Band offset
+                        // §7.3.8.3: sao_offset_sign parsed only when abs != 0
                         for (int i = 0; i < 4; i++) {
-                            cabac.decode_bypass(); // sao_offset_sign
+                            if (sao_offset_abs_val[i] != 0)
+                                cabac.decode_bypass(); // sao_offset_sign
                         }
                         cabac.decode_bypass_bins(5); // sao_band_position
                     } else {
@@ -356,10 +363,10 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
         int yCtb = (CtbAddrInRs / sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
 
         size_t bits_before = bs.bits_read();
-        HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu", CtbAddrInRs, xCtb, yCtb, bits_before);
+        HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu bins=%d",
+                 CtbAddrInRs, xCtb, yCtb, bits_before, cabac.bin_count());
 
         decode_coding_tree_unit(ctx, xCtb, yCtb);
-
         HEVC_LOG(TREE, "CTU addr_rs=%d consumed %zu bits, remaining=%zu",
                  CtbAddrInRs, bs.bits_read() - bits_before, bs.bits_remaining());
 
