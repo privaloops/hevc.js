@@ -113,11 +113,15 @@ static MV scale_mv(MV mv, int currPOC, int currRefPOC, int colPOC, int colRefPOC
     int distScaleFactor = Clip3(-4096, 4095, (tb * tx + 32) >> 6);
 
     MV scaled;
-    // §8.5.3.2.12 eq 8-221
-    scaled.x = static_cast<int16_t>(Clip3(-32768, 32767,
-        (distScaleFactor * mv.x + 128 - (distScaleFactor * mv.x >= 0 ? 0 : 1)) >> 8));
-    scaled.y = static_cast<int16_t>(Clip3(-32768, 32767,
-        (distScaleFactor * mv.y + 128 - (distScaleFactor * mv.y >= 0 ? 0 : 1)) >> 8));
+    // §8.5.3.2.9 eq 8-207: Sign(p) * ((Abs(p) + 127) >> 8)
+    auto scale_comp = [](int dist, int16_t comp) -> int16_t {
+        int product = dist * comp;
+        int sign = (product >= 0) ? 1 : -1;
+        return static_cast<int16_t>(Clip3(-32768, 32767,
+            sign * ((std::abs(product) + 127) >> 8)));
+    };
+    scaled.x = scale_comp(distScaleFactor, mv.x);
+    scaled.y = scale_comp(distScaleFactor, mv.y);
     return scaled;
 }
 
@@ -156,29 +160,49 @@ static bool derive_temporal_mv(const DecodingContext& ctx,
     }
 
     // The collocated picture must have motion info stored
-    if (!colPic->motion_info || colPic->motion_info_stride == 0) return false;
+    if (colPic->motion_info_buf.empty() || colPic->motion_info_stride == 0) return false;
 
     int minPuSize = ctx.sps->MinTbSizeY;
-    int miIdx = (yCol / minPuSize) * colPic->motion_info_stride + (xCol / minPuSize);
-    const auto& colMi = colPic->motion_info[miIdx];
+    // §8.5.3.2.8: quantize collocated position to 16-pixel grid
+    int xColQ = (xCol >> 4) << 4;
+    int yColQ = (yCol >> 4) << 4;
+    int miIdx = (yColQ / minPuSize) * colPic->motion_info_stride + (xColQ / minPuSize);
+    if (miIdx < 0 || miIdx >= static_cast<int>(colPic->motion_info_buf.size())) return false;
+    const auto& colMi = colPic->motion_info_buf[miIdx];
 
-    // §8.5.3.2.8: find available MV in collocated PU
-    // Try same list first, then other list
+    // §8.5.3.2.9: select MV from collocated PU
+    // Priority depends on NoBackwardPredFlag and collocated_from_l0_flag
     int colRefPOC = -1;
     MV colMV = {};
     bool found = false;
 
-    for (int tryList = 0; tryList < 2 && !found; tryList++) {
-        int l = (tryList == 0) ? listX : (1 - listX);
-        if (colMi.pred_flag[l]) {
-            colMV.x = colMi.mv_x[l];
-            colMV.y = colMi.mv_y[l];
-            if (l < 2 && colMi.ref_idx[l] >= 0 &&
-                colMi.ref_idx[l] < static_cast<int>(colPic->ref_poc[l].size())) {
-                colRefPOC = colPic->ref_poc[l][colMi.ref_idx[l]];
-                found = true;
-            }
+    // Determine which list to use from collocated PU
+    int colList = -1;
+    if (!colMi.pred_flag[0] && !colMi.pred_flag[1]) {
+        // Intra in collocated → not available
+        return false;
+    } else if (colMi.pred_flag[0] && !colMi.pred_flag[1]) {
+        colList = 0;
+    } else if (!colMi.pred_flag[0] && colMi.pred_flag[1]) {
+        colList = 1;
+    } else {
+        // Both available: §8.5.3.2.9
+        bool noBackward = ctx.dpb->no_backward_pred_flag();
+        if (noBackward) {
+            colList = listX;
+        } else {
+            // Use collocated_from_l0_flag to determine N
+            colList = ctx.sh->collocated_from_l0_flag ? 0 : 1;
         }
+    }
+
+    if (colList >= 0 && colMi.pred_flag[colList] &&
+        colMi.ref_idx[colList] >= 0 &&
+        colMi.ref_idx[colList] < static_cast<int>(colPic->ref_poc[colList].size())) {
+        colMV.x = colMi.mv_x[colList];
+        colMV.y = colMi.mv_y[colList];
+        colRefPOC = colPic->ref_poc[colList][colMi.ref_idx[colList]];
+        found = true;
     }
 
     if (!found) return false;
@@ -240,47 +264,35 @@ static void derive_spatial_merge_candidates(
             (yPb >> Log2ParMrgLevel) == (yNb >> Log2ParMrgLevel))
             continue;
 
-        // §8.5.3.2.3: partition-specific pruning
-        // A1: if PART_Nx2N / nLx2N / nRx2N and partIdx==1 → skip (handled in is_pu_available)
-        // B1: if PART_2NxN / 2NxnU / 2NxnD and partIdx==1 → skip
-        if (i == 1) { // B1
-            auto pm = ctx.cu_at(xPb, yPb).part_mode;
-            if (partIdx == 1 && (pm == PartMode::PART_2NxN ||
-                                  pm == PartMode::PART_2NxnU ||
-                                  pm == PartMode::PART_2NxnD))
+        // §8.5.3.2.3: partition-specific exclusions
+        auto pm = ctx.cu_at(xPb, yPb).part_mode;
+        if (i == 0 && partIdx == 1) { // A1
+            if (pm == PartMode::PART_Nx2N || pm == PartMode::PART_nLx2N ||
+                pm == PartMode::PART_nRx2N)
+                continue;
+        }
+        if (i == 1 && partIdx == 1) { // B1
+            if (pm == PartMode::PART_2NxN || pm == PartMode::PART_2NxnU ||
+                pm == PartMode::PART_2NxnD)
                 continue;
         }
 
         PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
 
-        // Pruning: check if this candidate is identical to a previous one
-        // §8.5.3.2.3: B1 pruned if == A1, B0 pruned if == B1,
-        // A0 pruned if == A1, B2 pruned if == A1 or B1
+        // §8.5.3.2.3: Pruning — compare motion vectors, ref indices AND pred flags
+        auto same_motion = [](const PUMotionInfo& a, const MergeCandidate& b) {
+            return a.mv[0].x == b.mv[0].x && a.mv[0].y == b.mv[0].y &&
+                   a.mv[1].x == b.mv[1].x && a.mv[1].y == b.mv[1].y &&
+                   a.ref_idx[0] == b.ref_idx[0] && a.ref_idx[1] == b.ref_idx[1] &&
+                   a.pred_flag[0] == b.pred_flag[0] && a.pred_flag[1] == b.pred_flag[1];
+        };
         bool prune = false;
-        if (i == 1 && avail[0]) { // B1 vs A1
-            prune = (mi.mv[0].x == cands[0].mv[0].x && mi.mv[0].y == cands[0].mv[0].y &&
-                     mi.mv[1].x == cands[0].mv[1].x && mi.mv[1].y == cands[0].mv[1].y &&
-                     mi.ref_idx[0] == cands[0].ref_idx[0] && mi.ref_idx[1] == cands[0].ref_idx[1]);
-        }
-        if (i == 2 && avail[1]) { // B0 vs B1
-            prune = (mi.mv[0].x == cands[1].mv[0].x && mi.mv[0].y == cands[1].mv[0].y &&
-                     mi.mv[1].x == cands[1].mv[1].x && mi.mv[1].y == cands[1].mv[1].y &&
-                     mi.ref_idx[0] == cands[1].ref_idx[0] && mi.ref_idx[1] == cands[1].ref_idx[1]);
-        }
-        if (i == 3 && avail[0]) { // A0 vs A1
-            prune = (mi.mv[0].x == cands[0].mv[0].x && mi.mv[0].y == cands[0].mv[0].y &&
-                     mi.mv[1].x == cands[0].mv[1].x && mi.mv[1].y == cands[0].mv[1].y &&
-                     mi.ref_idx[0] == cands[0].ref_idx[0] && mi.ref_idx[1] == cands[0].ref_idx[1]);
-        }
-        if (i == 4) { // B2 vs A1 and B1
-            if (avail[0])
-                prune = (mi.mv[0].x == cands[0].mv[0].x && mi.mv[0].y == cands[0].mv[0].y &&
-                         mi.mv[1].x == cands[0].mv[1].x && mi.mv[1].y == cands[0].mv[1].y &&
-                         mi.ref_idx[0] == cands[0].ref_idx[0] && mi.ref_idx[1] == cands[0].ref_idx[1]);
-            if (!prune && avail[1])
-                prune = (mi.mv[0].x == cands[1].mv[0].x && mi.mv[0].y == cands[1].mv[0].y &&
-                         mi.mv[1].x == cands[1].mv[1].x && mi.mv[1].y == cands[1].mv[1].y &&
-                         mi.ref_idx[0] == cands[1].ref_idx[0] && mi.ref_idx[1] == cands[1].ref_idx[1]);
+        if (i == 1 && avail[0]) prune = same_motion(mi, cands[0]);       // B1 vs A1
+        if (i == 2 && avail[1]) prune = same_motion(mi, cands[1]);       // B0 vs B1
+        if (i == 3 && avail[0]) prune = same_motion(mi, cands[0]);       // A0 vs A1
+        if (i == 4) {                                                      // B2 vs A1 and B1
+            if (avail[0]) prune = same_motion(mi, cands[0]);
+            if (!prune && avail[1]) prune = same_motion(mi, cands[1]);
         }
 
         // §8.5.3.2.3: B2 only checked if < 4 candidates so far
@@ -311,6 +323,15 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
                                        int xPb, int yPb, int nPbW, int nPbH,
                                        int partIdx, int mergeIdx) {
     auto& sh = *ctx.sh;
+    // §8.5.3.2.2 eq 8-110..8-113: Log2ParMrgLevel override for 8x8 CU
+    int Log2ParMrgLevel = ctx.pps->log2_parallel_merge_level_minus2 + 2;
+    if (Log2ParMrgLevel > 2 && nCbS == 8) {
+        xPb = xCb;
+        yPb = yCb;
+        nPbW = nCbS;
+        nPbH = nCbS;
+        partIdx = 0;
+    }
     int MaxNumMergeCand = sh.MaxNumMergeCand;
 
     // Build merge candidate list
@@ -435,75 +456,85 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
 // §8.5.3.2.6 — AMVP mode (MV prediction + MVD)
 // ============================================================
 
+// §8.5.3.2.7 helper: check a neighbor position for AMVP
+// Pass 1: same list + same ref. Pass 2: any list, same POC, with optional scaling.
+static bool amvp_check_neighbor(const DecodingContext& ctx,
+                                 int xNb, int yNb, int refIdxLX, int listX,
+                                 bool allowScaling, MV& outMV) {
+    int picW = static_cast<int>(ctx.sps->pic_width_in_luma_samples);
+    int picH = static_cast<int>(ctx.sps->pic_height_in_luma_samples);
+    if (xNb < 0 || yNb < 0 || xNb >= picW || yNb >= picH) return false;
+    if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) return false;
+
+    PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
+    Picture* currRef = (listX == 0) ? ctx.dpb->ref_pic_list0(refIdxLX)
+                                     : ctx.dpb->ref_pic_list1(refIdxLX);
+    if (!currRef) return false;
+    int currRefPOC = currRef->poc;
+
+    // §8.5.3.2.7: try both lists
+    for (int l = 0; l < 2; l++) {
+        int tryList = (l == 0) ? listX : (1 - listX);
+        if (!mi.pred_flag[tryList]) continue;
+        Picture* nbRef = (tryList == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[tryList])
+                                         : ctx.dpb->ref_pic_list1(mi.ref_idx[tryList]);
+        if (!nbRef) continue;
+
+        if (nbRef->poc == currRefPOC) {
+            outMV = mi.mv[tryList];
+            return true;
+        }
+        if (allowScaling) {
+            // §8.5.3.2.7: scale MV when POC differs (both short-term)
+            outMV = scale_mv(mi.mv[tryList], ctx.pic->poc, currRefPOC,
+                              ctx.pic->poc, nbRef->poc);
+            return true;
+        }
+    }
+    return false;
+}
+
 static MV derive_amvp_predictor(const DecodingContext& ctx,
                                  int /*xCb*/, int /*yCb*/, int /*nCbS*/,
                                  int xPb, int yPb, int nPbW, int nPbH,
                                  int refIdxLX, int listX, int /*partIdx*/,
                                  int mvpFlag) {
-    // §8.5.3.2.6: AMVP candidate derivation
-    // Step 1: Spatial candidates (§8.5.3.2.7)
-    // Simplified: check A0/A1 for candidate A, B0/B1/B2 for candidate B
-
+    // §8.5.3.2.6 + §8.5.3.2.7: AMVP candidate derivation
     MV mvA = {}, mvB = {};
     bool availA = false, availB = false;
 
-    // Left candidates: A0 (xPb-1, yPb+nPbH), A1 (xPb-1, yPb+nPbH-1)
-    int leftPositions[][2] = {{xPb - 1, yPb + nPbH}, {xPb - 1, yPb + nPbH - 1}};
-    for (auto& pos : leftPositions) {
+    // §8.5.3.2.7: Left group (A): A0 then A1
+    // Pass 1: same POC (no scaling). Pass 2: different POC (with scaling).
+    int leftPos[][2] = {{xPb - 1, yPb + nPbH}, {xPb - 1, yPb + nPbH - 1}};
+    // Pass 1: no scaling
+    for (auto& pos : leftPos) {
         if (availA) break;
-        int xNb = pos[0], yNb = pos[1];
-        if (xNb < 0 || yNb < 0 ||
-            xNb >= static_cast<int>(ctx.sps->pic_width_in_luma_samples) ||
-            yNb >= static_cast<int>(ctx.sps->pic_height_in_luma_samples))
-            continue;
-        if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) continue;
-
-        PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
-        // Check same list, same ref
-        if (mi.pred_flag[listX] && mi.ref_idx[listX] == refIdxLX) {
-            mvA = mi.mv[listX];
-            availA = true;
-        } else if (mi.pred_flag[1 - listX]) {
-            // Check other list with same ref POC
-            Picture* currRef = (listX == 0) ? ctx.dpb->ref_pic_list0(refIdxLX)
-                                             : ctx.dpb->ref_pic_list1(refIdxLX);
-            Picture* nbRef = ((1 - listX) == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[1 - listX])
-                                                  : ctx.dpb->ref_pic_list1(mi.ref_idx[1 - listX]);
-            if (currRef && nbRef && currRef->poc == nbRef->poc) {
-                mvA = mi.mv[1 - listX];
-                availA = true;
-            }
+        availA = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, false, mvA);
+    }
+    // Pass 2: with scaling
+    if (!availA) {
+        for (auto& pos : leftPos) {
+            if (availA) break;
+            availA = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, true, mvA);
         }
     }
 
-    // Above candidates: B0 (xPb+nPbW, yPb-1), B1 (xPb+nPbW-1, yPb-1), B2 (xPb-1, yPb-1)
-    int abovePositions[][2] = {{xPb + nPbW, yPb - 1}, {xPb + nPbW - 1, yPb - 1}, {xPb - 1, yPb - 1}};
-    for (auto& pos : abovePositions) {
+    // §8.5.3.2.7: Above group (B): B0, B1, B2
+    int abovePos[][2] = {{xPb + nPbW, yPb - 1}, {xPb + nPbW - 1, yPb - 1}, {xPb - 1, yPb - 1}};
+    // Pass 1: no scaling
+    for (auto& pos : abovePos) {
         if (availB) break;
-        int xNb = pos[0], yNb = pos[1];
-        if (xNb < 0 || yNb < 0 ||
-            xNb >= static_cast<int>(ctx.sps->pic_width_in_luma_samples) ||
-            yNb >= static_cast<int>(ctx.sps->pic_height_in_luma_samples))
-            continue;
-        if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) continue;
-
-        PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
-        if (mi.pred_flag[listX] && mi.ref_idx[listX] == refIdxLX) {
-            mvB = mi.mv[listX];
-            availB = true;
-        } else if (mi.pred_flag[1 - listX]) {
-            Picture* currRef = (listX == 0) ? ctx.dpb->ref_pic_list0(refIdxLX)
-                                             : ctx.dpb->ref_pic_list1(refIdxLX);
-            Picture* nbRef = ((1 - listX) == 0) ? ctx.dpb->ref_pic_list0(mi.ref_idx[1 - listX])
-                                                  : ctx.dpb->ref_pic_list1(mi.ref_idx[1 - listX]);
-            if (currRef && nbRef && currRef->poc == nbRef->poc) {
-                mvB = mi.mv[1 - listX];
-                availB = true;
-            }
+        availB = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, false, mvB);
+    }
+    // Pass 2: with scaling (only if isScaledFlagLX was not set)
+    if (!availB) {
+        for (auto& pos : abovePos) {
+            if (availB) break;
+            availB = amvp_check_neighbor(ctx, pos[0], pos[1], refIdxLX, listX, true, mvB);
         }
     }
 
-    // §8.5.3.2.6 step 2-3: Build AMVP list
+    // §8.5.3.2.6 step 2-3: Build AMVP list (eq 8-170)
     MV mvpList[2] = {};
     int numMvp = 0;
 
@@ -513,7 +544,7 @@ static MV derive_amvp_predictor(const DecodingContext& ctx,
     else if (!availA && availB)
         mvpList[numMvp++] = mvB;
 
-    // Temporal candidate if needed
+    // §8.5.3.2.6 step 2: temporal candidate only if < 2 spatial
     if (numMvp < 2 && ctx.sh->slice_temporal_mvp_enabled_flag) {
         MV mvCol = {};
         if (derive_temporal_mv(ctx, xPb, yPb, nPbW, nPbH, refIdxLX, listX, mvCol))
@@ -526,7 +557,6 @@ static MV derive_amvp_predictor(const DecodingContext& ctx,
         numMvp++;
     }
 
-    // Step 4: select
     return mvpList[mvpFlag];
 }
 
@@ -586,8 +616,9 @@ void decode_prediction_unit_inter(DecodingContext& ctx,
                 MV mvpL0 = derive_amvp_predictor(ctx, xCb, yCb, nCbS, xPb, yPb,
                                                    nPbW, nPbH, refIdxL0, 0, partIdx, mvpL0Flag);
 
-                result.mv[0].x = mvpL0.x + mvdL0.x;
-                result.mv[0].y = mvpL0.y + mvdL0.y;
+                // §8.5.3.2.1 eq 8-94..8-97: modular 16-bit MV addition
+                result.mv[0].x = static_cast<int16_t>((mvpL0.x + mvdL0.x + 0x10000) % 0x10000);
+                result.mv[0].y = static_cast<int16_t>((mvpL0.y + mvdL0.y + 0x10000) % 0x10000);
                 result.ref_idx[0] = refIdxL0;
                 result.pred_flag[0] = true;
             }
@@ -610,8 +641,8 @@ void decode_prediction_unit_inter(DecodingContext& ctx,
                 MV mvpL1 = derive_amvp_predictor(ctx, xCb, yCb, nCbS, xPb, yPb,
                                                    nPbW, nPbH, refIdxL1, 1, partIdx, mvpL1Flag);
 
-                result.mv[1].x = mvpL1.x + mvdL1.x;
-                result.mv[1].y = mvpL1.y + mvdL1.y;
+                result.mv[1].x = static_cast<int16_t>((mvpL1.x + mvdL1.x + 0x10000) % 0x10000);
+                result.mv[1].y = static_cast<int16_t>((mvpL1.y + mvdL1.y + 0x10000) % 0x10000);
                 result.ref_idx[1] = refIdxL1;
                 result.pred_flag[1] = true;
             }

@@ -44,8 +44,11 @@ struct Picture {
         int8_t ref_idx[2] = {-1, -1};
         bool pred_flag[2] = {};
     };
-    PUMotionInfoCompact* motion_info = nullptr;  // owned externally (by decoder)
+    std::vector<PUMotionInfoCompact> motion_info_buf;  // owned by this Picture
     int motion_info_stride = 0;
+    // Convenience accessors
+    PUMotionInfoCompact* motion_info_data() { return motion_info_buf.data(); }
+    const PUMotionInfoCompact* motion_info_data() const { return motion_info_buf.data(); }
 
     // Ref POC lists (snapshot at decode time, for TMVP MV scaling)
     std::vector<int32_t> ref_poc[2];  // ref_poc[0] = L0 POCs, ref_poc[1] = L1 POCs
