@@ -57,6 +57,19 @@ clang-tidy src/**/*.cpp -- -std=c++17
 9. **Debug mismatch** : si un oracle test FAIL, suis la procédure de debug ci-dessous
 10. **Mettre à jour BACKLOG.md** : cocher les tâches terminées, ajouter les nouvelles si identifiées
 
+### Règle d'implémentation depuis la spec
+
+> **ABSOLU** : Chaque fonction de décodage DOIT être une transcription directe de la spec.
+
+1. **Lire le PDF** de la section correspondante (pas les notes, pas les résumés, pas HM)
+2. **Transcrire** les formules, conditions et boucles telles qu'écrites dans la spec — ne pas "simplifier", "optimiser" ou "interpréter"
+3. **Nommer** les variables comme dans la spec (ex: `scanIdx`, `LastSignificantCoeffX`, `ctxInc`)
+4. **Commenter** chaque bloc avec la référence spec exacte (ex: `// Spec eq 9-55`, `// §7.3.8.11 line 3`)
+5. **Vérifier avec HM** uniquement quand le résultat de la spec semble ambigu ou quand un test échoue — et documenter la divergence dans LEARNINGS.md
+6. **Ne jamais** combiner des parties de la spec avec des parties de HM dans la même fonction — choisir UNE source et s'y tenir
+
+Violation type : "simplifier `if (log2TrafoSize == 2 || (log2TrafoSize == 3 && cIdx > 0))` au lieu de transcrire la vraie condition de la spec" → introduit des bugs silencieux qui se propagent dans tout le bitstream.
+
 ### Tests oracle — comment ça marche
 
 12 bitstreams de test sont dans `tests/conformance/fixtures/` avec des hash MD5 de référence (calculés depuis ffmpeg). Le script `tools/oracle_test.sh` :
@@ -158,7 +171,7 @@ ITU-T H.265 (V8, 08/2021) — "High Efficiency Video Coding"
 
 Le PDF officiel est stocké localement dans `docs/spec/pdf/` (gitignored).
 
-**IMPORTANT** : Quand tu implémentes une section de la spec, **lis le PDF** en priorité. Les notes dans `docs/spec/` sont des résumés — le PDF fait autorité en cas de divergence.
+**IMPORTANT** : Quand tu implémentes une section de la spec, **lis le PDF** et transcris les formules directement. Ne pas paraphraser, ne pas simplifier, ne pas deviner. Les notes dans `docs/spec/` sont des résumés — le PDF fait autorité en cas de divergence. HM (`/tmp/HM/`) est la référence de conformité — le consulter uniquement pour lever une ambiguïté du texte de la spec, jamais comme source primaire d'implémentation.
 
 ```
 docs/spec/pdf/T-REC-H.265-202108-S.pdf    # Spec complète (716 pages, 12 Mo)
