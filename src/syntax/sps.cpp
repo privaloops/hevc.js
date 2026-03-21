@@ -465,7 +465,7 @@ bool SPS::parse(BitstreamReader& bs) {
             intra_smoothing_disabled_flag = bs.read_flag();
             /*bool high_precision_offsets_enabled_flag =*/ bs.read_flag();
             /*bool persistent_rice_adaptation_enabled_flag =*/ bs.read_flag();
-            /*bool cabac_bypass_alignment_enabled_flag =*/ bs.read_flag();
+            cabac_bypass_alignment_enabled_flag = bs.read_flag();
         }
     }
 
