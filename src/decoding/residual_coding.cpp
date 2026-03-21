@@ -76,13 +76,15 @@ static void get_coeff_scan(int scanIdx, int coeffScan[][2]) {
 }
 
 // Derive scan index from intra mode and TU size (§8.4.4.2.1)
-static int derive_scan_idx(int log2TrafoSize, int intra_mode, int cIdx) {
-    if (log2TrafoSize == 2 || (log2TrafoSize == 3 && cIdx > 0)) {
-        // 4x4 luma or 8x8 chroma (which maps to 4x4 in 4:2:0)
+static int derive_scan_idx(int log2TrafoSize, int intra_mode, int /*cIdx*/) {
+    // Mode-dependent coefficient scan (MDCS) applies for blocks <= 8x8 pixels
+    // For 4:2:0 chroma with log2TrafoSize==3, chroma block is 4x4 (also <= 8)
+    // HM: MDCS_MAXIMUM_WIDTH/HEIGHT = 8, VER_IDX=26, HOR_IDX=10, ANGLE_LIMIT=4
+    if (log2TrafoSize <= 3) {
         if (intra_mode >= 6 && intra_mode <= 14)
-            return 2; // vertical scan
+            return 2; // vertical scan (mode near horizontal → scan columns first)
         if (intra_mode >= 22 && intra_mode <= 30)
-            return 1; // horizontal scan
+            return 1; // horizontal scan (mode near vertical → scan rows first)
     }
     return 0; // diagonal
 }
@@ -168,8 +170,9 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     int trSize = 1 << log2TrafoSize;
     std::memset(coefficients, 0, sizeof(int16_t) * trSize * trSize);
 
-    // Derive scan index
-    int intra_mode = ctx.intra_mode_at(x0, y0);
+    // Derive scan index — use chroma mode for chroma components (§8.4.4.2.1)
+    int intra_mode = (cIdx == 0) ? ctx.intra_mode_at(x0, y0)
+                                 : ctx.chroma_mode_at(x0, y0);
     int scanIdx = derive_scan_idx(log2TrafoSize, intra_mode, cIdx);
 
     int bins_start = cabac.bin_count();
@@ -177,10 +180,15 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
              x0, y0, log2TrafoSize, cIdx, scanIdx, bins_start);
 
     // Last significant coefficient position
+    // §7.3.8.11: For vertical scan, swap width/height for context derivation,
+    // then swap the decoded X/Y coordinates back
+    int log2W = log2TrafoSize, log2H = log2TrafoSize;
+    if (scanIdx == 2) std::swap(log2W, log2H); // vertical scan: swap dimensions
+
     int lastSigCoeffXPrefix = decode_last_sig_coeff_prefix(cabac, CTX_LAST_SIG_COEFF_X,
-                                                            cIdx, log2TrafoSize);
+                                                            cIdx, log2W);
     int lastSigCoeffYPrefix = decode_last_sig_coeff_prefix(cabac, CTX_LAST_SIG_COEFF_Y,
-                                                            cIdx, log2TrafoSize);
+                                                            cIdx, log2H);
 
     int LastSignificantCoeffX = lastSigCoeffXPrefix;
     int LastSignificantCoeffY = lastSigCoeffYPrefix;
@@ -195,6 +203,8 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
         int base = ((lastSigCoeffYPrefix >> 1) - 1);
         LastSignificantCoeffY = (1 << base) * ((lastSigCoeffYPrefix & 1) + 2) + suffix;
     }
+
+    if (scanIdx == 2) std::swap(LastSignificantCoeffX, LastSignificantCoeffY);
 
     HEVC_LOG(CABAC, "  lastSig=(%d,%d)", LastSignificantCoeffX, LastSignificantCoeffY);
 

@@ -493,7 +493,6 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                 decode_part_mode(cabac, pred_mode, log2CbSize,
                                  sps.MinCbLog2SizeY, sps.amp_enabled_flag));
         }
-
         HEVC_LOG(TREE, "CU (%d,%d) %dx%d pred=%d part=%d",
                  x0, y0, cbSize, cbSize, static_cast<int>(pred_mode),
                  static_cast<int>(part_mode));
@@ -631,7 +630,6 @@ void decode_prediction_unit_intra(DecodingContext& ctx, int x0, int y0,
                         intra_mode++;
                 }
             }
-
             HEVC_LOG(INTRA, "PU (%d,%d) luma_mode=%d (prev=%d mpm_idx=%d rem=%d)",
                      px, py, intra_mode, prev_flag[pu], mpm_idx_val[pu], rem_mode[pu]);
 

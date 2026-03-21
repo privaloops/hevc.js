@@ -79,6 +79,7 @@ int CabacEngine::decode_decision(int ctxIdx) {
     }
 
     renormalize();
+
     bin_count_++;
     return binVal;
 }
@@ -87,12 +88,13 @@ int CabacEngine::decode_decision(int ctxIdx) {
 int CabacEngine::decode_bypass() {
     ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
 
-    bin_count_++;
     int val = 0;
     if (ivlOffset_ >= ivlCurrRange_) {
         ivlOffset_ -= ivlCurrRange_;
         val = 1;
     }
+
+    bin_count_++;
     return val;
 }
 
