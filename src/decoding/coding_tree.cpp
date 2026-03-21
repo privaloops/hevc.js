@@ -228,8 +228,8 @@ static void derive_mpm(const DecodingContext& ctx, int x0, int y0, int /*puSize*
             candModeList[2] = 26; // Vertical
         } else {
             candModeList[0] = candA;
-            candModeList[1] = 2 + ((candA - 2 + 29) % 32);
-            candModeList[2] = 2 + ((candA - 2 + 1) % 32);
+            candModeList[1] = 2 + ((candA + 29) % 32);       // eq 8-25
+            candModeList[2] = 2 + ((candA - 2 + 1) % 32);    // eq 8-26
         }
     } else {
         candModeList[0] = candA;
