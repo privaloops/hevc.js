@@ -809,16 +809,25 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
         maxTrafoDepth = sps.max_transform_hierarchy_depth_inter;
     }
 
+    // §7.4.9.4: interSplitFlag — force split for non-2Nx2N inter CUs
+    // when max_transform_hierarchy_depth_inter == 0
+    bool interSplitFlag = (sps.max_transform_hierarchy_depth_inter == 0) &&
+                          (cu.pred_mode == PredMode::MODE_INTER) &&
+                          (cu.part_mode != PartMode::PART_2Nx2N) &&
+                          (trafoDepth == 0);
+
     // Determine split_transform_flag
     if (log2TrafoSize <= sps.MaxTbLog2SizeY &&
         log2TrafoSize > sps.MinTbLog2SizeY &&
         trafoDepth < maxTrafoDepth &&
-        !(intraSplitFlag && trafoDepth == 0)) {
+        !(intraSplitFlag && trafoDepth == 0) &&
+        !interSplitFlag) {
         split = decode_split_transform_flag(cabac, log2TrafoSize);
     } else {
         // Implicit split
         split = (log2TrafoSize > sps.MaxTbLog2SizeY) ||
-                (intraSplitFlag && trafoDepth == 0);
+                (intraSplitFlag && trafoDepth == 0) ||
+                interSplitFlag;
     }
 
     // §7.3.8.8: Chroma CBF parsed when log2TrafoSize > 2 (4:2:0) or ChromaArrayType == 3
