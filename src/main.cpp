@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <fstream>
 #include <vector>
 
@@ -245,8 +246,11 @@ int main(int argc, char* argv[]) {
 
     // Decode pipeline (Phase 4)
     if (output_path) {
+        auto t0 = std::chrono::high_resolution_clock::now();
         hevc::Decoder decoder;
         auto status = decoder.decode(data.data(), data.size());
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double decode_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         if (status != hevc::DecodeStatus::OK) {
             fprintf(stderr, "Error: decode failed\n");
             return 1;
@@ -259,7 +263,10 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        printf("Decoded %zu pictures\n", pics.size());
+        printf("Decoded %zu pictures in %.1fms (%.1f fps, %.1f ms/frame)\n",
+               pics.size(), decode_ms,
+               pics.size() * 1000.0 / decode_ms,
+               decode_ms / pics.size());
 
         // Write first picture (or all for multi-frame)
         if (pics.size() == 1) {
