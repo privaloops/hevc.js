@@ -14,7 +14,7 @@ Etat d'avancement par phase et prochaines taches.
 | 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
-| 9 — Performance | **En cours** | Interpolation bounds-check skip (+32% natif). Quick wins faits. SIMD WASM a faire. |
+| 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
 
 ## Phase 1 — Terminee
 
@@ -212,6 +212,38 @@ Voir `docs/phases/phase-08-wasm.md` pour le plan detaille.
 - [ ] Feeding incremental (ReadableStream)
 - [ ] Pool de buffers frames
 - [ ] Monitoring memoire
+
+## Phase 9 — Performance (EN COURS)
+
+### 9.1 — Quick wins (FAIT)
+- [x] Interior PU interpolation sans bounds check (+32% natif)
+- [x] Stack-allocated interpolation temp buffers
+- [x] SAO persistent backup buffers
+- [x] WASM SIMD auto-vectorisation (`-msimd128`, +44% WASM)
+- [x] Fix fprintf debug dans dpb.cpp
+- [x] CLI timing (fps, ms/frame)
+- [x] Benchmark script (`tools/benchmark.sh`)
+
+### 9.2 — WPP Multi-thread (A FAIRE)
+- [ ] Fix bug WPP P/B-frames (CABAC alignment aux frontieres de rangees CTU)
+- [ ] Thread pool natif (`std::thread`) pour decode parallele des rangees CTU
+- [ ] Dependance diagonale : rangee N attend le 2e CTU de la rangee N-1
+- [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
+- [ ] Benchmark WPP vs libde265 (cible : 4K@60fps)
+
+### 9.3 — SIMD intrinsics manuels (OPTIONNEL)
+- [ ] Interpolation luma 8-tap SIMD
+- [ ] Interpolation chroma 4-tap SIMD
+- [ ] Transform inverse SIMD
+- [ ] Deblocking SIMD
+
+### Resultats actuels
+
+| Resolution | Natif (1 thread) | WASM (Chrome) |
+|-----------|-----------------|---------------|
+| 720p | 187 fps | — |
+| 1080p | 77 fps | 61 fps |
+| 4K | 27.5 fps | 21 fps |
 
 ## Taches transverses
 
