@@ -47,6 +47,7 @@ add_library(hevc-decode-lib
     src/decoding/decoder.cpp
     src/filters/deblocking.cpp
     src/filters/sao.cpp
+    src/wasm/hevc_api.cpp
 )
 
 target_include_directories(hevc-decode-lib PUBLIC
@@ -62,16 +63,33 @@ target_link_libraries(hevc-decode PRIVATE hevc-decode-lib)
 
 # WASM-specific settings
 if(BUILD_WASM)
-    set_target_properties(hevc-decode PROPERTIES
+    # WASM target: build the C API as a JS+WASM module (not the CLI)
+    add_executable(hevc-wasm src/wasm/hevc_api.cpp)
+    target_link_libraries(hevc-wasm PRIVATE hevc-decode-lib)
+    set_target_properties(hevc-wasm PROPERTIES
+        OUTPUT_NAME "hevc-decode"
         SUFFIX ".js"
     )
-    target_compile_options(hevc-decode PRIVATE -O3)
-    target_link_options(hevc-decode PRIVATE
-        -s WASM=1
-        -s ALLOW_MEMORY_GROWTH=1
-        -s MODULARIZE=1
-        -s EXPORT_NAME=HEVCDecoder
+    # Enable exceptions for the whole project in WASM mode
+    target_compile_options(hevc-decode-lib PRIVATE -fexceptions)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(hevc-wasm PRIVATE -O0 -g -fexceptions)
+    else()
+        target_compile_options(hevc-wasm PRIVATE -O3 -fexceptions)
+    endif()
+    target_link_options(hevc-wasm PRIVATE
+        "SHELL:-s WASM=1"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s MODULARIZE=1"
+        "SHELL:-s EXPORT_NAME=HEVCDecoderModule"
+        "SHELL:-s STACK_SIZE=4194304"
+        "SHELL:-s ASSERTIONS=1"
+        "SHELL:-s NO_DISABLE_EXCEPTION_CATCHING=1"
+        "SHELL:-s EXPORTED_FUNCTIONS=[_hevc_decoder_create,_hevc_decoder_destroy,_hevc_decoder_decode,_hevc_decoder_get_frame_count,_hevc_decoder_get_frame,_hevc_decoder_get_info,_malloc,_free]"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,getValue,HEAPU8,HEAPU16]"
     )
+    # Don't build the native CLI in WASM mode
+    set_target_properties(hevc-decode PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()
 
 # Tests

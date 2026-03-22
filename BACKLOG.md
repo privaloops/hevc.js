@@ -13,7 +13,7 @@ Etat d'avancement par phase et prochaines taches.
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
 | 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
-| 8 — WASM Integration | A faire | — |
+| 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | A faire | — |
 
 ## Phase 1 — Terminee
@@ -183,6 +183,35 @@ Voir `docs/phases/phase-07-high-profiles.md` pour le plan detaille.
 - [x] Parsing complet des scaling lists
 - [x] Application dans dequant
 - [x] Matrices par defaut
+
+## Phase 8 — WASM Integration (FAIT)
+
+Voir `docs/phases/phase-08-wasm.md` pour le plan detaille.
+
+### 8.1 — API C (FAIT)
+- [x] `hevc_decoder_create/destroy/decode/get_frame_count/get_frame/get_info`
+- [x] Structures `HEVCFrame` et `HEVCStreamInfo`
+- [x] Build natif OK
+
+### 8.2 — Build Emscripten (FAIT)
+- [x] CMake target `hevc-wasm` avec MODULARIZE, EXPORTED_FUNCTIONS
+- [x] `-sSTACK_SIZE=1048576` (bottleneck deferred)
+- [x] Build WASM OK (123KB .wasm)
+- [x] Pixel-perfect verifie vs natif (MD5 match)
+
+### 8.3 — Bindings JS (FAIT)
+- [x] `hevc_decoder.js` — wrapper promise-based avec extraction frames Uint16Array
+- [x] `worker.js` — Web Worker avec protocol postMessage, transferable buffers
+
+### 8.4 — Demo HTML (FAIT)
+- [x] WebGL renderer YUV->RGB (BT.709 shader)
+- [x] File input, play/pause/step, clavier (fleches + espace)
+- [x] `demo/serve.sh` — script build + serve
+
+### 8.5-8.7 — Streaming, Memory Management (A FAIRE)
+- [ ] Feeding incremental (ReadableStream)
+- [ ] Pool de buffers frames
+- [ ] Monitoring memoire
 
 ## Taches transverses
 

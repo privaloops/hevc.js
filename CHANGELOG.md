@@ -12,6 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - 2 new oracle tests: `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`
   - `oracle_test.sh` now supports 10-bit output format via optional `PIX_FMT` parameter
 
+- **Phase 8 — WASM Integration**:
+  - C API (`src/wasm/hevc_api.h/cpp`): `hevc_decoder_create/destroy/decode/get_frame/get_info`
+  - Emscripten build: MODULARIZE, ALLOW_MEMORY_GROWTH, STACK_SIZE=1MB, EXPORTED_FUNCTIONS
+  - JS wrapper (`src/wasm/hevc_decoder.js`): promise-based API with typed array frame extraction
+  - Web Worker (`src/wasm/worker.js`): decode in background thread, transferable frame buffers
+  - Demo HTML (`demo/index.html`): WebGL YUV→RGB renderer (BT.709), file input, play/pause/step, keyboard shortcuts
+  - WASM pixel-perfect verified against native build (MD5 match on `i_64x64_qp22.265`)
+  - .wasm size: 123KB
+
 ### Fixed
 - **cu_skip_flag pred_mode not stored before decode_prediction_unit_inter** — skip CUs entered AMVP path (reading extra CABAC bin) instead of merge path because `pred_mode` was only stored in the CU grid AFTER the prediction unit decode. Latent bug masked in 8-bit tests by coincidental CABAC alignment; exposed by 10-bit bitstreams with different CABAC state.
 - **Multi-frame YUV output ignored bit depth** — the multi-frame output path in `main.cpp` cast all samples to `uint8_t`, producing 8-bit files for 10-bit content. Single-frame path (`write_yuv`) was correct. Also fixed chroma crop assuming 4:2:0 (`/2` hardcoded instead of using `SubWidthC`/`SubHeightC`).
