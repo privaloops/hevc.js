@@ -129,59 +129,25 @@ static MV scale_mv(MV mv, int currPOC, int currRefPOC, int colPOC, int colRefPOC
 // §8.5.3.2.8 — Temporal MV prediction (TMVP)
 // ============================================================
 
-static bool derive_temporal_mv(const DecodingContext& ctx,
-                                int xPb, int yPb, int nPbW, int nPbH,
-                                int refIdxLX, int listX,
-                                MV& mvLXCol) {
-    // Simplified TMVP: check bottom-right then center of collocated PU
-    if (!ctx.dpb || !ctx.dpb->col_pic()) return false;
-
-    Picture* colPic = ctx.dpb->col_pic();
-    int picW = static_cast<int>(ctx.sps->pic_width_in_luma_samples);
-    int picH = static_cast<int>(ctx.sps->pic_height_in_luma_samples);
-
-    // §8.5.3.2.8: try bottom-right first, then center
-    // Bottom-right: (xPb + nPbW, yPb + nPbH) — but must be in same/next CTU row
-    int xColBr = xPb + nPbW;
-    int yColBr = yPb + nPbH;
-
-    // Check if bottom-right is valid (§8.5.3.2.8 constraints)
-    bool brValid = (xColBr < picW && yColBr < picH &&
-                    (yColBr >> (ctx.sps->CtbLog2SizeY)) <= (yPb >> (ctx.sps->CtbLog2SizeY)));
-
-    int xCol, yCol;
-    if (brValid) {
-        xCol = xColBr;
-        yCol = yColBr;
-    } else {
-        // Center of PU
-        xCol = xPb + (nPbW >> 1);
-        yCol = yPb + (nPbH >> 1);
-    }
-
-    // The collocated picture must have motion info stored
-    if (colPic->motion_info_buf.empty() || colPic->motion_info_stride == 0) return false;
-
+// §8.5.3.2.9: derive collocated MV from a specific position in colPic
+static bool derive_collocated_mv_at(const DecodingContext& ctx,
+                                     Picture* colPic, int xCol, int yCol,
+                                     int refIdxLX, int listX,
+                                     MV& mvLXCol) {
     int minPuSize = ctx.sps->MinTbSizeY;
-    // §8.5.3.2.8: quantize collocated position to 16-pixel grid
     int xColQ = (xCol >> 4) << 4;
     int yColQ = (yCol >> 4) << 4;
     int miIdx = (yColQ / minPuSize) * colPic->motion_info_stride + (xColQ / minPuSize);
     if (miIdx < 0 || miIdx >= static_cast<int>(colPic->motion_info_buf.size())) return false;
     const auto& colMi = colPic->motion_info_buf[miIdx];
 
-    // §8.5.3.2.9: select MV from collocated PU
-    // Priority depends on NoBackwardPredFlag and collocated_from_l0_flag
-    int colRefPOC = -1;
-    MV colMV = {};
-    bool found = false;
+    // §8.5.3.2.9: if colPb is intra → not available
+    if (!colMi.pred_flag[0] && !colMi.pred_flag[1])
+        return false;
 
     // Determine which list to use from collocated PU
     int colList = -1;
-    if (!colMi.pred_flag[0] && !colMi.pred_flag[1]) {
-        // Intra in collocated → not available
-        return false;
-    } else if (colMi.pred_flag[0] && !colMi.pred_flag[1]) {
+    if (colMi.pred_flag[0] && !colMi.pred_flag[1]) {
         colList = 0;
     } else if (!colMi.pred_flag[0] && colMi.pred_flag[1]) {
         colList = 1;
@@ -191,21 +157,19 @@ static bool derive_temporal_mv(const DecodingContext& ctx,
         if (noBackward) {
             colList = listX;
         } else {
-            // §8.5.3.2.9: "with N being the value of collocated_from_l0_flag"
             colList = ctx.sh->collocated_from_l0_flag;
         }
     }
 
-    if (colList >= 0 && colMi.pred_flag[colList] &&
-        colMi.ref_idx[colList] >= 0 &&
-        colMi.ref_idx[colList] < static_cast<int>(colPic->ref_poc[colList].size())) {
-        colMV.x = colMi.mv_x[colList];
-        colMV.y = colMi.mv_y[colList];
-        colRefPOC = colPic->ref_poc[colList][colMi.ref_idx[colList]];
-        found = true;
-    }
+    if (colList < 0 || !colMi.pred_flag[colList] ||
+        colMi.ref_idx[colList] < 0 ||
+        colMi.ref_idx[colList] >= static_cast<int>(colPic->ref_poc[colList].size()))
+        return false;
 
-    if (!found) return false;
+    MV colMV;
+    colMV.x = colMi.mv_x[colList];
+    colMV.y = colMi.mv_y[colList];
+    int colRefPOC = colPic->ref_poc[colList][colMi.ref_idx[colList]];
 
     // Scale MV by POC distance
     int currPOC = ctx.pic->poc;
@@ -216,6 +180,36 @@ static bool derive_temporal_mv(const DecodingContext& ctx,
 
     mvLXCol = scale_mv(colMV, currPOC, currRefPOC, colPic->poc, colRefPOC);
     return true;
+}
+
+static bool derive_temporal_mv(const DecodingContext& ctx,
+                                int xPb, int yPb, int nPbW, int nPbH,
+                                int refIdxLX, int listX,
+                                MV& mvLXCol) {
+    // §8.5.3.2.8: temporal luma motion vector prediction
+    if (!ctx.dpb || !ctx.dpb->col_pic()) return false;
+
+    Picture* colPic = ctx.dpb->col_pic();
+    int picW = static_cast<int>(ctx.sps->pic_width_in_luma_samples);
+    int picH = static_cast<int>(ctx.sps->pic_height_in_luma_samples);
+    if (colPic->motion_info_buf.empty() || colPic->motion_info_stride == 0) return false;
+
+    // Step 1: try bottom-right position
+    int xColBr = xPb + nPbW;  // eq 8-198
+    int yColBr = yPb + nPbH;  // eq 8-199
+
+    bool brValid = (xColBr < picW && yColBr < picH &&
+                    (yColBr >> ctx.sps->CtbLog2SizeY) == (yPb >> ctx.sps->CtbLog2SizeY));
+
+    if (brValid) {
+        if (derive_collocated_mv_at(ctx, colPic, xColBr, yColBr, refIdxLX, listX, mvLXCol))
+            return true;
+    }
+
+    // Step 2: if bottom-right unavailable or intra, try center (eq 8-200, 8-201)
+    int xColCtr = xPb + (nPbW >> 1);
+    int yColCtr = yPb + (nPbH >> 1);
+    return derive_collocated_mv_at(ctx, colPic, xColCtr, yColCtr, refIdxLX, listX, mvLXCol);
 }
 
 // ============================================================
@@ -716,6 +710,7 @@ void decode_prediction_unit_inter(DecodingContext& ctx,
             if (sh.MaxNumMergeCand > 1)
                 mergeIdx = decode_merge_idx(cabac, sh.MaxNumMergeCand);
 
+            HEVC_LOG(INTER, "PU (%d,%d) MERGE idx=%d", xPb, yPb, mergeIdx);
             result = derive_merge_mode(ctx, xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH,
                                         partIdx, mergeIdx);
         } else {
@@ -737,6 +732,8 @@ void decode_prediction_unit_inter(DecodingContext& ctx,
 
                 MV mvpL0 = derive_amvp_predictor(ctx, xCb, yCb, nCbS, xPb, yPb,
                                                    nPbW, nPbH, refIdxL0, 0, partIdx, mvpL0Flag);
+                HEVC_LOG(INTER, "PU (%d,%d) AMVP L0 mvd=(%d,%d) mvp=(%d,%d) flag=%d ref=%d",
+                         xPb, yPb, mvdL0.x, mvdL0.y, mvpL0.x, mvpL0.y, mvpL0Flag, refIdxL0);
 
                 // §8.5.3.2.1 eq 8-94..8-97: modular 16-bit MV addition
                 result.mv[0].x = static_cast<int16_t>((mvpL0.x + mvdL0.x + 0x10000) % 0x10000);
