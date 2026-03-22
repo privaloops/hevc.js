@@ -80,6 +80,7 @@ int CabacEngine::decode_decision(int ctxIdx) {
 
     renormalize();
     bin_count_++;
+    // CABAC_TRACE_BINS: enable with -DCABAC_TRACE_BINS for bin-by-bin debugging
     return binVal;
 }
 

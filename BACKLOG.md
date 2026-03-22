@@ -10,8 +10,8 @@ Etat d'avancement par phase et prochaines taches.
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
-| 5 — Inter Prediction | A faire | — |
-| 6 — Loop Filters | A faire | — |
+| 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
+| 6 — Loop Filters | A faire | 0/15 tests. Deblocking + SAO non implementes. |
 | 7 — High Profiles | A faire | — |
 | 8 — WASM Integration | A faire | — |
 | 9 — Performance | A faire | — |
@@ -77,15 +77,63 @@ Voir `docs/phases/phase-04-intra.md` pour le plan detaille.
 - [x] DST inverse fix : matrice forward (M) au lieu de la transposee (M^T) — spec eq 8-315 utilise la matrice forward mais l'inverse 2D necessite M^T
 - [x] **i_64x64_qp22 pixel-perfect** (jalon Phase 4)
 
-## Phase 5 — Apres Phase 4 (subdivisee en 4 sous-phases)
+## Phase 5 — Inter Prediction (subdivisee en 11 sous-etapes)
 
 Voir `docs/phases/phase-05-inter.md` pour le plan detaille.
+Code existant a auditer : `inter_prediction.cpp`, `interpolation.cpp`, `dpb.cpp`.
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase5`
-- [ ] 5A — DPB + Ref Lists (POC, RPS, RefPicList construction)
-- [ ] 5B — MV Derivation (Merge 5+1 candidats, AMVP, TMVP, MV scaling)
-- [ ] 5C — Interpolation (8-tap luma, 4-tap chroma, shifts bit-exact)
-- [ ] 5D — Integration (P-frames puis B-frames pixel-perfect)
+### 5.0 — Fix parsing I-frame multi-CTU (FAIT)
+- [x] Bug identifie : MPM candModeList[1] eq 8-25, `candA-2+29` → `candA+29`
+- [x] I-frame QCIF 176x144 pixel-perfect (0 pixels faux)
+- [x] Non-regression `oracle_i_64x64_qp22` pixel-perfect
+
+### 5.1 — DPB + POC
+- [ ] Audit `dpb.cpp` POC derivation vs spec S8.3.1
+- [ ] Test POC correct pour 10 frames P et B
+
+### 5.2 — RPS + Reference Picture Lists
+- [ ] Audit RPS derivation et RefPicList construction
+- [ ] RefPicList0/1 identiques a HM pour chaque slice
+
+### 5.3 — Merge candidates (spatial)
+- [ ] Audit 5 candidats spatiaux vs spec S8.5.3.2.2
+- [ ] Test : candidats identiques a HM pour 5 PUs
+
+### 5.4 — TMVP
+- [ ] Audit collocated MV et MV scaling vs spec S8.5.3.2.7
+- [ ] Test unitaire MV scaling (5 cas)
+- [ ] Candidat temporel identique a HM
+
+### 5.5 — Merge mode complet
+- [ ] Audit combined bi-pred (Table 8-8) + zero padding
+- [ ] Merge list complete identique a HM
+
+### 5.6 — AMVP + MVD
+- [ ] Audit AMVP list construction vs spec S8.5.3.2.6
+- [ ] MV final identique a HM pour PUs AMVP
+
+### 5.7 — Interpolation luma (8-tap)
+- [ ] Audit 4 cas de shift/clip vs spec S8.5.3.2.2
+- [ ] Tests unitaires H-only, V-only, 2D
+
+### 5.8 — Interpolation chroma + bi-pred
+- [ ] Audit chroma 4-tap et bi-pred averaging
+- [ ] Tests unitaires chroma + bi-pred
+
+### 5.9 — Integration P-frames (FAIT)
+- [x] `oracle_p_qcif_10f` pixel-perfect
+
+### 5.10 — Integration B-frames (FAIT)
+- [x] `oracle_b_qcif_10f` pixel-perfect
+- [x] `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif` pixel-perfect
+- [x] `conf_p_weighted_qcif`, `conf_b_weighted_qcif` pixel-perfect
+- [x] `conf_b_opengop_qcif`, `conf_p_amp_256` pixel-perfect
+- [x] `conf_b_cabacinit_qcif` pixel-perfect
+
+### Bugs fixes session 2026-03-22 (3 bugs)
+- [x] Explicit weighted prediction (§8.5.3.3.4.3) — P-slices avec `weighted_pred_flag=1`
+- [x] Output frame ordering multi-GOP — CVS ID pour distinguer les GOPs avec POC identiques
+- [x] `interSplitFlag` (§7.4.9.4) — force TU split pour CU INTER non-2Nx2N quand `max_transform_hierarchy_depth_inter==0`
 
 ## Phase 6 — Apres Phase 5 (subdivisee en 4 sous-phases)
 

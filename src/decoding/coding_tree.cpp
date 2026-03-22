@@ -1,6 +1,8 @@
 #include "decoding/coding_tree.h"
 #include "decoding/syntax_elements.h"
 #include "decoding/cabac_tables.h"
+#include "decoding/interpolation.h"
+#include "decoding/dpb.h"
 #include "common/debug.h"
 
 #include <cstring>
@@ -92,19 +94,24 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry,
 
     if (!sao_merge_left_flag && !sao_merge_up_flag) {
         int numComp = (ctx.sps->ChromaArrayType != 0) ? 3 : 1;
+        int sao_type_idx_chroma = 0; // §7.4.9.3: SaoTypeIdx[2] = SaoTypeIdx[1]
         for (int cIdx = 0; cIdx < numComp; cIdx++) {
             if ((sh.slice_sao_luma_flag && cIdx == 0) ||
                 (sh.slice_sao_chroma_flag && cIdx > 0)) {
                 int sao_type_idx = 0;
-                if (cIdx == 0 || cIdx == 1) {
+                if (cIdx == 0) {
                     sao_type_idx = decode_sao_type_idx(cabac);
-                }
-                if (cIdx == 2) {
-                    // chroma shares type with Cb
+                } else if (cIdx == 1) {
+                    sao_type_idx = decode_sao_type_idx(cabac);
+                    sao_type_idx_chroma = sao_type_idx; // save for cIdx==2
+                } else {
+                    // §7.4.9.3: SaoTypeIdx[2][rx][ry] = SaoTypeIdx[1][rx][ry]
+                    sao_type_idx = sao_type_idx_chroma;
                 }
                 if (sao_type_idx != 0) {
                     int bitDepth = (cIdx == 0) ? ctx.sps->BitDepthY : ctx.sps->BitDepthC;
                     int maxOff = (1 << (std::min(bitDepth, 10) - 5)) - 1;
+                    int sao_offset_abs_val[4] = {};
                     for (int i = 0; i < 4; i++) {
                         // sao_offset_abs: TR cMax=maxOff, bypass
                         int val = 0;
@@ -112,12 +119,14 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry,
                             if (cabac.decode_bypass() == 0) break;
                             val++;
                         }
-                        (void)val;
+                        sao_offset_abs_val[i] = val;
                     }
                     if (sao_type_idx == 1) {
                         // Band offset
+                        // §7.3.8.3: sao_offset_sign parsed only when abs != 0
                         for (int i = 0; i < 4; i++) {
-                            cabac.decode_bypass(); // sao_offset_sign
+                            if (sao_offset_abs_val[i] != 0)
+                                cabac.decode_bypass(); // sao_offset_sign
                         }
                         cabac.decode_bypass_bins(5); // sao_band_position
                     } else {
@@ -219,8 +228,8 @@ static void derive_mpm(const DecodingContext& ctx, int x0, int y0, int /*puSize*
             candModeList[2] = 26; // Vertical
         } else {
             candModeList[0] = candA;
-            candModeList[1] = 2 + ((candA - 2 + 29) % 32);
-            candModeList[2] = 2 + ((candA - 2 + 1) % 32);
+            candModeList[1] = 2 + ((candA + 29) % 32);       // eq 8-25
+            candModeList[2] = 2 + ((candA - 2 + 1) % 32);    // eq 8-26
         }
     } else {
         candModeList[0] = candA;
@@ -348,18 +357,31 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
     HEVC_LOG(TREE, "slice_segment_data: addr=%d type=%d QP=%d",
              sh.slice_segment_address, static_cast<int>(sh.slice_type), sh.SliceQpY);
 
+    // WPP context storage: save CABAC contexts after the 2nd CTU of each row
+    // §9.2.2: at the start of a new CTU row (WPP), contexts are restored from
+    // the saved state after the 2nd CTU of the previous row
+    CabacContext wppSavedContexts[NUM_CABAC_CONTEXTS];
+    bool wppContextsAvailable = false;
+
     bool end_of_slice = false;
     while (!end_of_slice) {
         int xCtb = (CtbAddrInRs % sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
         int yCtb = (CtbAddrInRs / sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
+        int ctuCol = CtbAddrInRs % sps.PicWidthInCtbsY;
 
         size_t bits_before = bs.bits_read();
-        HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu", CtbAddrInRs, xCtb, yCtb, bits_before);
+        HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu bins=%d",
+                 CtbAddrInRs, xCtb, yCtb, bits_before, cabac.bin_count());
 
         decode_coding_tree_unit(ctx, xCtb, yCtb);
-
         HEVC_LOG(TREE, "CTU addr_rs=%d consumed %zu bits, remaining=%zu",
                  CtbAddrInRs, bs.bits_read() - bits_before, bs.bits_remaining());
+
+        // §9.2.2: WPP — save contexts after the 2nd CTU of each row (col index 1)
+        if (pps.entropy_coding_sync_enabled_flag && ctuCol == 1) {
+            cabac.save_contexts(wppSavedContexts);
+            wppContextsAvailable = true;
+        }
 
         end_of_slice = decode_end_of_slice_segment_flag(cabac);
 
@@ -368,12 +390,33 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
             if (CtbAddrInTs >= sps.PicSizeInCtbsY) break;
             CtbAddrInRs = pps.CtbAddrTsToRs[CtbAddrInTs];
 
-            // Tile/WPP boundary: skip subset end bit + byte alignment
+            // Tile boundary: subset end + byte alignment + CABAC reinit
             if (pps.tiles_enabled_flag &&
                 pps.TileId[CtbAddrInTs] != pps.TileId[CtbAddrInTs - 1]) {
                 cabac.decode_terminate(); // end_of_subset_one_bit
                 bs.byte_alignment();
                 cabac.init_decoder(bs);
+            }
+
+            // WPP boundary (§9.3.4.3.6): at end of each CTU row, decode
+            // end_of_subset_one_bit + byte alignment + reinit CABAC + restore contexts
+            if (pps.entropy_coding_sync_enabled_flag) {
+                int prevRs = pps.CtbAddrTsToRs[CtbAddrInTs - 1];
+                int prevRow = prevRs / sps.PicWidthInCtbsY;
+                int curRow  = CtbAddrInRs / sps.PicWidthInCtbsY;
+                if (curRow != prevRow) {
+                    cabac.decode_terminate(); // end_of_subset_one_bit
+                    bs.byte_alignment();
+                    cabac.init_decoder(bs);
+                    // §9.2.2: restore contexts from 2nd CTU of previous row
+                    if (wppContextsAvailable) {
+                        cabac.load_contexts(wppSavedContexts);
+                    } else {
+                        // First row had < 2 CTUs: re-init from slice
+                        cabac.init_contexts(static_cast<int>(sh.slice_type),
+                                            sh.SliceQpY, sh.cabac_init_flag);
+                    }
+                }
             }
         }
     }
@@ -478,9 +521,34 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
     PartMode part_mode = PartMode::PART_2Nx2N;
 
     if (cu_skip) {
-        // Skip mode — inter prediction (Phase 5)
+        // §7.3.8.5: Skip mode = merge without residual
         pred_mode = PredMode::MODE_SKIP;
         HEVC_LOG(TREE, "CU (%d,%d) %dx%d SKIP", x0, y0, cbSize, cbSize);
+        // prediction_unit for skip (always 2Nx2N) + motion compensation
+        decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
+        {
+            PUMotionInfo mi = get_pu_motion(ctx, x0, y0);
+            int16_t pred[64*64];
+            perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, 0,
+                mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                mi.pred_flag[0], mi.pred_flag[1], pred);
+            for (int y = 0; y < cbSize; y++)
+                for (int x = 0; x < cbSize; x++)
+                    ctx.pic->sample(0, x0+x, y0+y) = static_cast<uint16_t>(pred[y*cbSize+x]);
+            if (sps.ChromaArrayType != 0) {
+                int cW = cbSize / sps.SubWidthC, cH = cbSize / sps.SubHeightC;
+                int xC = x0 / sps.SubWidthC, yC = y0 / sps.SubHeightC;
+                for (int c = 1; c <= 2; c++) {
+                    int16_t cpred[32*32];
+                    perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, c,
+                        mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                        mi.pred_flag[0], mi.pred_flag[1], cpred);
+                    for (int y = 0; y < cH; y++)
+                        for (int x = 0; x < cW; x++)
+                            ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(cpred[y*cW+x]);
+                }
+            }
+        }
     } else {
         if (sh.slice_type != SliceType::I) {
             pred_mode = decode_pred_mode_flag(cabac) ?
@@ -498,7 +566,7 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                  static_cast<int>(part_mode));
 
         if (pred_mode == PredMode::MODE_INTRA) {
-            // Check PCM
+            // Check PCM — §7.3.8.5
             bool is_pcm = false;
             if (part_mode == PartMode::PART_2Nx2N && sps.pcm_enabled_flag &&
                 log2CbSize >= sps.Log2MinIpcmCbSizeY &&
@@ -525,7 +593,68 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             // Intra prediction
             decode_prediction_unit_intra(ctx, x0, y0, log2CbSize, part_mode);
         }
-        // Inter prediction handled in Phase 5
+        if (pred_mode == PredMode::MODE_INTER) {
+            // §7.3.8.5: parse prediction_unit(s) and perform motion compensation
+            auto mc_pu = [&](int xPb, int yPb, int nPbW, int nPbH, int partIdx) {
+                decode_prediction_unit_inter(ctx, x0, y0, cbSize, xPb, yPb, nPbW, nPbH, partIdx);
+                // §8.5.3: motion compensation → write prediction to picture
+                PUMotionInfo mi = get_pu_motion(ctx, xPb, yPb);
+                // Luma
+                {
+                    int16_t pred[64*64];
+                    perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, 0,
+                        mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                        mi.pred_flag[0], mi.pred_flag[1], pred);
+                    for (int y = 0; y < nPbH; y++)
+                        for (int x = 0; x < nPbW; x++)
+                            ctx.pic->sample(0, xPb+x, yPb+y) = static_cast<uint16_t>(pred[y*nPbW+x]);
+                }
+                // Chroma (4:2:0)
+                if (sps.ChromaArrayType != 0) {
+                    int cW = nPbW / sps.SubWidthC;
+                    int cH = nPbH / sps.SubHeightC;
+                    int xC = xPb / sps.SubWidthC;
+                    int yC = yPb / sps.SubHeightC;
+                    for (int c = 1; c <= 2; c++) {
+                        int16_t pred[32*32];
+                        perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, c,
+                            mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
+                            mi.pred_flag[0], mi.pred_flag[1], pred);
+                        for (int y = 0; y < cH; y++)
+                            for (int x = 0; x < cW; x++)
+                                ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(pred[y*cW+x]);
+                    }
+                }
+            };
+            if (part_mode == PartMode::PART_2Nx2N) {
+                mc_pu(x0, y0, cbSize, cbSize, 0);
+            } else if (part_mode == PartMode::PART_2NxN) {
+                mc_pu( x0, y0, cbSize, cbSize/2, 0);
+                mc_pu( x0, y0+cbSize/2, cbSize, cbSize/2, 1);
+            } else if (part_mode == PartMode::PART_Nx2N) {
+                mc_pu( x0, y0, cbSize/2, cbSize, 0);
+                mc_pu( x0+cbSize/2, y0, cbSize/2, cbSize, 1);
+            } else if (part_mode == PartMode::PART_2NxnU) {
+                mc_pu( x0, y0, cbSize, cbSize/4, 0);
+                mc_pu( x0, y0+cbSize/4, cbSize, cbSize*3/4, 1);
+            } else if (part_mode == PartMode::PART_2NxnD) {
+                mc_pu( x0, y0, cbSize, cbSize*3/4, 0);
+                mc_pu( x0, y0+cbSize*3/4, cbSize, cbSize/4, 1);
+            } else if (part_mode == PartMode::PART_nLx2N) {
+                mc_pu( x0, y0, cbSize/4, cbSize, 0);
+                mc_pu( x0+cbSize/4, y0, cbSize*3/4, cbSize, 1);
+            } else if (part_mode == PartMode::PART_nRx2N) {
+                mc_pu( x0, y0, cbSize*3/4, cbSize, 0);
+                mc_pu( x0+cbSize*3/4, y0, cbSize/4, cbSize, 1);
+            } else if (part_mode == PartMode::PART_NxN) {
+                // §7.3.8.5: NxN inter (only at min CB size)
+                int half = cbSize / 2;
+                mc_pu( x0,      y0,      half, half, 0);
+                mc_pu( x0+half, y0,      half, half, 1);
+                mc_pu( x0,      y0+half, half, half, 2);
+                mc_pu( x0+half, y0+half, half, half, 3);
+            }
+        }
     }
 
     // Store CU info in grid
@@ -544,8 +673,12 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
     if (!cu_skip) {
         bool rqt_root_cbf = true;
         if (pred_mode != PredMode::MODE_INTRA) {
-            // For inter: parse rqt_root_cbf if not merge-2Nx2N
-            // Phase 5 — for now assume cbf=1
+            // §7.3.8.5: rqt_root_cbf parsed when NOT (PART_2Nx2N && merge_flag)
+            bool is_merge_2Nx2N = (part_mode == PartMode::PART_2Nx2N &&
+                                    ctx.cu_at(x0, y0).merge_flag);
+            if (!is_merge_2Nx2N) {
+                rqt_root_cbf = decode_rqt_root_cbf(cabac);
+            }
         }
 
         if (rqt_root_cbf) {
@@ -676,16 +809,25 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
         maxTrafoDepth = sps.max_transform_hierarchy_depth_inter;
     }
 
+    // §7.4.9.4: interSplitFlag — force split for non-2Nx2N inter CUs
+    // when max_transform_hierarchy_depth_inter == 0
+    bool interSplitFlag = (sps.max_transform_hierarchy_depth_inter == 0) &&
+                          (cu.pred_mode == PredMode::MODE_INTER) &&
+                          (cu.part_mode != PartMode::PART_2Nx2N) &&
+                          (trafoDepth == 0);
+
     // Determine split_transform_flag
     if (log2TrafoSize <= sps.MaxTbLog2SizeY &&
         log2TrafoSize > sps.MinTbLog2SizeY &&
         trafoDepth < maxTrafoDepth &&
-        !(intraSplitFlag && trafoDepth == 0)) {
+        !(intraSplitFlag && trafoDepth == 0) &&
+        !interSplitFlag) {
         split = decode_split_transform_flag(cabac, log2TrafoSize);
     } else {
         // Implicit split
         split = (log2TrafoSize > sps.MaxTbLog2SizeY) ||
-                (intraSplitFlag && trafoDepth == 0);
+                (intraSplitFlag && trafoDepth == 0) ||
+                interSplitFlag;
     }
 
     // §7.3.8.8: Chroma CBF parsed when log2TrafoSize > 2 (4:2:0) or ChromaArrayType == 3
@@ -782,12 +924,19 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
             std::memcpy(residual, coefficients, sizeof(int16_t) * trSize * trSize);
         }
 
-        // Intra prediction for luma
-        int intra_mode = ctx.intra_mode_at(x0, y0);
+        // Prediction for luma
         int16_t pred_samples[64 * 64] = {};
-        perform_intra_prediction(ctx, x0, y0, log2TrafoSize, 0, intra_mode,
-                                 pred_samples);
-
+        if (cu.pred_mode == PredMode::MODE_INTRA) {
+            int intra_mode = ctx.intra_mode_at(x0, y0);
+            perform_intra_prediction(ctx, x0, y0, log2TrafoSize, 0, intra_mode,
+                                     pred_samples);
+        } else {
+            // Inter: pred already in picture from PU-level MC, read it back
+            for (int y = 0; y < trSize; y++)
+                for (int x = 0; x < trSize; x++)
+                    pred_samples[y * trSize + x] = static_cast<int16_t>(
+                        ctx.pic->sample(0, x0 + x, y0 + y));
+        }
 
         // Reconstruct
         reconstruct_block(ctx, x0, y0, log2TrafoSize, 0, pred_samples, residual);
@@ -858,11 +1007,21 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                                     sizeof(int16_t) * trSizeC * trSizeC);
                     }
 
-                    // Chroma intra prediction
-                    int chroma_mode = ctx.chroma_mode_at(xC, yC);
+                    // Chroma prediction
                     int16_t pred_samples[32 * 32] = {};
-                    perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
-                                            chroma_mode, pred_samples);
+                    if (cu.pred_mode == PredMode::MODE_INTRA) {
+                        int chroma_mode = ctx.chroma_mode_at(xC, yC);
+                        perform_intra_prediction(ctx, xC, yC, log2TrafoSizeC, cIdx,
+                                                chroma_mode, pred_samples);
+                    } else {
+                        // Inter: pred already written by PU-level MC
+                        int xCC = xC / sps.SubWidthC;
+                        int yCC = yC / sps.SubHeightC;
+                        for (int y = 0; y < trSizeC; y++)
+                            for (int x = 0; x < trSizeC; x++)
+                                pred_samples[y * trSizeC + x] = static_cast<int16_t>(
+                                    ctx.pic->sample(cIdx, xCC + x, yCC + y));
+                    }
 
                     reconstruct_block(ctx, xC, yC, log2TrafoSizeC, cIdx,
                                      pred_samples, residual);
