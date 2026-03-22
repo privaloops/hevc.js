@@ -70,12 +70,12 @@ if(BUILD_WASM)
         OUTPUT_NAME "hevc-decode"
         SUFFIX ".js"
     )
-    # Enable exceptions for the whole project in WASM mode
-    target_compile_options(hevc-decode-lib PRIVATE -fexceptions)
+    # Enable exceptions + SIMD 128-bit for the whole project in WASM mode
+    target_compile_options(hevc-decode-lib PRIVATE -fexceptions -msimd128)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_options(hevc-wasm PRIVATE -O0 -g -fexceptions)
+        target_compile_options(hevc-wasm PRIVATE -O0 -g -fexceptions -msimd128)
     else()
-        target_compile_options(hevc-wasm PRIVATE -O3 -fexceptions)
+        target_compile_options(hevc-wasm PRIVATE -O3 -fexceptions -msimd128)
     endif()
     target_link_options(hevc-wasm PRIVATE
         "SHELL:-s WASM=1"
