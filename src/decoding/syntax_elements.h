@@ -84,7 +84,7 @@ inline int decode_merge_flag(CabacEngine& cabac) {
 int decode_merge_idx(CabacEngine& cabac, int maxNumMergeCand);
 
 // §7.3.8.9 — inter_pred_idc (PRED_L0=0, PRED_L1=1, PRED_BI=2)
-int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctbLog2Size);
+int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctDepth);
 
 // §7.3.8.9 — ref_idx_l0 / ref_idx_l1
 int decode_ref_idx(CabacEngine& cabac, int numRefIdxActive);

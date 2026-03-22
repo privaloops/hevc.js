@@ -724,8 +724,12 @@ void decode_prediction_unit_inter(DecodingContext& ctx,
             // AMVP mode
             int inter_pred_idc = 0;  // 0=PRED_L0, 1=PRED_L1, 2=PRED_BI
             if (sh.slice_type == SliceType::B) {
-                inter_pred_idc = decode_inter_pred_idc(cabac, nPbW, nPbH,
-                                                        ctx.sps->CtbLog2SizeY);
+                // §9.3.4.2.3 Table 9-48: ctxInc for inter_pred_idc binIdx=0
+                // is CtDepth[x0][y0] = CtbLog2SizeY - log2CbSize
+                int log2CbSize = 0;
+                { int s = nCbS; while (s > 1) { s >>= 1; log2CbSize++; } }
+                int ctDepth = ctx.sps->CtbLog2SizeY - log2CbSize;
+                inter_pred_idc = decode_inter_pred_idc(cabac, nPbW, nPbH, ctDepth);
             }
 
             // L0
