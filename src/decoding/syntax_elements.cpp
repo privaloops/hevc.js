@@ -241,4 +241,92 @@ int decode_coeff_abs_level_remaining(CabacEngine& cabac, int cRiceParam) {
     }
 }
 
+// ============================================================
+// Phase 5 — Inter prediction syntax elements
+// ============================================================
+
+// §9.3.3.9 — inter_pred_idc: spec Table 9-47
+// 0=PRED_L0, 1=PRED_L1, 2=PRED_BI
+int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctDepth) {
+    // §9.3.4.2.3 Table 9-48: binIdx 0 ctxInc = (nPbW+nPbH != 12) ? CtDepth : 4
+    int ctxInc = (nPbW + nPbH != 12) ? ctDepth : 4;
+    int bin0 = cabac.decode_decision(CTX_INTER_PRED_IDC + ctxInc);
+    // Table 9-47: (nPbW+nPbH)==12: "0"→PRED_L0, "1"→PRED_L1 (no PRED_BI)
+    if (nPbW + nPbH == 12)
+        return bin0 ? 1 : 0;  // PRED_L1 or PRED_L0
+    // Table 9-47: (nPbW+nPbH)!=12: "1"→PRED_BI, "00"→PRED_L0, "01"→PRED_L1
+    if (bin0 == 1) return 2;  // PRED_BI
+    int bin1 = cabac.decode_decision(CTX_INTER_PRED_IDC + 4);
+    return bin1 ? 1 : 0;     // PRED_L1 or PRED_L0
+}
+
+// §9.3.3.5 — ref_idx: TU binarization, max=numRefIdxActive
+int decode_ref_idx(CabacEngine& cabac, int numRefIdxActive) {
+    if (numRefIdxActive == 0) return 0;
+    int bin0 = cabac.decode_decision(CTX_REF_IDX + 0);
+    if (bin0 == 0) return 0;
+    int idx = 1;
+    if (numRefIdxActive > 1) {
+        int bin1 = cabac.decode_decision(CTX_REF_IDX + 1);
+        if (bin1 == 0) return 1;
+        idx = 2;
+        // Remaining bins: bypass (TU)
+        for (int i = 2; i < numRefIdxActive; i++) {
+            if (cabac.decode_bypass() == 0) break;
+            idx++;
+        }
+    }
+    return idx;
+}
+
+// §7.3.8.10 — mvd_coding: abs_mvd_greater0, abs_mvd_greater1, abs_mvd_minus2, sign
+MV decode_mvd(CabacEngine& cabac) {
+    // §7.3.8.9 mvd_coding — transcription directe de la spec
+    MV mvd = {};
+
+    // §9.3.3.3 eq 9-13: k-th order Exp-Golomb with k=1 (Table 9-43)
+    auto decode_eg1 = [&cabac]() -> int {
+        int k = 1;
+        int absV = 0;
+        while (cabac.decode_bypass()) {
+            absV += (1 << k);
+            k++;
+        }
+        if (k > 0)
+            absV += cabac.decode_bypass_bins(k);
+        return absV;
+    };
+
+    // abs_mvd_greater0_flag[0], abs_mvd_greater0_flag[1]
+    int g0_h = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+    int g0_v = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+
+    // abs_mvd_greater1_flag[0], abs_mvd_greater1_flag[1]
+    int g1_h = 0, g1_v = 0;
+    if (g0_h) g1_h = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+    if (g0_v) g1_v = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+
+    // §7.3.8.9: H component (abs_mvd_minus2[0] + mvd_sign_flag[0])
+    int abs_h = 0;
+    if (g0_h) {
+        abs_h = g1_h + 1;
+        if (g1_h)
+            abs_h += decode_eg1();
+        int sign = cabac.decode_bypass();   // mvd_sign_flag[0]
+        mvd.x = static_cast<int16_t>(sign ? -abs_h : abs_h);
+    }
+
+    // §7.3.8.9: V component (abs_mvd_minus2[1] + mvd_sign_flag[1])
+    int abs_v = 0;
+    if (g0_v) {
+        abs_v = g1_v + 1;
+        if (g1_v)
+            abs_v += decode_eg1();
+        int sign = cabac.decode_bypass();   // mvd_sign_flag[1]
+        mvd.y = static_cast<int16_t>(sign ? -abs_v : abs_v);
+    }
+
+    return mvd;
+}
+
 } // namespace hevc

@@ -252,8 +252,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // Write all decoded pictures to output YUV file
-        auto& pics = decoder.pictures();
+        // Write all decoded pictures to output YUV file (in POC order)
+        auto pics = decoder.output_pictures();
         if (pics.empty()) {
             fprintf(stderr, "Error: no pictures decoded\n");
             return 1;
@@ -263,30 +263,30 @@ int main(int argc, char* argv[]) {
 
         // Write first picture (or all for multi-frame)
         if (pics.size() == 1) {
-            if (!pics[0].write_yuv(output_path)) {
+            if (!pics[0]->write_yuv(output_path)) {
                 fprintf(stderr, "Error: failed to write %s\n", output_path);
                 return 1;
             }
         } else {
-            // Append all frames to output file
+            // Append all frames to output file (in POC/display order)
             FILE* f = fopen(output_path, "wb");
             if (!f) {
                 fprintf(stderr, "Error: cannot open %s\n", output_path);
                 return 1;
             }
-            for (auto& pic : pics) {
+            for (auto* pic : pics) {
                 // Write each plane with conformance window cropping
                 for (int c = 0; c < 3; c++) {
-                    int cropLeft = (c == 0) ? pic.conf_win_left : pic.conf_win_left / 2;
-                    int cropRight = (c == 0) ? pic.conf_win_right : pic.conf_win_right / 2;
-                    int cropTop = (c == 0) ? pic.conf_win_top : pic.conf_win_top / 2;
-                    int cropBottom = (c == 0) ? pic.conf_win_bottom : pic.conf_win_bottom / 2;
-                    int outW = pic.width[c] - cropLeft - cropRight;
-                    int outH = pic.height[c] - cropTop - cropBottom;
+                    int cropLeft = (c == 0) ? pic->conf_win_left : pic->conf_win_left / 2;
+                    int cropRight = (c == 0) ? pic->conf_win_right : pic->conf_win_right / 2;
+                    int cropTop = (c == 0) ? pic->conf_win_top : pic->conf_win_top / 2;
+                    int cropBottom = (c == 0) ? pic->conf_win_bottom : pic->conf_win_bottom / 2;
+                    int outW = pic->width[c] - cropLeft - cropRight;
+                    int outH = pic->height[c] - cropTop - cropBottom;
 
-                    for (int y = cropTop; y < pic.height[c] - cropBottom; y++) {
-                        for (int x = cropLeft; x < pic.width[c] - cropRight; x++) {
-                            uint8_t val = static_cast<uint8_t>(pic.sample(c, x, y));
+                    for (int y = cropTop; y < pic->height[c] - cropBottom; y++) {
+                        for (int x = cropLeft; x < pic->width[c] - cropRight; x++) {
+                            uint8_t val = static_cast<uint8_t>(pic->sample(c, x, y));
                             fwrite(&val, 1, 1, f);
                         }
                     }

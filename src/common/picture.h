@@ -31,11 +31,29 @@ struct Picture {
 
     // Picture Order Count
     int32_t poc = 0;
+    // Coded Video Sequence ID (incremented at each IRAP with NoRaslOutputFlag)
+    int32_t cvs_id = 0;
 
     // Reference status
     bool used_for_short_term_ref = false;
     bool used_for_long_term_ref = false;
     bool needed_for_output = false;
+
+    // Inter: per-PU motion info for TMVP (stored after decoding)
+    struct PUMotionInfoCompact {
+        int16_t mv_x[2] = {};
+        int16_t mv_y[2] = {};
+        int8_t ref_idx[2] = {-1, -1};
+        bool pred_flag[2] = {};
+    };
+    std::vector<PUMotionInfoCompact> motion_info_buf;  // owned by this Picture
+    int motion_info_stride = 0;
+    // Convenience accessors
+    PUMotionInfoCompact* motion_info_data() { return motion_info_buf.data(); }
+    const PUMotionInfoCompact* motion_info_data() const { return motion_info_buf.data(); }
+
+    // Ref POC lists (snapshot at decode time, for TMVP MV scaling)
+    std::vector<int32_t> ref_poc[2];  // ref_poc[0] = L0 POCs, ref_poc[1] = L1 POCs
 
     // Allocate planes based on dimensions and chroma format
     void allocate(int width, int height, ChromaFormat fmt, int bd_luma, int bd_chroma);

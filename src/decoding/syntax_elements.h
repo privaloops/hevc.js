@@ -83,6 +83,25 @@ inline int decode_merge_flag(CabacEngine& cabac) {
 // §7.3.8.9 — merge_idx (TU, cMax = MaxNumMergeCand - 1)
 int decode_merge_idx(CabacEngine& cabac, int maxNumMergeCand);
 
+// §7.3.8.9 — inter_pred_idc (PRED_L0=0, PRED_L1=1, PRED_BI=2)
+int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctDepth);
+
+// §7.3.8.9 — ref_idx_l0 / ref_idx_l1
+int decode_ref_idx(CabacEngine& cabac, int numRefIdxActive);
+
+// §7.3.8.10 — mvd_coding (returns MV with x,y components)
+MV decode_mvd(CabacEngine& cabac);
+
+// §7.3.8.9 — mvp_l0_flag / mvp_l1_flag
+inline int decode_mvp_flag(CabacEngine& cabac) {
+    return cabac.decode_decision(CTX_MVP_FLAG);
+}
+
+// §7.3.8.5 — rqt_root_cbf (for inter CU)
+inline int decode_rqt_root_cbf(CabacEngine& cabac) {
+    return cabac.decode_decision(CTX_RQT_ROOT_CBF);
+}
+
 // §7.3.8.11 — split_transform_flag
 int decode_split_transform_flag(CabacEngine& cabac, int log2TrafoSize);
 

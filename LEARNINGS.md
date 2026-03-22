@@ -108,3 +108,115 @@ La spec §8.6.4.2 eq 8-315 definit la 1D transform comme `y[i] = sum_j transMatr
 ### Milestone atteint
 
 **oracle_i_64x64_qp22 = pixel-perfect** (jalon Phase 4). Progression pixels faux: 5608 → 4239 → 2674 → 2023 → **0**.
+
+## Session 2026-03-21c — Phase 5 spec audit + CABAC bypass fix + multi-CTU investigation
+
+### cabac_bypass_alignment_enabled_flag — RExt only (CRITICAL)
+
+Le commit `71f86ab` avait ajoute `cabac.align_bypass()` (ivlCurrRange=256) avant les coeff_sign_flag et coeff_abs_level_remaining de facon **inconditionnelle**. Or `cabac_bypass_alignment_enabled_flag` est un flag SPS RExt (§7.4.3.2.2), infere a 0 pour Main profile. Forcer ivlCurrRange=256 corrompait l'etat CABAC pour TOUS les bypass bins, causant un decodage de 52 minutes et des coefficients aberrants.
+
+**Fix**: conditionner `align_bypass()` sur `ctx.sps->cabac_bypass_alignment_enabled_flag`. Stocker le flag dans le SPS (il etait parse mais ignore).
+
+**Resultat**: oracle_i_64x64_qp22 pixel-perfect restaure.
+
+### TMVP collocated_from_l0_flag inversion (§8.5.3.2.9)
+
+Le code avait `colList = collocated_from_l0_flag ? 0 : 1` — inversé. La spec dit "with N being the value of collocated_from_l0_flag", donc `colList = collocated_from_l0_flag` directement.
+
+### AMVP rewrite (§8.5.3.2.7)
+
+Reecrit pour suivre la spec: tracking de `isScaledFlagLX`, scaling B-group seulement quand `isScaledFlagLX==0`, disponibilite §6.4.2 (z-scan + cross-CTU), check `LongTermRefPic` dans le pass scaling.
+
+### Multi-CTU I-frame mismatch — investigation exhaustive sans resolution
+
+**Symptome**: oracle_i_64x64_qp22 (1 CTU) pixel-perfect, mais p_qcif_10f I-frame (176x144, 9 CTUs) a 21593 pixels faux. Premier pixel faux a (160,0) dans CTU 2.
+
+**Audit spec-first effectue** (toutes sections conformes):
+- §7.3.8.1 slice_segment_data (boucle CTU)
+- §9.2.2 CABAC context propagation
+- §6.4.1 z-scan availability (cross-CTU)
+- §8.4.4.2.2 ref sample construction + substitution
+- §9.3.4.2.2 split_cu_flag context
+- §9.3.4.2.4 coded_sub_block_flag context
+- §9.3.4.2.5 sig_coeff_flag context (eq 9-40 a 9-55)
+- §7.3.8.8 transform_tree (split, cbf)
+- §7.3.8.10 transform_unit (chroma deferred)
+- §8.4.2 MPM derivation
+- §8.4.3 chroma mode derivation
+
+**Comparaison bin-par-bin avec HM**: 18322 decision bins identiques (val, range, offset), divergence au bin 18323. Le contexte ctx=90 (sig_coeff_flag ctxInc=8, 4x4 luma) a pStateIdx=62 (sature) chez nous vs pStateIdx ~31 chez HM. Cause: certains bins que nous assignons a ctx=90 sont assignes a un autre contexte dans HM, malgre des r/o identiques (les deux contextes ont le meme etat par coincidence).
+
+**Conclusion**: le bug est dans le mapping sig_coeff_flag pour les 4x4 TUs. La spec (eq 9-41 + ctxIdxMap + Table 9-50) et notre code sont conformes en apparence, mais HM utilise un mapping subtillement different. L'audit spec n'a pas pu le trouver car le spec et HM sont incoherents sur ce point (deja documente dans LEARNINGS Session 2025-03-20).
+
+**Decision**: consulter libde265 comme source de verite alternative pour identifier le mapping exact que les decodeurs conformes utilisent. Ce n'est pas du debug iteratif — c'est une consultation de reference d'implementation.
+
+### Bugs corriges cette session (3 bugs)
+
+11. **CABAC bypass alignment conditionnel** — `align_bypass()` inconditionnel → conditionnel sur `cabac_bypass_alignment_enabled_flag`
+12. **TMVP colList inversion** — `collocated_from_l0_flag ? 0 : 1` → `collocated_from_l0_flag`
+13. **AMVP rewrite §8.5.3.2.7** — isScaledFlagLX, §6.4.2 availability, LongTermRefPic check
+
+## Session 2026-03-21d — Fix multi-CTU I-frame (pixel-perfect!)
+
+### MPM candModeList[1] formula — off-by-2 (CRITICAL)
+
+La spec eq 8-25 dit: `candModeList[1] = 2 + ((candIntraPredModeA + 29) % 32)`.
+Notre code avait: `2 + ((candA - 2 + 29) % 32)` — un `-2` en trop.
+
+**Impact**: quand candA==candB >= 2, le 2e candidat MPM était décalé de 2 (ex: 29 au lieu de 31 pour candA=32). Cela causait un mode intra incorrect (mode 31 au lieu de 30) pour certains CUs dans les CTU 2+. Mode 31 est hors [22,30] → scanIdx=0 (diagonal) au lieu de scanIdx=1 (horizontal) → sig_coeff_flag contexts faux → divergence CABAC → 21593 pixels faux.
+
+**Méthode de découverte**: trace bin-par-bin avec ctxIdx ajouté à HM. La divergence au bin 18323 a révélé un mauvais scan type. Remonté au mode intra 31 vs 30. Comparaison MPM HM preds=[32,31,33] vs nôtre [32,29,33] → formule eq 8-25 fausse.
+
+**Leçon**: les formules modulaires de la spec (avec `% 32`) sont faciles à mal transcrire. Toujours vérifier le résultat numérique pour quelques valeurs de candA (ex: candA=2, 10, 26, 32) contre HM.
+
+### Bug #14
+
+14. **MPM candModeList[1]** — `candA-2+29` au lieu de `candA+29` (spec eq 8-25). Causait 21593 pixels faux dans la frame I multi-CTU 176x144.
+
+### Milestone atteint
+
+**I-frame multi-CTU 176x144 = pixel-perfect** (bloqueur Phase 5 levé).
+
+## Session 2026-03-22 — Phase 5 completion (3 bugs, 10/10 tests)
+
+### Explicit weighted prediction — ne pas ignorer les flags PPS (CRITICAL)
+
+Le PPS contient `weighted_pred_flag` (P-slices) et `weighted_bipred_flag` (B-slices). La spec §8.5.3.3.4.1 route vers default (§8.5.3.3.4.2) ou explicit (§8.5.3.3.4.3) selon `weightedPredFlag`. Le code appelait toujours `weighted_pred_default`, ignorant les flags.
+
+**Impact**: P-slices avec poids non-triviaux produisaient des valeurs luma fausses (max_diff=11), cascadant vers les B-frames qui les référencent.
+
+**Méthode de découverte**: analyse de la sortie `--dump-headers` montrant `weighted_pred = 1` dans le PPS. Le fix est une transcription directe de la spec eq 8-265 à 8-277.
+
+**Leçon**: toujours vérifier les flags PPS qui routent vers des processus différents. Un flag ignoré = un processus entier manquant.
+
+### Output frame ordering multi-GOP — POC n'est PAS un identifiant global (HIGH)
+
+Quand un bitstream contient plusieurs IDR, le POC remet à 0 à chaque IDR. Trier la sortie par POC seul mélange les frames de GOPs différents. La reconstruction pixel-perfect produisait 176 à position (0,0), mais le YUV montrait 66 (une frame d'un autre GOP à la mauvaise position).
+
+**Fix**: ajouter un compteur `cvs_id` (Coded Video Sequence) incrémenté à chaque IDR, trier par `(cvs_id, poc)`.
+
+**Piège supplémentaire**: le code avait DEUX fonctions de sortie (`DPB::get_output_pictures()` et `Decoder::output_pictures()`) avec des tris différents. Le fix dans l'une ne s'appliquait pas à l'autre. Toujours vérifier qu'il n'y a pas de duplication de logique.
+
+### interSplitFlag — condition implicite facile à oublier (HIGH)
+
+La spec §7.4.9.4 dit que quand `split_transform_flag` n'est pas présent dans le bitstream, il est inféré à 1 si `interSplitFlag == 1`. L'`interSplitFlag` se déclenche quand:
+- `max_transform_hierarchy_depth_inter == 0`
+- `CuPredMode == MODE_INTER`
+- `PartMode != PART_2Nx2N`
+- `trafoDepth == 0`
+
+Sans cette condition, le décodeur lit `split_transform_flag` du bitstream alors qu'il devrait être inféré, corrompant l'état CABAC pour tous les éléments suivants.
+
+**Pourquoi seulement 4 frames**: seules les B-frames avec des CUs 32x32 non-2Nx2N (PART_2NxN) étaient affectées. Les CUs 64x64 forçaient déjà le split via `log2TrafoSize > MaxTbLog2SizeY`. Les CUs 2Nx2N avaient `interSplitFlag=0`.
+
+**Méthode de découverte**: agent subagent avec investigation systématique — comparaison HM SYN trace pour identifier le CU exact (64,96 PART_2NxN dans POC 8), puis relecture spec §7.4.9.4.
+
+### Bugs #15-17
+
+15. **Explicit weighted prediction** — `weighted_pred_default` appelé systématiquement au lieu de router selon `weightedPredFlag` (§8.5.3.3.4.1)
+16. **Output ordering multi-GOP** — tri par POC seul mélange les frames de GOPs avec POC identiques
+17. **interSplitFlag** — condition implicite manquante pour le split du transform tree (§7.4.9.4)
+
+### Milestone atteint
+
+**Phase 5 Inter Prediction = 10/10 tests pixel-perfect** : `oracle_p_qcif_10f`, `oracle_b_qcif_10f`, `conf_p_weighted_qcif`, `conf_b_weighted_qcif`, `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif`, `conf_b_opengop_qcif`, `conf_p_amp_256`, `conf_b_cabacinit_qcif`.
