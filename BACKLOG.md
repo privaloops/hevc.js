@@ -11,7 +11,7 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | A faire | 0/15 tests. Deblocking + SAO non implementes. |
+| 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
 | 7 — High Profiles | A faire | — |
 | 8 — WASM Integration | A faire | — |
 | 9 — Performance | A faire | — |
@@ -135,16 +135,18 @@ Code existant a auditer : `inter_prediction.cpp`, `interpolation.cpp`, `dpb.cpp`
 - [x] Output frame ordering multi-GOP — CVS ID pour distinguer les GOPs avec POC identiques
 - [x] `interSplitFlag` (§7.4.9.4) — force TU split pour CU INTER non-2Nx2N quand `max_transform_hierarchy_depth_inter==0`
 
-## Phase 6 — Apres Phase 5 (subdivisee en 4 sous-phases)
+## Phase 6 — Termine (subdivisee en 4 sous-phases)
 
 Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
 
-- [ ] **Prealable** : Executer `tools/fetch_conformance.sh phase6`
-- [ ] 6A — Deblocking Luma (Bs derivation, strong/weak filter)
-- [ ] 6B — Deblocking Chroma (Bs==2 seulement)
-- [ ] 6C — SAO (Edge offset, Band offset, merge)
-- [ ] 6D — Integration Full Main Profile ← **jalon majeur**
+- [x] 6A — Deblocking Luma (Bs derivation, strong/weak filter)
+- [x] 6B — Deblocking Chroma (Bs==2 seulement)
+- [x] 6C — SAO (Edge offset, Band offset, merge)
+- [x] 6D — Integration Full Main Profile ← **jalon majeur atteint**
 - [ ] **Validation finale** : Telecharger les bitstreams de conformite officiels JCT-VC
+
+### Bug fixes
+- [x] Chroma deblocking saute quand luma decision dE==0 (le `continue` sautait aussi le chroma)
 
 ## Taches transverses
 
