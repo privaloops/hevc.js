@@ -292,25 +292,30 @@ MV decode_mvd(CabacEngine& cabac) {
     if (g0_v) g1_v = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
 
     // Step 3: abs_mvd_minus2 (bypass, EG1) — only if greater1 is 1
+    // §9.3.3.3 eq 9-13: k-th order Exp-Golomb with k=1 (Table 9-43)
+    auto decode_eg1 = [&cabac]() -> int {
+        int k = 1;  // EG1: start with k=1
+        int absV = 0;
+        while (cabac.decode_bypass()) {
+            absV += (1 << k);
+            k++;
+        }
+        // Read remaining k bits
+        if (k > 0)
+            absV += cabac.decode_bypass_bins(k);
+        return absV;
+    };
+
     int abs_h = 0, abs_v = 0;
     if (g0_h) {
         abs_h = g1_h + 1;
-        if (g1_h) {
-            // EG1 bypass: read prefix (unary), then suffix
-            int prefix = 0;
-            while (cabac.decode_bypass()) prefix++;
-            int suffix = (prefix > 0) ? cabac.decode_bypass_bins(prefix) : 0;
-            abs_h += (1 << prefix) - 1 + suffix;
-        }
+        if (g1_h)
+            abs_h += decode_eg1();
     }
     if (g0_v) {
         abs_v = g1_v + 1;
-        if (g1_v) {
-            int prefix = 0;
-            while (cabac.decode_bypass()) prefix++;
-            int suffix = (prefix > 0) ? cabac.decode_bypass_bins(prefix) : 0;
-            abs_v += (1 << prefix) - 1 + suffix;
-        }
+        if (g1_v)
+            abs_v += decode_eg1();
     }
 
     // Step 4: sign flags (bypass)
