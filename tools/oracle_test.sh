@@ -12,6 +12,7 @@ WIDTH="$2"
 HEIGHT="$3"
 EXPECTED_MD5="$4"
 DECODER="${5:-./hevc-decode}"
+PIX_FMT="${6:-yuv420p}"  # yuv420p for 8-bit, yuv420p10le for 10-bit
 
 # Vérifier que le décodeur existe
 if [ ! -x "$DECODER" ]; then
@@ -68,7 +69,7 @@ else
 
     # Si ffmpeg est disponible, générer la référence et comparer pixel par pixel
     if command -v ffmpeg &>/dev/null && command -v python3 &>/dev/null; then
-        ffmpeg -y -i "$BITSTREAM" -pix_fmt yuv420p "$TMPDIR/ref.yuv" 2>/dev/null
+        ffmpeg -y -i "$BITSTREAM" -pix_fmt "$PIX_FMT" "$TMPDIR/ref.yuv" 2>/dev/null
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
         python3 "$SCRIPT_DIR/oracle_compare.py" "$TMPDIR/ref.yuv" "$TMPDIR/output.yuv" "$WIDTH" "$HEIGHT" || true
     fi
