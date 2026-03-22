@@ -58,6 +58,23 @@ struct DecodingContext {
     PUMotionInfo* motion_info = nullptr;
     int motion_info_stride = 0;  // = pic_width / MinTbSizeY
 
+    // Phase 6: deblocking data at min-TB (4x4) granularity
+    uint8_t* cbf_luma_grid = nullptr;    // 1 if TU has nonzero luma coefficients
+    uint8_t* log2_tu_size_grid = nullptr; // log2 of TU size covering this 4x4 block
+    uint8_t* edge_flags_v = nullptr;     // 1 if there's a vertical edge at this 4x4 position
+    uint8_t* edge_flags_h = nullptr;     // 1 if there's a horizontal edge at this 4x4 position
+    int filter_grid_stride = 0;          // = pic_width / 4
+
+    // Phase 6: SAO params per CTU
+    struct SaoParams {
+        int sao_type_idx[3] = {};     // 0=off, 1=band, 2=edge
+        int sao_offset_val[3][5] = {}; // derived offset values (spec §7.4.9.3)
+        int sao_band_position[3] = {};
+        int sao_eo_class[3] = {};
+    };
+    SaoParams* sao_params = nullptr;   // array [PicWidthInCtbsY * PicHeightInCtbsY]
+    int sao_params_stride = 0;         // = PicWidthInCtbsY
+
     // Helper: get CU info at luma sample position
     CUInfo& cu_at(int x, int y) {
         int minCbSize = sps->MinCbSizeY;
