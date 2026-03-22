@@ -249,14 +249,19 @@ static void derive_spatial_merge_candidates(
         cands[i] = {};
     }
 
-    // Check each candidate
+    // §8.5.3.2.3: For each candidate, we need BOTH the raw block availability
+    // (availableX) and the motion info at that position, because pruning conditions
+    // use raw availability, not the filtered availableFlagX.
+    bool rawAvail[5] = {};
+    PUMotionInfo rawMotion[5] = {};
+
+    // First pass: compute raw availability and motion for all 5 positions
+    auto pm = ctx.cu_at(xPb, yPb).part_mode;
     for (int i = 0; i < 5; i++) {
         int xNb = nbPos[i].x;
         int yNb = nbPos[i].y;
 
-        // §8.5.3.2.3: additional pruning conditions per candidate
         bool available = is_pu_available(ctx, xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH, xNb, yNb, partIdx);
-
         if (!available) continue;
 
         // §8.5.3.2.3: parallel merge level constraint
@@ -265,7 +270,6 @@ static void derive_spatial_merge_candidates(
             continue;
 
         // §8.5.3.2.3: partition-specific exclusions
-        auto pm = ctx.cu_at(xPb, yPb).part_mode;
         if (i == 0 && partIdx == 1) { // A1
             if (pm == PartMode::PART_Nx2N || pm == PartMode::PART_nLx2N ||
                 pm == PartMode::PART_nRx2N)
@@ -277,40 +281,48 @@ static void derive_spatial_merge_candidates(
                 continue;
         }
 
-        PUMotionInfo mi = get_pu_motion(ctx, xNb, yNb);
+        rawAvail[i] = true;
+        rawMotion[i] = get_pu_motion(ctx, xNb, yNb);
+    }
 
-        // §8.5.3.2.3: Pruning — compare motion vectors, ref indices AND pred flags
-        auto same_motion = [](const PUMotionInfo& a, const MergeCandidate& b) {
-            return a.mv[0].x == b.mv[0].x && a.mv[0].y == b.mv[0].y &&
-                   a.mv[1].x == b.mv[1].x && a.mv[1].y == b.mv[1].y &&
-                   a.ref_idx[0] == b.ref_idx[0] && a.ref_idx[1] == b.ref_idx[1] &&
-                   a.pred_flag[0] == b.pred_flag[0] && a.pred_flag[1] == b.pred_flag[1];
-        };
+    // Second pass: apply pruning per spec, using rawAvail for conditions
+    auto same_motion_raw = [](const PUMotionInfo& a, const PUMotionInfo& b) {
+        return a.mv[0].x == b.mv[0].x && a.mv[0].y == b.mv[0].y &&
+               a.mv[1].x == b.mv[1].x && a.mv[1].y == b.mv[1].y &&
+               a.ref_idx[0] == b.ref_idx[0] && a.ref_idx[1] == b.ref_idx[1] &&
+               a.pred_flag[0] == b.pred_flag[0] && a.pred_flag[1] == b.pred_flag[1];
+    };
+
+    for (int i = 0; i < 5; i++) {
+        if (!rawAvail[i]) continue;
+
         bool prune = false;
-        if (i == 1 && avail[0]) prune = same_motion(mi, cands[0]);       // B1 vs A1
-        if (i == 2 && avail[1]) prune = same_motion(mi, cands[1]);       // B0 vs B1
-        if (i == 3 && avail[0]) prune = same_motion(mi, cands[0]);       // A0 vs A1
-        if (i == 4) {                                                      // B2 vs A1 and B1
-            if (avail[0]) prune = same_motion(mi, cands[0]);
-            if (!prune && avail[1]) prune = same_motion(mi, cands[1]);
-        }
-
-        // §8.5.3.2.3: B2 only checked if < 4 candidates so far
+        // §8.5.3.2.3: B1 pruned if availableA1 AND same motion as A1
+        if (i == 1 && rawAvail[0]) prune = same_motion_raw(rawMotion[1], rawMotion[0]);
+        // §8.5.3.2.3: B0 pruned if availableB1 AND same motion as B1
+        if (i == 2 && rawAvail[1]) prune = same_motion_raw(rawMotion[2], rawMotion[1]);
+        // §8.5.3.2.3: A0 pruned if availableA1 AND same motion as A1
+        if (i == 3 && rawAvail[0]) prune = same_motion_raw(rawMotion[3], rawMotion[0]);
+        // §8.5.3.2.3: B2 pruned if availableA1 AND same motion as A1,
+        //             OR availableB1 AND same motion as B1
         if (i == 4) {
+            // B2 only checked if < 4 candidates so far
             int cnt = 0;
             for (int k = 0; k < 4; k++) if (avail[k]) cnt++;
-            if (cnt >= 4) continue;
+            if (cnt >= 4) { continue; }
+            if (rawAvail[0]) prune = same_motion_raw(rawMotion[4], rawMotion[0]);
+            if (!prune && rawAvail[1]) prune = same_motion_raw(rawMotion[4], rawMotion[1]);
         }
 
         if (prune) continue;
 
         avail[i] = true;
-        cands[i].mv[0] = mi.mv[0];
-        cands[i].mv[1] = mi.mv[1];
-        cands[i].ref_idx[0] = mi.ref_idx[0];
-        cands[i].ref_idx[1] = mi.ref_idx[1];
-        cands[i].pred_flag[0] = mi.pred_flag[0];
-        cands[i].pred_flag[1] = mi.pred_flag[1];
+        cands[i].mv[0] = rawMotion[i].mv[0];
+        cands[i].mv[1] = rawMotion[i].mv[1];
+        cands[i].ref_idx[0] = rawMotion[i].ref_idx[0];
+        cands[i].ref_idx[1] = rawMotion[i].ref_idx[1];
+        cands[i].pred_flag[0] = rawMotion[i].pred_flag[0];
+        cands[i].pred_flag[1] = rawMotion[i].pred_flag[1];
     }
 }
 
