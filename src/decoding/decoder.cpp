@@ -83,6 +83,18 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     pic->poc = poc;
     pic->needed_for_output = sh.pic_output_flag;
 
+    // §8.1: IRAP with NoRaslOutputFlag starts a new CVS
+    if (is_irap(nal.header.nal_unit_type)) {
+        bool isIDR = (nal.header.nal_unit_type == NalUnitType::IDR_W_RADL ||
+                      nal.header.nal_unit_type == NalUnitType::IDR_N_LP);
+        bool isBLA = (nal.header.nal_unit_type == NalUnitType::BLA_W_LP ||
+                      nal.header.nal_unit_type == NalUnitType::BLA_W_RADL ||
+                      nal.header.nal_unit_type == NalUnitType::BLA_N_LP);
+        if (isIDR || isBLA)
+            cvs_id_++;
+    }
+    pic->cvs_id = cvs_id_;
+
     // Set conformance window
     if (sps->conformance_window_flag) {
         pic->conf_win_left = sps->conf_win_left_offset * sps->SubWidthC;
@@ -192,13 +204,16 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
 }
 
 std::vector<Picture*> Decoder::output_pictures() {
-    // Collect all pictures from the DPB, return in POC order
+    // Collect all pictures from the DPB, sort by CVS then POC
     std::vector<Picture*> out;
     for (auto& pic : dpb_.pictures()) {
         out.push_back(pic.get());
     }
     std::sort(out.begin(), out.end(),
-              [](const Picture* a, const Picture* b) { return a->poc < b->poc; });
+              [](const Picture* a, const Picture* b) {
+                  if (a->cvs_id != b->cvs_id) return a->cvs_id < b->cvs_id;
+                  return a->poc < b->poc;
+              });
     return out;
 }
 
