@@ -1,0 +1,94 @@
+// HEVC Decoder C API implementation
+
+#include "wasm/hevc_api.h"
+#include "decoding/decoder.h"
+#include "common/types.h"
+
+#include <cstring>
+#include <vector>
+
+struct HEVCDecoder {
+    hevc::Decoder decoder;
+    std::vector<hevc::Picture*> output;
+    const hevc::SPS* last_sps = nullptr;
+};
+
+extern "C" {
+
+HEVCDecoder* hevc_decoder_create(void) {
+    return new (std::nothrow) HEVCDecoder();
+}
+
+void hevc_decoder_destroy(HEVCDecoder* dec) {
+    delete dec;
+}
+
+int hevc_decoder_decode(HEVCDecoder* dec, const uint8_t* data, size_t size) {
+    if (!dec || !data || size == 0) return HEVC_ERROR;
+
+    try {
+        auto status = dec->decoder.decode(data, size);
+        if (status != hevc::DecodeStatus::OK) return HEVC_ERROR;
+
+        dec->output = dec->decoder.output_pictures();
+        return HEVC_OK;
+    } catch (...) {
+        // Catch C++ exceptions (e.g. BitstreamReader read past end on multi-slice)
+        // Still return partial results if any frames were decoded
+        dec->output = dec->decoder.output_pictures();
+        return dec->output.empty() ? HEVC_ERROR : HEVC_OK;
+    }
+}
+
+int hevc_decoder_get_frame_count(HEVCDecoder* dec) {
+    if (!dec) return 0;
+    return static_cast<int>(dec->output.size());
+}
+
+int hevc_decoder_get_frame(HEVCDecoder* dec, int index, HEVCFrame* frame) {
+    if (!dec || !frame || index < 0 || index >= static_cast<int>(dec->output.size()))
+        return HEVC_ERROR;
+
+    const auto* pic = dec->output[index];
+    int sub_w = hevc::SubWidthC(pic->chroma_format);
+    int sub_h = hevc::SubHeightC(pic->chroma_format);
+
+    // Cropped dimensions
+    int crop_w = pic->pic_width_in_luma - pic->conf_win_left - pic->conf_win_right;
+    int crop_h = pic->pic_height_in_luma - pic->conf_win_top - pic->conf_win_bottom;
+
+    // Plane pointers offset by conformance window
+    int y_offset = pic->conf_win_top * pic->stride[0] + pic->conf_win_left;
+    int c_offset = (pic->conf_win_top / sub_h) * pic->stride[1] +
+                   (pic->conf_win_left / sub_w);
+
+    frame->y  = pic->planes[0].data() + y_offset;
+    frame->cb = pic->planes[1].data() + c_offset;
+    frame->cr = pic->planes[2].data() + c_offset;
+    frame->width = crop_w;
+    frame->height = crop_h;
+    frame->stride_y = pic->stride[0];
+    frame->stride_c = pic->stride[1];
+    frame->chroma_width = crop_w / sub_w;
+    frame->chroma_height = crop_h / sub_h;
+    frame->bit_depth = pic->bit_depth_luma;
+    frame->poc = pic->poc;
+
+    return HEVC_OK;
+}
+
+int hevc_decoder_get_info(HEVCDecoder* dec, HEVCStreamInfo* info) {
+    if (!dec || !info || dec->output.empty()) return HEVC_ERROR;
+
+    const auto* pic = dec->output[0];
+    info->width = pic->pic_width_in_luma - pic->conf_win_left - pic->conf_win_right;
+    info->height = pic->pic_height_in_luma - pic->conf_win_top - pic->conf_win_bottom;
+    info->bit_depth = pic->bit_depth_luma;
+    info->chroma_format = static_cast<int>(pic->chroma_format);
+    info->profile = 0;
+    info->level = 0;
+
+    return HEVC_OK;
+}
+
+} // extern "C"
