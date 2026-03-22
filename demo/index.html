@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HEVC Decode — WebAssembly Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  h1 { font-size: 1.4em; margin-bottom: 12px; color: #fff; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
+  button, label { background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+  button:hover, label:hover { background: #0f3460; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  input[type="file"] { display: none; }
+  canvas { border: 1px solid #0f3460; border-radius: 4px; max-width: 100%; background: #000; }
+  .info { font-size: 0.85em; color: #aaa; margin-top: 8px; text-align: center; }
+  .info span { color: #53c1de; }
+  #status { margin-top: 8px; font-size: 0.85em; color: #e94560; }
+  .frame-nav { display: flex; gap: 8px; align-items: center; }
+  .frame-nav span { min-width: 80px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>HEVC/H.265 WebAssembly Decoder</h1>
+
+<div class="controls">
+  <label for="file-input">Open .265 file</label>
+  <input type="file" id="file-input" accept=".265,.hevc,.h265,.bin">
+  <div class="frame-nav">
+    <button id="btn-prev" disabled>&lt; Prev</button>
+    <span id="frame-label">—</span>
+    <button id="btn-next" disabled>Next &gt;</button>
+  </div>
+  <button id="btn-play" disabled>Play</button>
+</div>
+
+<canvas id="display" width="640" height="480"></canvas>
+
+<div class="info" id="info"></div>
+<div id="status">Loading WASM module...</div>
+
+<script>
+const VERTEX_SRC = `
+  attribute vec2 a_pos;
+  attribute vec2 a_tex;
+  varying vec2 v_tex;
+  void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    v_tex = a_tex;
+  }
+`;
+
+// BT.709 YUV -> RGB (full range for decoded HEVC)
+const FRAGMENT_SRC = `
+  precision mediump float;
+  varying vec2 v_tex;
+  uniform sampler2D u_texY;
+  uniform sampler2D u_texCb;
+  uniform sampler2D u_texCr;
+  uniform float u_scale; // 1/255 for 8-bit, 1/1023 for 10-bit
+  void main() {
+    float y  = texture2D(u_texY,  v_tex).r / u_scale;
+    float cb = texture2D(u_texCb, v_tex).r / u_scale - 0.5;
+    float cr = texture2D(u_texCr, v_tex).r / u_scale - 0.5;
+    // BT.709
+    float r = y + 1.5748 * cr;
+    float g = y - 0.1873 * cb - 0.4681 * cr;
+    float b = y + 1.8556 * cb;
+    gl_FragColor = vec4(clamp(r, 0.0, 1.0), clamp(g, 0.0, 1.0), clamp(b, 0.0, 1.0), 1.0);
+  }
+`;
+
+let gl, program, texY, texCb, texCr, uScale;
+let worker;
+let frames = [];
+let streamInfo = null;
+let currentFrame = 0;
+let playing = false;
+let playTimer = null;
+let decodeStartTime = 0;
+let decodeTimeMs = 0;
+
+// --- WebGL setup ---
+function initGL() {
+  const canvas = document.getElementById('display');
+  gl = canvas.getContext('webgl');
+  if (!gl) { setStatus('WebGL not supported'); return false; }
+
+  const vs = compileShader(gl.VERTEX_SHADER, VERTEX_SRC);
+  const fs = compileShader(gl.FRAGMENT_SHADER, FRAGMENT_SRC);
+  program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  gl.useProgram(program);
+
+  // Fullscreen quad
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1,-1, 0,1,  1,-1, 1,1,  -1,1, 0,0,  1,1, 1,0
+  ]), gl.STATIC_DRAW);
+
+  const aPos = gl.getAttribLocation(program, 'a_pos');
+  const aTex = gl.getAttribLocation(program, 'a_tex');
+  gl.enableVertexAttribArray(aPos);
+  gl.enableVertexAttribArray(aTex);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
+
+  // Textures
+  texY  = createTexture(0);
+  texCb = createTexture(1);
+  texCr = createTexture(2);
+
+  gl.uniform1i(gl.getUniformLocation(program, 'u_texY'), 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_texCb'), 1);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_texCr'), 2);
+  uScale = gl.getUniformLocation(program, 'u_scale');
+
+  return true;
+}
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  return s;
+}
+
+function createTexture(unit) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return tex;
+}
+
+function uploadPlane(tex, unit, data, width, height, bitDepth) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  // Convert uint16 to float-compatible uint8 (normalize to 0-255 range)
+  const scale = bitDepth <= 8 ? 1 : (255 / ((1 << bitDepth) - 1));
+  const u8 = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    u8[i] = Math.min(255, Math.round(data[i] * scale));
+  }
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, u8);
+}
+
+function renderFrame(frame) {
+  const canvas = document.getElementById('display');
+  canvas.width = frame.width;
+  canvas.height = frame.height;
+  gl.viewport(0, 0, frame.width, frame.height);
+
+  // For 8-bit: textures store val/255, shader reads as val/255, scale=1.0
+  // For 10-bit: textures store val*255/1023/255 = val/1023, shader needs scale=1.0
+  gl.uniform1f(uScale, 1.0);
+
+  uploadPlane(texY,  0, frame.y,  frame.width, frame.height, frame.bitDepth);
+  uploadPlane(texCb, 1, frame.cb, frame.chromaWidth, frame.chromaHeight, frame.bitDepth);
+  uploadPlane(texCr, 2, frame.cr, frame.chromaWidth, frame.chromaHeight, frame.bitDepth);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// --- Worker communication ---
+function initWorker() {
+  worker = new Worker('worker.js');
+  worker.onmessage = (e) => {
+    const msg = e.data;
+    switch (msg.type) {
+      case 'ready':
+        setStatus('Ready — open a .265 file');
+        break;
+      case 'info':
+        streamInfo = msg.info;
+        break;
+      case 'frame':
+        frames.push(msg.frame);
+        break;
+      case 'done':
+        decodeTimeMs = performance.now() - decodeStartTime;
+        setStatus(`Decoded ${msg.frameCount} frames in ${(decodeTimeMs / 1000).toFixed(2)}s`);
+        updateInfo();
+        if (frames.length > 0) {
+          currentFrame = 0;
+          showFrame(0);
+          document.getElementById('btn-prev').disabled = false;
+          document.getElementById('btn-next').disabled = false;
+          document.getElementById('btn-play').disabled = false;
+        }
+        break;
+      case 'error':
+        setStatus('Error: ' + msg.message);
+        break;
+    }
+  };
+  worker.postMessage({ type: 'init', wasmUrl: 'hevc-decode.js' });
+}
+
+function showFrame(idx) {
+  if (idx < 0 || idx >= frames.length) return;
+  currentFrame = idx;
+  renderFrame(frames[idx]);
+  document.getElementById('frame-label').textContent = `${idx + 1} / ${frames.length}`;
+}
+
+function updateInfo() {
+  if (!streamInfo) return;
+  const el = document.getElementById('info');
+  const fps = decodeTimeMs > 0 ? (frames.length / (decodeTimeMs / 1000)).toFixed(1) : '—';
+  const msPerFrame = decodeTimeMs > 0 ? (decodeTimeMs / frames.length).toFixed(1) : '—';
+  el.innerHTML = `<span>${streamInfo.width}x${streamInfo.height}</span> ` +
+    `<span>${streamInfo.bitDepth}-bit</span> ` +
+    `<span>${frames.length} frames</span> ` +
+    `<span>${fps} fps</span> ` +
+    `<span>${msPerFrame} ms/frame</span> ` +
+    `<span>.wasm ${(window._wasmSize / 1024).toFixed(0)}KB</span>`;
+}
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+// --- Event handlers ---
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  frames = [];
+  streamInfo = null;
+  playing = false;
+  clearInterval(playTimer);
+  document.getElementById('btn-play').textContent = 'Play';
+
+  setStatus('Decoding ' + file.name + '...');
+  const data = await file.arrayBuffer();
+  decodeStartTime = performance.now();
+  worker.postMessage({ type: 'decode', data }, [data]);
+});
+
+document.getElementById('btn-prev').addEventListener('click', () => showFrame(currentFrame - 1));
+document.getElementById('btn-next').addEventListener('click', () => showFrame(currentFrame + 1));
+document.getElementById('btn-play').addEventListener('click', () => {
+  if (playing) {
+    playing = false;
+    clearInterval(playTimer);
+    document.getElementById('btn-play').textContent = 'Play';
+  } else {
+    playing = true;
+    document.getElementById('btn-play').textContent = 'Pause';
+    playTimer = setInterval(() => {
+      if (currentFrame >= frames.length - 1) {
+        currentFrame = -1; // loop
+      }
+      showFrame(currentFrame + 1);
+    }, 40); // ~25fps
+  }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') showFrame(currentFrame - 1);
+  else if (e.key === 'ArrowRight') showFrame(currentFrame + 1);
+  else if (e.key === ' ') { e.preventDefault(); document.getElementById('btn-play').click(); }
+});
+
+// --- Init ---
+if (initGL()) {
+  // Track WASM size
+  fetch('hevc-decode.wasm').then(r => { window._wasmSize = +r.headers.get('content-length') || 0; });
+  initWorker();
+} else {
+  setStatus('WebGL not available');
+}
+</script>
+</body>
+</html>
