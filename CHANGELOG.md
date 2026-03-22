@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - 2 new oracle tests: `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`
   - `oracle_test.sh` now supports 10-bit output format via optional `PIX_FMT` parameter
 
+- **Phase 9 — Performance optimizations**:
+  - Interior PU interpolation: skip bounds checking for PUs not at picture edges (+32% native, 56→75 fps 1080p)
+  - Stack-allocated interpolation buffers: eliminate heap allocations per PU
+  - SAO early exit: skip full-picture copy when no CTU has SAO enabled
+  - Fixed stray `fprintf` in `dpb.cpp` (debug output in release builds)
+
 - **Phase 8 — WASM Integration**:
   - C API (`src/wasm/hevc_api.h/cpp`): `hevc_decoder_create/destroy/decode/get_frame/get_info`
   - Emscripten build: MODULARIZE, ALLOW_MEMORY_GROWTH, STACK_SIZE=1MB, EXPORTED_FUNCTIONS

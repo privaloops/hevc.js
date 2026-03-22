@@ -124,7 +124,7 @@ void DPB::derive_rps(const SliceHeader& sh, const SPS& sps,
         // Negative pictures (POC < current)
         for (int i = 0; i < NumNegativePics; i++) {
             int32_t poc = picOrderCntVal + rps->DeltaPocS0[i];
-            fprintf(stderr, "[PARSE] RPS DeltaPocS0[%d]=%d → POC %d used=%d\n",
+            HEVC_LOG(DPB, "RPS DeltaPocS0[%d]=%d → POC %d used=%d",
                     i, rps->DeltaPocS0[i], poc, rps->UsedByCurrPicS0[i]);
             if (rps->UsedByCurrPicS0[i])
                 PocStCurrBefore.push_back(poc);
