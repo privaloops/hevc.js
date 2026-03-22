@@ -176,6 +176,7 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.filter_grid_stride = modeGridW;
     ctx.sao_params = sao_params_buf_.data();
     ctx.sao_params_stride = sps->PicWidthInCtbsY;
+    ctx.sao_backup = sao_backup_;
 
     // Create bitstream reader for slice data (RBSP already extracted by NalParser)
     BitstreamReader bs(nal.rbsp.data(), nal.rbsp.size());

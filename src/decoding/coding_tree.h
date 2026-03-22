@@ -75,6 +75,9 @@ struct DecodingContext {
     SaoParams* sao_params = nullptr;   // array [PicWidthInCtbsY * PicHeightInCtbsY]
     int sao_params_stride = 0;         // = PicWidthInCtbsY
 
+    // Phase 9: SAO backup planes (reused across frames, owned by Decoder)
+    std::vector<uint16_t>* sao_backup = nullptr;  // array of 3 vectors
+
     // Helper: get CU info at luma sample position
     CUInfo& cu_at(int x, int y) {
         int minCbSize = sps->MinCbSizeY;
