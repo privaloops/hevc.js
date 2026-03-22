@@ -43,6 +43,9 @@ private:
     // Output pictures (accumulated across all decoded pictures)
     std::vector<Picture*> output_pics_;
 
+    // CVS counter — incremented at each IRAP with NoRaslOutputFlag
+    int32_t cvs_id_ = 0;
+
     // Decoding context allocations (per-picture)
     std::vector<CUInfo> cu_info_buf_;
     std::vector<int> intra_mode_buf_;

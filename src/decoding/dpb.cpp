@@ -124,6 +124,8 @@ void DPB::derive_rps(const SliceHeader& sh, const SPS& sps,
         // Negative pictures (POC < current)
         for (int i = 0; i < NumNegativePics; i++) {
             int32_t poc = picOrderCntVal + rps->DeltaPocS0[i];
+            fprintf(stderr, "[PARSE] RPS DeltaPocS0[%d]=%d → POC %d used=%d\n",
+                    i, rps->DeltaPocS0[i], poc, rps->UsedByCurrPicS0[i]);
             if (rps->UsedByCurrPicS0[i])
                 PocStCurrBefore.push_back(poc);
             else
@@ -396,8 +398,12 @@ std::vector<Picture*> DPB::get_output_pictures() {
             out.push_back(pic.get());
         }
     }
+    // Sort by CVS (GOP) first, then by POC within each CVS
     std::sort(out.begin(), out.end(),
-              [](const Picture* a, const Picture* b) { return a->poc < b->poc; });
+              [](const Picture* a, const Picture* b) {
+                  if (a->cvs_id != b->cvs_id) return a->cvs_id < b->cvs_id;
+                  return a->poc < b->poc;
+              });
     // Mark as output
     for (auto* pic : out) {
         pic->needed_for_output = false;

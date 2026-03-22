@@ -31,6 +31,8 @@ struct Picture {
 
     // Picture Order Count
     int32_t poc = 0;
+    // Coded Video Sequence ID (incremented at each IRAP with NoRaslOutputFlag)
+    int32_t cvs_id = 0;
 
     // Reference status
     bool used_for_short_term_ref = false;
