@@ -220,3 +220,39 @@ Sans cette condition, le décodeur lit `split_transform_flag` du bitstream alors
 ### Milestone atteint
 
 **Phase 5 Inter Prediction = 10/10 tests pixel-perfect** : `oracle_p_qcif_10f`, `oracle_b_qcif_10f`, `conf_p_weighted_qcif`, `conf_b_weighted_qcif`, `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif`, `conf_b_opengop_qcif`, `conf_p_amp_256`, `conf_b_cabacinit_qcif`.
+
+## Session 2026-03-22b — Phase 7 Main 10 (10-bit 4:2:0)
+
+### cu_skip_flag pred_mode race condition — latent bug since Phase 5 (CRITICAL)
+
+Le CU grid stocke `pred_mode` a la ligne 691 de `coding_tree.cpp`, APRES l'appel a `decode_prediction_unit_inter` (ligne 553 pour skip, 624 pour inter). Or `decode_prediction_unit_inter` lit `cu.pred_mode` du grid pour choisir entre merge (skip) et AMVP (inter). Pour les CUs skip, le grid a encore `MODE_INTRA` (default) → la fonction entre dans le chemin AMVP au lieu de merge, lisant un bin CABAC supplementaire (`merge_flag`) qui n'existe pas dans le bitstream.
+
+**Pourquoi masque en 8-bit** : les bitstreams de test 8-bit n'avaient pas de CUs skip, ou les CUs skip tombaient dans des etats CABAC ou le bin `merge_flag` fantome valait 1 (= merge), produisant le meme resultat que le chemin correct. Le bitstream 10-bit a QP=45 avec `ultrafast` (100% skip, tous sur des positions anciennement intra) a expose le bug.
+
+**Fix** : stocker `pred_mode = MODE_SKIP` dans le CU grid AVANT l'appel a `decode_prediction_unit_inter`.
+
+**Lecon** : tester avec des bitstreams qui maximisent les CUs skip (QP eleve + ultrafast + 10-bit). Les bitstreams "medium preset, QP 22" n'exercent pas les modes skip assez agressivement.
+
+### Architecture 10-bit = zero-effort grace a AD-002 (POSITIVE)
+
+La decision d'architecture AD-002 (`Pixel = uint16_t`) prise en Phase 1 a rendu le support 10-bit quasi transparent :
+- Aucun `255` hardcode nulle part — tous les clips utilisent `(1 << bitDepth) - 1`
+- `QpBdOffsetY`/`QpBdOffsetC` correctement derives et utilises dans QP, dequant, deblocking beta/tC
+- Shifts d'interpolation parametres par `bitDepth` (§8.5.3.3.3)
+- SAO band shift = `bitDepth - 5`
+- YUV output 10-bit deja gere dans `write_yuv()` (8-bit = uint8_t, 10-bit = uint16_t LE)
+
+**Seul probleme** : le chemin multi-frame dans `main.cpp` castait en `uint8_t` (bug trivial fixe en 5 min).
+
+### WPP inter-frame = bug restant (LOW)
+
+Le WPP fonctionne pour les I-frames mais echoue pour les P/B-frames. Le contexte CABAC save/restore aux frontieres de rangees CTU a un probleme d'alignement ou de timing en mode inter. Defere — le WPP est optionnel pour le Main 10 profile et prepare la Phase 9 (parallelisme).
+
+### Bugs #18-19
+
+18. **cu_skip_flag pred_mode race** — pred_mode stocke dans le CU grid apres `decode_prediction_unit_inter` au lieu d'avant, causant le chemin AMVP au lieu de merge pour les CUs skip
+19. **Multi-frame YUV 8-bit cast** — `main.cpp` multi-frame path castait en `uint8_t`, ignorant le bit depth + chroma crop hardcode `/2`
+
+### Milestone atteint
+
+**Phase 7 Main 10 = pixel-perfect** : `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`. 124/128 tests passent (4 echecs = multi-slice, inchange).
