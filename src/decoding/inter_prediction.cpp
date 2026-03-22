@@ -142,8 +142,10 @@ static bool derive_collocated_mv_at(const DecodingContext& ctx,
     const auto& colMi = colPic->motion_info_buf[miIdx];
 
     // §8.5.3.2.9: if colPb is intra → not available
-    if (!colMi.pred_flag[0] && !colMi.pred_flag[1])
+    if (!colMi.pred_flag[0] && !colMi.pred_flag[1]) {
+        HEVC_LOG(INTER, "TMVP colQ=(%d,%d) is INTRA", xColQ, yColQ);
         return false;
+    }
 
     // Determine which list to use from collocated PU
     int colList = -1;
@@ -179,6 +181,8 @@ static bool derive_collocated_mv_at(const DecodingContext& ctx,
     int currRefPOC = currRef->poc;
 
     mvLXCol = scale_mv(colMV, currPOC, currRefPOC, colPic->poc, colRefPOC);
+    HEVC_LOG(INTER, "TMVP colQ=(%d,%d) colMV=(%d,%d) scaled=(%d,%d) colRefPOC=%d currPOC=%d currRefPOC=%d colPOC=%d",
+             xColQ, yColQ, colMV.x, colMV.y, mvLXCol.x, mvLXCol.y, colRefPOC, ctx.pic->poc, currRefPOC, colPic->poc);
     return true;
 }
 
@@ -647,10 +651,13 @@ static MV derive_amvp_predictor(const DecodingContext& ctx,
 
     // §8.5.3.2.6 step 2: temporal candidate
     bool availFlagCol = false;
+    // §8.5.3.2.6 step 2: temporal MV derivation
+    // Skip temporal ONLY when both A and B are available AND they differ.
+    // When A==B or either is unavailable, temporal IS derived.
     MV mvCol = {};
-    if (availFlagA && availFlagB && mvLXA.x == mvLXB.x && mvLXA.y == mvLXB.y) {
+    if (availFlagA && availFlagB && (mvLXA.x != mvLXB.x || mvLXA.y != mvLXB.y)) {
         availFlagCol = false;
-    } else if (!availFlagA || !availFlagB) {
+    } else {
         if (ctx.sh->slice_temporal_mvp_enabled_flag)
             availFlagCol = derive_temporal_mv(ctx, xPb, yPb, nPbW, nPbH, refIdxLX, listX, mvCol);
     }
