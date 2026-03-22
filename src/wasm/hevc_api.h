@@ -66,6 +66,25 @@ int hevc_decoder_get_frame(HEVCDecoder* dec, int index, HEVCFrame* frame);
 // Returns HEVC_OK on success, HEVC_ERROR if no stream decoded yet
 int hevc_decoder_get_info(HEVCDecoder* dec, HEVCStreamInfo* info);
 
+// --- Incremental API (streaming) ---
+
+// Feed a chunk of data (one or more complete NAL units with start codes)
+// The decoder accumulates parameter sets and decodes pictures incrementally.
+// Returns HEVC_OK on success, HEVC_ERROR on failure
+int hevc_decoder_feed(HEVCDecoder* dec, const uint8_t* data, size_t size);
+
+// Drain newly output-ready pictures (§C.5.2 bumping process)
+// Outputs pictures in display order, only when ready per DPB constraints.
+// Returns HEVC_OK and sets *count to the number of available frames.
+int hevc_decoder_drain(HEVCDecoder* dec, int* count);
+
+// Get a drained frame by index (0 to count-1, valid until next feed/drain call)
+int hevc_decoder_get_drained_frame(HEVCDecoder* dec, int index, HEVCFrame* frame);
+
+// Flush all remaining pictures from the DPB (call at end of stream)
+// After flush, drain to get the remaining frames.
+int hevc_decoder_flush(HEVCDecoder* dec);
+
 #ifdef __cplusplus
 }
 #endif
