@@ -67,7 +67,7 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
     // Total reference samples needed: 4*nTbS + 1
     int totalSamples = 4 * nTbS + 1;
     bool available[4 * 64 + 1];
-    int16_t samples[4 * 64 + 1];
+    int16_t samples[4 * 64 + 1] = {};
 
     std::memset(available, false, sizeof(available));
 

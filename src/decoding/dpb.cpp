@@ -308,11 +308,11 @@ void DPB::construct_ref_pic_lists(const SliceHeader& sh, const SPS& /*sps*/,
     HEVC_LOG(PARSE, "RefPicLists: L0=%zu entries, L1=%zu entries",
              ref_pic_list0_.size(), ref_pic_list1_.size());
     for (size_t i = 0; i < ref_pic_list0_.size(); i++) {
-        auto* p = ref_pic_list0_[i].pic;
+        [[maybe_unused]] auto* p = ref_pic_list0_[i].pic;
         HEVC_LOG(PARSE, "  L0[%zu] = POC %d", i, p ? p->poc : -999);
     }
     for (size_t i = 0; i < ref_pic_list1_.size(); i++) {
-        auto* p = ref_pic_list1_[i].pic;
+        [[maybe_unused]] auto* p = ref_pic_list1_[i].pic;
         HEVC_LOG(PARSE, "  L1[%zu] = POC %d", i, p ? p->poc : -999);
     }
 }

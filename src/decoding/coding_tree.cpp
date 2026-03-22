@@ -394,7 +394,7 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
         int yCtb = (CtbAddrInRs / sps.PicWidthInCtbsY) << sps.CtbLog2SizeY;
         int ctuCol = CtbAddrInRs % sps.PicWidthInCtbsY;
 
-        size_t bits_before = bs.bits_read();
+        [[maybe_unused]] size_t bits_before = bs.bits_read();
         HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu bins=%d",
                  CtbAddrInRs, xCtb, yCtb, bits_before, cabac.bin_count());
 
