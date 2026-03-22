@@ -549,6 +549,17 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
         // §7.3.8.5: Skip mode = merge without residual
         pred_mode = PredMode::MODE_SKIP;
         HEVC_LOG(TREE, "CU (%d,%d) %dx%d SKIP", x0, y0, cbSize, cbSize);
+
+        // Store pred_mode in grid BEFORE decode_prediction_unit_inter
+        // so that it correctly selects the merge path (not AMVP)
+        {
+            int n = cbSize / sps.MinCbSizeY;
+            for (int j = 0; j < n; j++)
+                for (int i = 0; i < n; i++)
+                    ctx.cu_at(x0 + i * sps.MinCbSizeY,
+                              y0 + j * sps.MinCbSizeY).pred_mode = PredMode::MODE_SKIP;
+        }
+
         // prediction_unit for skip (always 2Nx2N) + motion compensation
         decode_prediction_unit_inter(ctx, x0, y0, cbSize, x0, y0, cbSize, cbSize, 0);
         {

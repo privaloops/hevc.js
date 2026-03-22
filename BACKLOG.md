@@ -12,7 +12,7 @@ Etat d'avancement par phase et prochaines taches.
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
 | 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
-| 7 — High Profiles | A faire | — |
+| 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
 | 8 — WASM Integration | A faire | — |
 | 9 — Performance | A faire | — |
 
@@ -147,6 +147,42 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
 
 ### Bug fixes
 - [x] Chroma deblocking saute quand luma decision dE==0 (le `continue` sautait aussi le chroma)
+
+## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
+
+Voir `docs/phases/phase-07-high-profiles.md` pour le plan detaille.
+
+### 7.1 — Main 10 (10-bit 4:2:0) (FAIT)
+- [x] Audit pipeline 10-bit (QpBdOffset, shifts, clips) — tout conforme
+- [x] Fix `cu_skip_flag` pred_mode race condition (bug #18)
+- [x] Fix multi-frame YUV output 8-bit cast (bug #19)
+- [x] Bitstreams 10-bit + oracle tests (2 tests pixel-perfect)
+
+### 7.2 — Main 4:2:2 10
+- [ ] Support `chroma_format_idc == 2`
+- [ ] Adapter interpolation chroma et deblocking
+
+### 7.3 — Main 4:4:4
+- [ ] Support `chroma_format_idc == 3`
+
+### 7.4 — Niveaux eleves
+- [x] Level 5.0/5.1 — fonctionne (BBB 1080p/4K decodent, meme si multi-slice fail)
+
+### 7.5 — Tiles (FAIT)
+- [x] PPS parsing (tile columns/rows, CtbAddrRsToTs/TsToRs/TileId)
+- [x] CABAC re-init aux frontieres de tiles
+- [x] Tile boundary exclusion dans deblocking/SAO
+
+### 7.6 — WPP (PARTIEL)
+- [x] entropy_coding_sync_enabled_flag parse
+- [x] Context save/restore au 2e CTU de chaque rangee
+- [x] WPP I-frames pixel-perfect
+- [ ] WPP P/B-frames (bug d'alignement CABAC aux frontieres inter)
+
+### 7.7 — Scaling Lists (FAIT en Phase 4)
+- [x] Parsing complet des scaling lists
+- [x] Application dans dequant
+- [x] Matrices par defaut
 
 ## Taches transverses
 
