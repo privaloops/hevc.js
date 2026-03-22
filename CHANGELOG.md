@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **hevc.js monorepo restructure**:
+  - pnpm workspace with `packages/core/` (TypeScript WASM wrapper) and `packages/videojs/` (Video.js Tech + fMP4 demuxer + renderer)
+  - `@hevcjs/core`: typed `HEVCDecoder` class with `.create()` / `.decode()` / `.destroy()` API
+  - `@hevcjs/videojs`: `HevcWasmTech` Video.js Tech, `FMP4Demuxer` (moof/mdat → NAL units), `FrameRenderer` (WebGL + VideoFrame/MediaStreamTrackGenerator)
+  - npm subpath exports: `import { HEVCDecoder } from 'hevc.js'` and `import 'hevc.js/videojs'`
+  - tsup build (ESM + .d.ts), TypeScript strict mode
+  - C++ source and tests unchanged (122/126 tests pass)
+
 - **Phase 7 — Main 10 Profile (10-bit 4:2:0)**:
   - 10-bit decoding pixel-perfect (I-frame + full pipeline I+P+B with deblock+SAO)
   - 2 new oracle tests: `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`

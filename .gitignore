@@ -38,6 +38,12 @@ demo/hevc-decode.js
 demo/hevc-decode.wasm
 demo/worker.js
 
+# Node.js / pnpm
+node_modules/
+packages/*/dist/
+pnpm-debug.log*
+*.tsbuildinfo
+
 # OS
 .DS_Store
 Thumbs.db
