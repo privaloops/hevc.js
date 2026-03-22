@@ -19,6 +19,10 @@ interface DecoderAPI {
   getFrameCount: (dec: number) => number;
   getFrame: (dec: number, index: number, framePtr: number) => number;
   getInfo: (dec: number, infoPtr: number) => number;
+  feed: (dec: number, ptr: number, size: number) => number;
+  drain: (dec: number, countPtr: number) => number;
+  getDrainedFrame: (dec: number, index: number, framePtr: number) => number;
+  flush: (dec: number) => number;
 }
 
 /**
@@ -46,6 +50,10 @@ export class HEVCDecoder {
       getFrameCount: module.cwrap("hevc_decoder_get_frame_count", "number", ["number"]) as (dec: number) => number,
       getFrame: module.cwrap("hevc_decoder_get_frame", "number", ["number", "number", "number"]) as (dec: number, index: number, framePtr: number) => number,
       getInfo: module.cwrap("hevc_decoder_get_info", "number", ["number", "number"]) as (dec: number, infoPtr: number) => number,
+      feed: module.cwrap("hevc_decoder_feed", "number", ["number", "number", "number"]) as (dec: number, ptr: number, size: number) => number,
+      drain: module.cwrap("hevc_decoder_drain", "number", ["number", "number"]) as (dec: number, countPtr: number) => number,
+      getDrainedFrame: module.cwrap("hevc_decoder_get_drained_frame", "number", ["number", "number", "number"]) as (dec: number, index: number, framePtr: number) => number,
+      flush: module.cwrap("hevc_decoder_flush", "number", ["number"]) as (dec: number) => number,
     };
     this._dec = this._api.create();
     if (!this._dec) throw new Error("Failed to create HEVC decoder");
@@ -112,27 +120,43 @@ export class HEVCDecoder {
     try {
       const ret = this._api.getFrame(this._dec, index, framePtr);
       if (ret !== 0) return null;
-
-      const yPtr    = m.getValue(framePtr, "*");
-      const cbPtr   = m.getValue(framePtr + 4, "*");
-      const crPtr   = m.getValue(framePtr + 8, "*");
-      const width   = m.getValue(framePtr + 12, "i32");
-      const height  = m.getValue(framePtr + 16, "i32");
-      const strideY = m.getValue(framePtr + 20, "i32");
-      const strideC = m.getValue(framePtr + 24, "i32");
-      const cw      = m.getValue(framePtr + 28, "i32");
-      const ch      = m.getValue(framePtr + 32, "i32");
-      const bd      = m.getValue(framePtr + 36, "i32");
-      const poc     = m.getValue(framePtr + 40, "i32");
-
-      const y  = copyPlane(m, yPtr, width, height, strideY);
-      const cb = copyPlane(m, cbPtr, cw, ch, strideC);
-      const cr = copyPlane(m, crPtr, cw, ch, strideC);
-
-      return { y, cb, cr, width, height, chromaWidth: cw, chromaHeight: ch, bitDepth: bd, poc };
+      return this._readFrameFromPtr(framePtr);
     } finally {
       m._free(framePtr);
     }
+  }
+
+  private _extractDrainedFrame(index: number): HEVCFrame | null {
+    const m = this._m;
+    const framePtr = m._malloc(48);
+    try {
+      const ret = this._api.getDrainedFrame(this._dec, index, framePtr);
+      if (ret !== 0) return null;
+      return this._readFrameFromPtr(framePtr);
+    } finally {
+      m._free(framePtr);
+    }
+  }
+
+  private _readFrameFromPtr(framePtr: number): HEVCFrame {
+    const m = this._m;
+    const yPtr    = m.getValue(framePtr, "*");
+    const cbPtr   = m.getValue(framePtr + 4, "*");
+    const crPtr   = m.getValue(framePtr + 8, "*");
+    const width   = m.getValue(framePtr + 12, "i32");
+    const height  = m.getValue(framePtr + 16, "i32");
+    const strideY = m.getValue(framePtr + 20, "i32");
+    const strideC = m.getValue(framePtr + 24, "i32");
+    const cw      = m.getValue(framePtr + 28, "i32");
+    const ch      = m.getValue(framePtr + 32, "i32");
+    const bd      = m.getValue(framePtr + 36, "i32");
+    const poc     = m.getValue(framePtr + 40, "i32");
+
+    const y  = copyPlane(m, yPtr, width, height, strideY);
+    const cb = copyPlane(m, cbPtr, cw, ch, strideC);
+    const cr = copyPlane(m, crPtr, cw, ch, strideC);
+
+    return { y, cb, cr, width, height, chromaWidth: cw, chromaHeight: ch, bitDepth: bd, poc };
   }
 
   private _extractInfo(): HEVCStreamInfo | null {
@@ -151,6 +175,78 @@ export class HEVCDecoder {
       };
     } finally {
       m._free(infoPtr);
+    }
+  }
+
+  // --- Incremental API (streaming) ---
+
+  /**
+   * Feed a chunk of data containing one or more complete NAL units.
+   * The decoder accumulates parameter sets and decodes pictures incrementally.
+   * Call drain() after each feed() to retrieve output-ready frames.
+   */
+  feed(data: Uint8Array): void {
+    const m = this._m;
+    const ptr = m._malloc(data.length);
+    try {
+      m.HEAPU8.set(data, ptr);
+      const ret = this._api.feed(this._dec, ptr, data.length);
+      if (ret !== 0) throw new Error(`Feed failed (code ${ret})`);
+    } finally {
+      m._free(ptr);
+    }
+  }
+
+  /**
+   * Drain output-ready frames from the decoder (§C.5.2 bumping process).
+   * Returns frames in display order, only when ready per DPB constraints.
+   * Frames are valid until the next feed() or destroy() call.
+   */
+  drain(): HEVCFrame[] {
+    const m = this._m;
+    const countPtr = m._malloc(4);
+    try {
+      const ret = this._api.drain(this._dec, countPtr);
+      if (ret !== 0) return [];
+      const count = m.getValue(countPtr, "i32");
+      const frames: HEVCFrame[] = [];
+      for (let i = 0; i < count; i++) {
+        const frame = this._extractDrainedFrame(i);
+        if (frame) frames.push(frame);
+      }
+      return frames;
+    } finally {
+      m._free(countPtr);
+    }
+  }
+
+  /**
+   * Flush all remaining frames from the DPB (call at end of stream).
+   * Returns all buffered frames in display order.
+   */
+  flush(): HEVCFrame[] {
+    const ret = this._api.flush(this._dec);
+    if (ret !== 0) return [];
+    // After flush, drained frames are available via getDrainedFrame
+    const m = this._m;
+    const countPtr = m._malloc(4);
+    try {
+      // flush() already populates the drained list, read the count
+      // by checking how many frames are available
+      const frames: HEVCFrame[] = [];
+      const framePtr = m._malloc(48);
+      try {
+        for (let i = 0; ; i++) {
+          const r = this._api.getDrainedFrame(this._dec, i, framePtr);
+          if (r !== 0) break;
+          frames.push(this._readFrameFromPtr(framePtr));
+        }
+      } finally {
+        m._free(framePtr);
+      }
+      return frames;
+    } finally {
+      m._free(countPtr);
     }
   }
 
