@@ -66,9 +66,30 @@ public:
     // Mark current picture as short-term reference after decoding (§8.1 step 4)
     void mark_current_as_short_term_ref();
 
-    // Output and bumping process (§C.5 simplified)
+    // Output and bumping process (§C.5 simplified — legacy batch mode)
     // Returns pictures that should be output (in POC order)
     std::vector<Picture*> get_output_pictures();
+
+    // ============================================================
+    // §C.5.2 — Incremental output (bumping process)
+    // ============================================================
+
+    // §C.5.2.4 — "Bumping" process: output the picture with smallest POC
+    // that is marked as "needed for output". Returns nullptr if no picture to bump.
+    Picture* bump();
+
+    // §C.5.2.2/C.5.2.3 — Drain: bump pictures while bumping conditions are met.
+    // Uses sps_max_num_reorder_pics and sps_max_dec_pic_buffering_minus1 from the active SPS.
+    // Returns newly output pictures in display order.
+    std::vector<Picture*> drain(const SPS& sps);
+
+    // Flush: output ALL remaining pictures marked as "needed for output", in POC order.
+    // Called at end-of-stream.
+    std::vector<Picture*> flush();
+
+    // Remove pictures from DPB that are neither reference nor needed for output.
+    // §C.5.2.4 step 3 + §C.5.2.2
+    void evict_unused();
 
     // Get all stored pictures (for external access)
     const std::vector<std::shared_ptr<Picture>>& pictures() const { return pictures_; }
