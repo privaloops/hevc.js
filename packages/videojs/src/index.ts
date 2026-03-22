@@ -1,4 +1,8 @@
+// Auto-registers HEVC SourceHandler on Video.js Html5 tech at import time
+import "./source-handler.js";
+
 export { HevcWasmTech } from "./tech.js";
+export { HEVCSourceHandler } from "./source-handler.js";
 export { FMP4Demuxer } from "./fmp4-demuxer.js";
 export type { DemuxedSample } from "./fmp4-demuxer.js";
 export { FrameRenderer } from "./renderer.js";
