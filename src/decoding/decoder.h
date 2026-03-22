@@ -51,6 +51,13 @@ private:
     std::vector<int> intra_mode_buf_;
     std::vector<int> chroma_mode_buf_;
     std::vector<PUMotionInfo> motion_info_buf_;
+
+    // Phase 6: filter data (per-picture)
+    std::vector<uint8_t> cbf_luma_buf_;
+    std::vector<uint8_t> log2_tu_size_buf_;
+    std::vector<uint8_t> edge_flags_v_buf_;
+    std::vector<uint8_t> edge_flags_h_buf_;
+    std::vector<DecodingContext::SaoParams> sao_params_buf_;
 };
 
 } // namespace hevc

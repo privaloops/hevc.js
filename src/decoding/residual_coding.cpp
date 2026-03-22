@@ -192,7 +192,7 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
         scanIdx = derive_scan_idx(predModeIntra, true);
     }
 
-    int bins_start = cabac.bin_count();
+    [[maybe_unused]] int bins_start = cabac.bin_count();
     HEVC_LOG(CABAC, "residual_coding (%d,%d) log2=%d cIdx=%d scanIdx=%d bins_at=%d",
              x0, y0, log2TrafoSize, cIdx, scanIdx, bins_start);
 
@@ -454,7 +454,7 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     }
 
     // Count total nonzero
-    int totalNonzero = 0;
+    [[maybe_unused]] int totalNonzero = 0;
     for (int k = 0; k < trSize * trSize; k++)
         if (coefficients[k] != 0) totalNonzero++;
 

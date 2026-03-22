@@ -45,6 +45,8 @@ add_library(hevc-decode-lib
     src/decoding/interpolation.cpp
     src/decoding/dpb.cpp
     src/decoding/decoder.cpp
+    src/filters/deblocking.cpp
+    src/filters/sao.cpp
 )
 
 target_include_directories(hevc-decode-lib PUBLIC

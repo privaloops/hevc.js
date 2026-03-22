@@ -1,6 +1,8 @@
 #include "decoding/decoder.h"
 #include "bitstream/nal_unit.h"
 #include "bitstream/bitstream_reader.h"
+#include "filters/deblocking.h"
+#include "filters/sao.h"
 #include "common/debug.h"
 
 #include <cstring>
@@ -135,6 +137,22 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     std::fill(pic->motion_info_buf.begin(), pic->motion_info_buf.end(), Picture::PUMotionInfoCompact{});
     pic->motion_info_stride = modeGridW;
 
+    // Phase 6: filter grids at min-TB (4x4) granularity
+    cbf_luma_buf_.resize(modeGridW * modeGridH, 0);
+    std::fill(cbf_luma_buf_.begin(), cbf_luma_buf_.end(), 0);
+    log2_tu_size_buf_.resize(modeGridW * modeGridH, sps->CtbLog2SizeY);
+    std::fill(log2_tu_size_buf_.begin(), log2_tu_size_buf_.end(),
+              static_cast<uint8_t>(sps->CtbLog2SizeY));
+    edge_flags_v_buf_.resize(modeGridW * modeGridH, 0);
+    std::fill(edge_flags_v_buf_.begin(), edge_flags_v_buf_.end(), 0);
+    edge_flags_h_buf_.resize(modeGridW * modeGridH, 0);
+    std::fill(edge_flags_h_buf_.begin(), edge_flags_h_buf_.end(), 0);
+
+    // Phase 6: SAO params per CTU
+    int ctbGridSize = sps->PicWidthInCtbsY * sps->PicHeightInCtbsY;
+    sao_params_buf_.resize(ctbGridSize);
+    std::fill(sao_params_buf_.begin(), sao_params_buf_.end(), DecodingContext::SaoParams{});
+
     // Setup decoding context
     CabacEngine cabac;
     DecodingContext ctx;
@@ -151,6 +169,13 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.intra_pred_mode_stride = modeGridW;
     ctx.motion_info = motion_info_buf_.data();
     ctx.motion_info_stride = modeGridW;
+    ctx.cbf_luma_grid = cbf_luma_buf_.data();
+    ctx.log2_tu_size_grid = log2_tu_size_buf_.data();
+    ctx.edge_flags_v = edge_flags_v_buf_.data();
+    ctx.edge_flags_h = edge_flags_h_buf_.data();
+    ctx.filter_grid_stride = modeGridW;
+    ctx.sao_params = sao_params_buf_.data();
+    ctx.sao_params_stride = sps->PicWidthInCtbsY;
 
     // Create bitstream reader for slice data (RBSP already extracted by NalParser)
     BitstreamReader bs(nal.rbsp.data(), nal.rbsp.size());
@@ -175,6 +200,10 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         fprintf(stderr, "Error: failed to decode slice data\n");
         return DecodeStatus::ERROR;
     }
+
+    // §8.7: In-loop filters — deblocking then SAO
+    apply_deblocking(ctx);
+    apply_sao(ctx);
 
     // Store motion info in the Picture for TMVP access by future frames
     for (int i = 0; i < modeGridW * modeGridH; i++) {

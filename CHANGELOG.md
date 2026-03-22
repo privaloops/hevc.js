@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Phase 6 — Loop Filters** (11/14 tests pass, 3 failures are multi-slice limitation):
+  - Deblocking filter (§8.7.2) — boundary strength derivation, strong/weak luma filter, chroma filter (Bs==2)
+  - SAO filter (§8.7.3) — edge offset (4 EO classes), band offset (32 bands), CTU merge (left/up)
+  - Per-TU cbf and edge flag storage for deblocking boundary detection
+  - SAO parameter storage with derived SaoOffsetVal (§7.4.9.3)
+  - **`oracle_full_qcif_10f` pixel-perfect — Main profile complet**
+
+### Fixed
+- Chroma deblocking skipped when luma decision dE==0 (luma `continue` also skipped chroma filtering)
+
+### Previously added (Phase 5)
 - **Phase 5 — Inter Prediction** (10/10 tests pass):
   - Explicit weighted sample prediction (§8.5.3.3.4.3) — `weighted_pred_flag` P-slices with per-ref luma/chroma weights and offsets
   - CVS-aware output frame ordering — `cvs_id` counter for multi-GOP bitstreams with POC wrap at IDR boundaries
