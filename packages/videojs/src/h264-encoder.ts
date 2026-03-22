@@ -1,0 +1,151 @@
+/**
+ * H264Encoder — Wraps WebCodecs VideoEncoder to transcode YUV frames to H.264.
+ *
+ * Pipeline: HEVCFrame (Uint16Array YUV planes) → VideoFrame(I420) → VideoEncoder → EncodedVideoChunk
+ */
+
+import type { HEVCFrame } from "@hevcjs/core";
+
+export interface H264EncoderConfig {
+  width: number;
+  height: number;
+  fps?: number;
+  bitrate?: number;
+}
+
+export interface EncodedChunk {
+  data: Uint8Array;
+  timestamp: number;
+  duration: number;
+  isKeyframe: boolean;
+}
+
+export class H264Encoder {
+  private _encoder: VideoEncoder;
+  private _width: number;
+  private _height: number;
+  private _fps: number;
+  private _codecDescription: Uint8Array | null = null;
+  private _pendingChunks: EncodedChunk[] = [];
+  private _flushResolve: (() => void) | null = null;
+
+  /** Callback invoked for each encoded chunk */
+  onChunk: ((chunk: EncodedChunk) => void) | null = null;
+
+  /** Callback invoked when codec description (avcC) is available */
+  onCodecDescription: ((desc: Uint8Array) => void) | null = null;
+
+  constructor(config: H264EncoderConfig) {
+    this._width = config.width;
+    this._height = config.height;
+    this._fps = config.fps ?? 25;
+
+    this._encoder = new VideoEncoder({
+      output: (chunk, metadata) => this._handleOutput(chunk, metadata),
+      error: (e) => { throw new Error(`VideoEncoder error: ${e.message}`); },
+    });
+
+    this._encoder.configure({
+      codec: "avc1.42001f", // Baseline profile, level 3.1
+      width: this._width,
+      height: this._height,
+      bitrate: config.bitrate ?? this._width * this._height * this._fps * 0.1, // ~0.1 bpp
+      framerate: this._fps,
+      hardwareAcceleration: "prefer-hardware",
+      avc: { format: "avc" }, // Annex B output (start codes)
+    });
+  }
+
+  /** Get the avcC codec description (available after first keyframe) */
+  get codecDescription(): Uint8Array | null {
+    return this._codecDescription;
+  }
+
+  /**
+   * Encode a decoded HEVC frame.
+   * Converts Uint16Array YUV planes to I420 Uint8Array, creates VideoFrame, encodes.
+   */
+  encode(frame: HEVCFrame, timestampUs: number, keyFrame = false): void {
+    const w = frame.width;
+    const h = frame.height;
+    const cw = frame.chromaWidth;
+    const ch = frame.chromaHeight;
+    const shift = frame.bitDepth > 8 ? frame.bitDepth - 8 : 0;
+
+    // Build I420 buffer: Y plane + U (Cb) plane + V (Cr) plane
+    const ySize = w * h;
+    const cSize = cw * ch;
+    const i420 = new Uint8Array(ySize + cSize * 2);
+
+    // Y plane
+    for (let i = 0; i < ySize; i++) {
+      const v = frame.y[i]! >> shift;
+      i420[i] = v > 255 ? 255 : v;
+    }
+    // U (Cb) plane
+    for (let i = 0; i < cSize; i++) {
+      const v = frame.cb[i]! >> shift;
+      i420[ySize + i] = v > 255 ? 255 : v;
+    }
+    // V (Cr) plane
+    for (let i = 0; i < cSize; i++) {
+      const v = frame.cr[i]! >> shift;
+      i420[ySize + cSize + i] = v > 255 ? 255 : v;
+    }
+
+    const videoFrame = new VideoFrame(i420, {
+      format: "I420",
+      codedWidth: w,
+      codedHeight: h,
+      timestamp: timestampUs,
+      duration: Math.round(1_000_000 / this._fps),
+      colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709" },
+    });
+
+    this._encoder.encode(videoFrame, { keyFrame });
+    videoFrame.close();
+  }
+
+  /** Flush the encoder — waits for all pending chunks to be output */
+  async flush(): Promise<void> {
+    await this._encoder.flush();
+  }
+
+  /** Close the encoder and release resources */
+  close(): void {
+    this._encoder.close();
+  }
+
+  /** Check if VideoEncoder is supported in the current environment */
+  static isSupported(): boolean {
+    return typeof VideoEncoder !== "undefined";
+  }
+
+  private _handleOutput(chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata): void {
+    // Capture codec description (avcC) from first chunk with decoderConfig
+    if (metadata?.decoderConfig?.description && !this._codecDescription) {
+      const desc = metadata.decoderConfig.description;
+      if (desc instanceof ArrayBuffer) {
+        this._codecDescription = new Uint8Array(desc);
+      } else if (desc instanceof Uint8Array) {
+        this._codecDescription = new Uint8Array(desc);
+      } else if (ArrayBuffer.isView(desc)) {
+        this._codecDescription = new Uint8Array((desc as ArrayBufferView).buffer);
+      }
+      this.onCodecDescription?.(this._codecDescription!);
+    }
+
+    // Extract chunk data
+    const data = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(data);
+
+    const encoded: EncodedChunk = {
+      data,
+      timestamp: chunk.timestamp,
+      duration: chunk.duration ?? Math.round(1_000_000 / this._fps),
+      isKeyframe: chunk.type === "key",
+    };
+
+    this.onChunk?.(encoded);
+  }
+}
