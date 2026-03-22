@@ -51,6 +51,9 @@ export interface DecoderOptions {
 export type WorkerRequest =
   | { type: "init"; wasmUrl: string }
   | { type: "decode"; data: ArrayBuffer }
+  | { type: "feed"; data: ArrayBuffer }
+  | { type: "drain" }
+  | { type: "flush" }
   | { type: "destroy" };
 
 /** Worker message types (worker → main) */
@@ -59,4 +62,6 @@ export type WorkerResponse =
   | { type: "info"; info: HEVCStreamInfo }
   | { type: "frame"; index: number; frame: HEVCFrame }
   | { type: "done"; frameCount: number }
+  | { type: "drained"; frames: HEVCFrame[] }
+  | { type: "flushed"; frames: HEVCFrame[] }
   | { type: "error"; message: string };
