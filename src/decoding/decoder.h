@@ -58,6 +58,9 @@ private:
     std::vector<uint8_t> edge_flags_v_buf_;
     std::vector<uint8_t> edge_flags_h_buf_;
     std::vector<DecodingContext::SaoParams> sao_params_buf_;
+
+    // Phase 9: SAO backup buffers (reused across frames to avoid per-frame allocation)
+    std::vector<uint16_t> sao_backup_[3];
 };
 
 } // namespace hevc
