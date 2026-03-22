@@ -208,6 +208,66 @@ static void weighted_pred_default(int16_t* predL0, int16_t* predL1,
 }
 
 // ============================================================
+// §8.5.3.3.4.3 — Explicit weighted sample prediction
+// ============================================================
+
+static void weighted_pred_explicit(int16_t* predL0, int16_t* predL1,
+                                    bool flagL0, bool flagL1,
+                                    int refIdxL0, int refIdxL1,
+                                    int cIdx, int nSamples, int bitDepth,
+                                    const PredWeightTable& pwt,
+                                    int16_t* output) {
+    // §8.5.3.3.4.3
+    int shift1 = std::max(2, 14 - bitDepth);
+    int maxVal = (1 << bitDepth) - 1;
+
+    int log2Wd, w0, w1, o0, o1;
+
+    if (cIdx == 0) {
+        // Luma — eq 8-265..8-269
+        log2Wd = static_cast<int>(pwt.luma_log2_weight_denom) + shift1;
+        w0 = pwt.l0[refIdxL0 >= 0 ? refIdxL0 : 0].luma_weight;
+        w1 = pwt.l1[refIdxL1 >= 0 ? refIdxL1 : 0].luma_weight;
+        // WpOffsetBdShiftY = BitDepthY - 8
+        int wpShiftY = bitDepth - 8;
+        o0 = pwt.l0[refIdxL0 >= 0 ? refIdxL0 : 0].luma_offset << wpShiftY;
+        o1 = pwt.l1[refIdxL1 >= 0 ? refIdxL1 : 0].luma_offset << wpShiftY;
+    } else {
+        // Chroma — eq 8-270..8-274
+        int chromaLog2WeightDenom = static_cast<int>(pwt.luma_log2_weight_denom) +
+                                    pwt.delta_chroma_log2_weight_denom;
+        log2Wd = chromaLog2WeightDenom + shift1;
+        int ci = cIdx - 1;  // 0=Cb, 1=Cr
+        w0 = pwt.l0[refIdxL0 >= 0 ? refIdxL0 : 0].chroma_weight[ci];
+        w1 = pwt.l1[refIdxL1 >= 0 ? refIdxL1 : 0].chroma_weight[ci];
+        // WpOffsetBdShiftC = BitDepthC - 8
+        int wpShiftC = bitDepth - 8;
+        o0 = pwt.l0[refIdxL0 >= 0 ? refIdxL0 : 0].chroma_offset[ci] << wpShiftC;
+        o1 = pwt.l1[refIdxL1 >= 0 ? refIdxL1 : 0].chroma_offset[ci] << wpShiftC;
+    }
+
+    if (flagL0 && !flagL1) {
+        // eq 8-275: uni-pred L0
+        int round = 1 << (log2Wd - 1);
+        for (int i = 0; i < nSamples; i++)
+            output[i] = static_cast<int16_t>(Clip3(0, maxVal,
+                ((predL0[i] * w0 + round) >> log2Wd) + o0));
+    } else if (!flagL0 && flagL1) {
+        // eq 8-276: uni-pred L1
+        int round = 1 << (log2Wd - 1);
+        for (int i = 0; i < nSamples; i++)
+            output[i] = static_cast<int16_t>(Clip3(0, maxVal,
+                ((predL1[i] * w1 + round) >> log2Wd) + o1));
+    } else {
+        // eq 8-277: bi-pred
+        for (int i = 0; i < nSamples; i++)
+            output[i] = static_cast<int16_t>(Clip3(0, maxVal,
+                (predL0[i] * w0 + predL1[i] * w1 +
+                 ((o0 + o1 + 1) << log2Wd)) >> (log2Wd + 1)));
+    }
+}
+
+// ============================================================
 // §8.5.3.3 — Top-level inter prediction for one PU
 // ============================================================
 
@@ -294,10 +354,26 @@ void perform_inter_prediction(DecodingContext& ctx,
         }
     }
 
-    // §8.5.3.3.4.2: Default weighted prediction (averaging)
-    weighted_pred_default(predL0.data(), predL1.data(),
-                           predFlagL0, predFlagL1,
-                           nSamples, bitDepth, pred_samples);
+    // §8.5.3.3.4.1: Determine weightedPredFlag
+    bool weightedPredFlag = false;
+    if (ctx.sh->slice_type == SliceType::P)
+        weightedPredFlag = ctx.pps->weighted_pred_flag;
+    else if (ctx.sh->slice_type == SliceType::B)
+        weightedPredFlag = ctx.pps->weighted_bipred_flag;
+
+    if (weightedPredFlag) {
+        // §8.5.3.3.4.3: Explicit weighted sample prediction
+        weighted_pred_explicit(predL0.data(), predL1.data(),
+                               predFlagL0, predFlagL1,
+                               refIdxL0, refIdxL1,
+                               cIdx, nSamples, bitDepth,
+                               ctx.sh->pred_weight_table, pred_samples);
+    } else {
+        // §8.5.3.3.4.2: Default weighted sample prediction
+        weighted_pred_default(predL0.data(), predL1.data(),
+                               predFlagL0, predFlagL1,
+                               nSamples, bitDepth, pred_samples);
+    }
 }
 
 } // namespace hevc
