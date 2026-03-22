@@ -412,6 +412,129 @@ std::vector<Picture*> DPB::get_output_pictures() {
 }
 
 // ============================================================
+// §C.5.2.4 — "Bumping" process
+// ============================================================
+// 1. Select the picture with the smallest PicOrderCntVal that is
+//    marked as "needed for output".
+// 2. Output it and mark as "not needed for output".
+// 3. If the picture storage buffer is also "unused for reference",
+//    it is emptied (handled by evict_unused).
+
+Picture* DPB::bump() {
+    // §C.5.2.4 step 1: select the picture with the smallest PicOrderCntVal
+    // that is marked as "needed for output".
+    // Within multiple CVS, earlier CVS pictures are output first.
+    Picture* smallest = nullptr;
+    for (auto& pic : pictures_) {
+        if (!pic->needed_for_output) continue;
+        if (!smallest ||
+            pic->cvs_id < smallest->cvs_id ||
+            (pic->cvs_id == smallest->cvs_id && pic->poc < smallest->poc)) {
+            smallest = pic.get();
+        }
+    }
+    if (smallest) {
+        smallest->needed_for_output = false;  // §C.5.2.4 step 2
+    }
+    return smallest;
+}
+
+// ============================================================
+// §C.5.2.2 / §C.5.2.3 — Drain (incremental bumping)
+// ============================================================
+// Bumps pictures while any of the following conditions are true:
+// - The number of pictures marked "needed for output" >
+//   sps_max_num_reorder_pics[HighestTid]
+// - The number of pictures in the DPB >=
+//   sps_max_dec_pic_buffering_minus1[HighestTid] + 1
+// - sps_max_latency_increase_plus1 != 0 and a picture has
+//   PicLatencyCount >= SpsMaxLatencyPictures
+//
+// Note: PicLatencyCount tracking is not implemented (would require
+// per-picture counter incremented at each subsequent picture decode).
+// For most real-world streams, the reorder_pics and DPB size conditions
+// are sufficient. Latency-based bumping is a conformance refinement
+// that can be added later if needed.
+
+std::vector<Picture*> DPB::drain(const SPS& sps) {
+    std::vector<Picture*> out;
+
+    // §C.5.2.2: use HighestTid = sps_max_sub_layers_minus1
+    int tid = sps.sps_max_sub_layers_minus1;
+    int max_reorder = static_cast<int>(sps.sub_layer_ordering[tid].max_num_reorder_pics);
+    int max_dpb_size = static_cast<int>(sps.sub_layer_ordering[tid].max_dec_pic_buffering_minus1) + 1;
+
+    auto count_needed_for_output = [this]() {
+        int count = 0;
+        for (auto& pic : pictures_) {
+            if (pic->needed_for_output) count++;
+        }
+        return count;
+    };
+
+    // §C.5.2.2: bump while conditions are met
+    while (true) {
+        bool should_bump = false;
+
+        // Condition 1: too many pictures waiting for output
+        if (count_needed_for_output() > max_reorder) {
+            should_bump = true;
+        }
+
+        // Condition 2: DPB is full
+        if (static_cast<int>(pictures_.size()) >= max_dpb_size) {
+            if (count_needed_for_output() > 0) {
+                should_bump = true;
+            }
+        }
+
+        if (!should_bump) break;
+
+        Picture* pic = bump();
+        if (!pic) break;
+        out.push_back(pic);
+
+        // NOTE: Do NOT evict here — the returned raw pointers must stay valid
+        // until the next feed() call. alloc_picture() handles eviction.
+    }
+
+    return out;
+}
+
+// ============================================================
+// Flush — output ALL remaining pictures (end of stream)
+// ============================================================
+
+std::vector<Picture*> DPB::flush() {
+    std::vector<Picture*> out;
+
+    // Bump all pictures marked as "needed for output", in POC order
+    while (true) {
+        Picture* pic = bump();
+        if (!pic) break;
+        out.push_back(pic);
+    }
+
+    // NOTE: Do NOT evict here — raw pointers must stay valid.
+    return out;
+}
+
+// ============================================================
+// Evict unused — remove pictures that are neither ref nor output
+// ============================================================
+
+void DPB::evict_unused() {
+    pictures_.erase(
+        std::remove_if(pictures_.begin(), pictures_.end(),
+            [this](const std::shared_ptr<Picture>& p) {
+                // Don't evict the current picture being decoded
+                if (p.get() == current_pic_) return false;
+                return !p->is_reference() && !p->needed_for_output;
+            }),
+        pictures_.end());
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 
