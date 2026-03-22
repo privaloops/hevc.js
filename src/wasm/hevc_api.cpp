@@ -9,7 +9,8 @@
 
 struct HEVCDecoder {
     hevc::Decoder decoder;
-    std::vector<hevc::Picture*> output;
+    std::vector<hevc::Picture*> output;   // batch mode
+    std::vector<hevc::Picture*> drained;  // incremental mode
     const hevc::SPS* last_sps = nullptr;
 };
 
@@ -75,6 +76,73 @@ int hevc_decoder_get_frame(HEVCDecoder* dec, int index, HEVCFrame* frame) {
     frame->poc = pic->poc;
 
     return HEVC_OK;
+}
+
+// --- Incremental API ---
+
+int hevc_decoder_feed(HEVCDecoder* dec, const uint8_t* data, size_t size) {
+    if (!dec || !data || size == 0) return HEVC_ERROR;
+
+    try {
+        auto status = dec->decoder.feed(data, size);
+        return (status == hevc::DecodeStatus::OK) ? HEVC_OK : HEVC_ERROR;
+    } catch (...) {
+        return HEVC_ERROR;
+    }
+}
+
+int hevc_decoder_drain(HEVCDecoder* dec, int* count) {
+    if (!dec || !count) return HEVC_ERROR;
+
+    try {
+        dec->drained = dec->decoder.drain();
+        *count = static_cast<int>(dec->drained.size());
+        return HEVC_OK;
+    } catch (...) {
+        *count = 0;
+        return HEVC_ERROR;
+    }
+}
+
+int hevc_decoder_get_drained_frame(HEVCDecoder* dec, int index, HEVCFrame* frame) {
+    if (!dec || !frame || index < 0 || index >= static_cast<int>(dec->drained.size()))
+        return HEVC_ERROR;
+
+    const auto* pic = dec->drained[index];
+    int sub_w = hevc::SubWidthC(pic->chroma_format);
+    int sub_h = hevc::SubHeightC(pic->chroma_format);
+
+    int crop_w = pic->pic_width_in_luma - pic->conf_win_left - pic->conf_win_right;
+    int crop_h = pic->pic_height_in_luma - pic->conf_win_top - pic->conf_win_bottom;
+
+    int y_offset = pic->conf_win_top * pic->stride[0] + pic->conf_win_left;
+    int c_offset = (pic->conf_win_top / sub_h) * pic->stride[1] +
+                   (pic->conf_win_left / sub_w);
+
+    frame->y  = pic->planes[0].data() + y_offset;
+    frame->cb = pic->planes[1].data() + c_offset;
+    frame->cr = pic->planes[2].data() + c_offset;
+    frame->width = crop_w;
+    frame->height = crop_h;
+    frame->stride_y = pic->stride[0];
+    frame->stride_c = pic->stride[1];
+    frame->chroma_width = crop_w / sub_w;
+    frame->chroma_height = crop_h / sub_h;
+    frame->bit_depth = pic->bit_depth_luma;
+    frame->poc = pic->poc;
+
+    return HEVC_OK;
+}
+
+int hevc_decoder_flush(HEVCDecoder* dec) {
+    if (!dec) return HEVC_ERROR;
+
+    try {
+        dec->drained = dec->decoder.flush();
+        return HEVC_OK;
+    } catch (...) {
+        return HEVC_ERROR;
+    }
 }
 
 int hevc_decoder_get_info(HEVCDecoder* dec, HEVCStreamInfo* info) {

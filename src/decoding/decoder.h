@@ -24,10 +24,23 @@ class Decoder {
 public:
     Decoder() = default;
 
-    // Decode a complete bitstream
+    // Decode a complete bitstream (batch mode)
     DecodeStatus decode(const uint8_t* data, size_t size);
 
-    // Get decoded pictures (in output order)
+    // Feed a chunk of data (incremental mode — one or more complete NAL units)
+    // Same as decode() but named for clarity in streaming context.
+    DecodeStatus feed(const uint8_t* data, size_t size);
+
+    // Drain newly output-ready pictures (§C.5.2 bumping process)
+    // Returns pictures in display order. Only returns pictures that are
+    // ready according to sps_max_num_reorder_pics / DPB size constraints.
+    std::vector<Picture*> drain();
+
+    // Flush all remaining pictures from the DPB (end-of-stream)
+    // Returns all pictures still marked as "needed for output", in POC order.
+    std::vector<Picture*> flush();
+
+    // Get decoded pictures — batch mode (legacy, returns ALL pictures ever decoded)
     std::vector<Picture*> output_pictures();
 
     // Get DPB (for testing)

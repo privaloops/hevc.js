@@ -233,6 +233,20 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     return DecodeStatus::OK;
 }
 
+DecodeStatus Decoder::feed(const uint8_t* data, size_t size) {
+    return decode(data, size);
+}
+
+std::vector<Picture*> Decoder::drain() {
+    const SPS* sps = ps_mgr_.active_sps();
+    if (!sps) return {};
+    return dpb_.drain(*sps);
+}
+
+std::vector<Picture*> Decoder::flush() {
+    return dpb_.flush();
+}
+
 std::vector<Picture*> Decoder::output_pictures() {
     // Collect all pictures from the DPB, sort by CVS then POC
     std::vector<Picture*> out;
