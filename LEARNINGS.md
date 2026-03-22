@@ -176,3 +176,47 @@ Notre code avait: `2 + ((candA - 2 + 29) % 32)` — un `-2` en trop.
 ### Milestone atteint
 
 **I-frame multi-CTU 176x144 = pixel-perfect** (bloqueur Phase 5 levé).
+
+## Session 2026-03-22 — Phase 5 completion (3 bugs, 10/10 tests)
+
+### Explicit weighted prediction — ne pas ignorer les flags PPS (CRITICAL)
+
+Le PPS contient `weighted_pred_flag` (P-slices) et `weighted_bipred_flag` (B-slices). La spec §8.5.3.3.4.1 route vers default (§8.5.3.3.4.2) ou explicit (§8.5.3.3.4.3) selon `weightedPredFlag`. Le code appelait toujours `weighted_pred_default`, ignorant les flags.
+
+**Impact**: P-slices avec poids non-triviaux produisaient des valeurs luma fausses (max_diff=11), cascadant vers les B-frames qui les référencent.
+
+**Méthode de découverte**: analyse de la sortie `--dump-headers` montrant `weighted_pred = 1` dans le PPS. Le fix est une transcription directe de la spec eq 8-265 à 8-277.
+
+**Leçon**: toujours vérifier les flags PPS qui routent vers des processus différents. Un flag ignoré = un processus entier manquant.
+
+### Output frame ordering multi-GOP — POC n'est PAS un identifiant global (HIGH)
+
+Quand un bitstream contient plusieurs IDR, le POC remet à 0 à chaque IDR. Trier la sortie par POC seul mélange les frames de GOPs différents. La reconstruction pixel-perfect produisait 176 à position (0,0), mais le YUV montrait 66 (une frame d'un autre GOP à la mauvaise position).
+
+**Fix**: ajouter un compteur `cvs_id` (Coded Video Sequence) incrémenté à chaque IDR, trier par `(cvs_id, poc)`.
+
+**Piège supplémentaire**: le code avait DEUX fonctions de sortie (`DPB::get_output_pictures()` et `Decoder::output_pictures()`) avec des tris différents. Le fix dans l'une ne s'appliquait pas à l'autre. Toujours vérifier qu'il n'y a pas de duplication de logique.
+
+### interSplitFlag — condition implicite facile à oublier (HIGH)
+
+La spec §7.4.9.4 dit que quand `split_transform_flag` n'est pas présent dans le bitstream, il est inféré à 1 si `interSplitFlag == 1`. L'`interSplitFlag` se déclenche quand:
+- `max_transform_hierarchy_depth_inter == 0`
+- `CuPredMode == MODE_INTER`
+- `PartMode != PART_2Nx2N`
+- `trafoDepth == 0`
+
+Sans cette condition, le décodeur lit `split_transform_flag` du bitstream alors qu'il devrait être inféré, corrompant l'état CABAC pour tous les éléments suivants.
+
+**Pourquoi seulement 4 frames**: seules les B-frames avec des CUs 32x32 non-2Nx2N (PART_2NxN) étaient affectées. Les CUs 64x64 forçaient déjà le split via `log2TrafoSize > MaxTbLog2SizeY`. Les CUs 2Nx2N avaient `interSplitFlag=0`.
+
+**Méthode de découverte**: agent subagent avec investigation systématique — comparaison HM SYN trace pour identifier le CU exact (64,96 PART_2NxN dans POC 8), puis relecture spec §7.4.9.4.
+
+### Bugs #15-17
+
+15. **Explicit weighted prediction** — `weighted_pred_default` appelé systématiquement au lieu de router selon `weightedPredFlag` (§8.5.3.3.4.1)
+16. **Output ordering multi-GOP** — tri par POC seul mélange les frames de GOPs avec POC identiques
+17. **interSplitFlag** — condition implicite manquante pour le split du transform tree (§7.4.9.4)
+
+### Milestone atteint
+
+**Phase 5 Inter Prediction = 10/10 tests pixel-perfect** : `oracle_p_qcif_10f`, `oracle_b_qcif_10f`, `conf_p_weighted_qcif`, `conf_b_weighted_qcif`, `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif`, `conf_b_opengop_qcif`, `conf_p_amp_256`, `conf_b_cabacinit_qcif`.

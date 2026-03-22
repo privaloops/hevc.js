@@ -10,8 +10,8 @@ Etat d'avancement par phase et prochaines taches.
 | 2 — Bitstream & NAL | **Terminee** | NalParser, start codes, NAL header, AU boundaries, --dump-nals, 22 tests |
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
-| 5 — Inter Prediction | **En cours** | 5.0 FAIT (multi-CTU pixel-perfect). 5A-5D codes, audit en cours. Etapes 5.1-5.10 a valider. |
-| 6 — Loop Filters | A faire | — |
+| 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
+| 6 — Loop Filters | A faire | 0/15 tests. Deblocking + SAO non implementes. |
 | 7 — High Profiles | A faire | — |
 | 8 — WASM Integration | A faire | — |
 | 9 — Performance | A faire | — |
@@ -120,12 +120,20 @@ Code existant a auditer : `inter_prediction.cpp`, `interpolation.cpp`, `dpb.cpp`
 - [ ] Audit chroma 4-tap et bi-pred averaging
 - [ ] Tests unitaires chroma + bi-pred
 
-### 5.9 — Integration P-frames
-- [ ] `oracle_p_qcif_10f` pixel-perfect
+### 5.9 — Integration P-frames (FAIT)
+- [x] `oracle_p_qcif_10f` pixel-perfect
 
-### 5.10 — Integration B-frames
-- [ ] `oracle_b_qcif_10f` pixel-perfect
-- [ ] `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif` pixel-perfect
+### 5.10 — Integration B-frames (FAIT)
+- [x] `oracle_b_qcif_10f` pixel-perfect
+- [x] `conf_b_hier_qcif`, `conf_b_tmvp_qcif`, `conf_b_cra_qcif` pixel-perfect
+- [x] `conf_p_weighted_qcif`, `conf_b_weighted_qcif` pixel-perfect
+- [x] `conf_b_opengop_qcif`, `conf_p_amp_256` pixel-perfect
+- [x] `conf_b_cabacinit_qcif` pixel-perfect
+
+### Bugs fixes session 2026-03-22 (3 bugs)
+- [x] Explicit weighted prediction (§8.5.3.3.4.3) — P-slices avec `weighted_pred_flag=1`
+- [x] Output frame ordering multi-GOP — CVS ID pour distinguer les GOPs avec POC identiques
+- [x] `interSplitFlag` (§7.4.9.4) — force TU split pour CU INTER non-2Nx2N quand `max_transform_hierarchy_depth_inter==0`
 
 ## Phase 6 — Apres Phase 5 (subdivisee en 4 sous-phases)
 
