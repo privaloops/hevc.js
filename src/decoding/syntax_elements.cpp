@@ -279,52 +279,48 @@ int decode_ref_idx(CabacEngine& cabac, int numRefIdxActive) {
 
 // §7.3.8.10 — mvd_coding: abs_mvd_greater0, abs_mvd_greater1, abs_mvd_minus2, sign
 MV decode_mvd(CabacEngine& cabac) {
-    // §9.3.3.9: Two components (horizontal, vertical)
+    // §7.3.8.9 mvd_coding — transcription directe de la spec
     MV mvd = {};
 
-    // Step 1: abs_mvd_greater0_flag for both components
-    int g0_h = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
-    int g0_v = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
-
-    // Step 2: abs_mvd_greater1_flag (only if greater0 is 1)
-    int g1_h = 0, g1_v = 0;
-    if (g0_h) g1_h = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
-    if (g0_v) g1_v = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
-
-    // Step 3: abs_mvd_minus2 (bypass, EG1) — only if greater1 is 1
     // §9.3.3.3 eq 9-13: k-th order Exp-Golomb with k=1 (Table 9-43)
     auto decode_eg1 = [&cabac]() -> int {
-        int k = 1;  // EG1: start with k=1
+        int k = 1;
         int absV = 0;
         while (cabac.decode_bypass()) {
             absV += (1 << k);
             k++;
         }
-        // Read remaining k bits
         if (k > 0)
             absV += cabac.decode_bypass_bins(k);
         return absV;
     };
 
-    int abs_h = 0, abs_v = 0;
+    // abs_mvd_greater0_flag[0], abs_mvd_greater0_flag[1]
+    int g0_h = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+    int g0_v = cabac.decode_decision(CTX_ABS_MVD_GREATER0);
+
+    // abs_mvd_greater1_flag[0], abs_mvd_greater1_flag[1]
+    int g1_h = 0, g1_v = 0;
+    if (g0_h) g1_h = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+    if (g0_v) g1_v = cabac.decode_decision(CTX_ABS_MVD_GREATER1);
+
+    // §7.3.8.9: H component (abs_mvd_minus2[0] + mvd_sign_flag[0])
+    int abs_h = 0;
     if (g0_h) {
         abs_h = g1_h + 1;
         if (g1_h)
             abs_h += decode_eg1();
+        int sign = cabac.decode_bypass();   // mvd_sign_flag[0]
+        mvd.x = static_cast<int16_t>(sign ? -abs_h : abs_h);
     }
+
+    // §7.3.8.9: V component (abs_mvd_minus2[1] + mvd_sign_flag[1])
+    int abs_v = 0;
     if (g0_v) {
         abs_v = g1_v + 1;
         if (g1_v)
             abs_v += decode_eg1();
-    }
-
-    // Step 4: sign flags (bypass)
-    if (abs_h) {
-        int sign = cabac.decode_bypass();
-        mvd.x = static_cast<int16_t>(sign ? -abs_h : abs_h);
-    }
-    if (abs_v) {
-        int sign = cabac.decode_bypass();
+        int sign = cabac.decode_bypass();   // mvd_sign_flag[1]
         mvd.y = static_cast<int16_t>(sign ? -abs_v : abs_v);
     }
 
