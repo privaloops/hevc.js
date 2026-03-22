@@ -14,7 +14,7 @@ Etat d'avancement par phase et prochaines taches.
 | 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
-| 9 — Performance | A faire | — |
+| 9 — Performance | **En cours** | Interpolation bounds-check skip (+32% natif). Quick wins faits. SIMD WASM a faire. |
 
 ## Phase 1 — Terminee
 

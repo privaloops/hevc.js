@@ -25,13 +25,19 @@ void apply_sao(DecodingContext& ctx) {
     int ctbSize = 1 << sps.CtbLog2SizeY;
     int subW = sps.SubWidthC;
     int subH = sps.SubHeightC;
+    int numComp = (sps.ChromaArrayType != 0) ? 3 : 1;
+
+    // Quick check: skip entirely if no CTU has SAO enabled
+    bool anySao = false;
+    for (int i = 0; i < sps.PicSizeInCtbsY && !anySao; i++) {
+        for (int c = 0; c < numComp; c++) {
+            if (ctx.sao_params[i].sao_type_idx[c] != 0) { anySao = true; break; }
+        }
+    }
+    if (!anySao) return;
 
     // §8.7.3.1: SAO operates on a copy of the deblocked picture
     // We need the pre-SAO samples for EO neighbor comparisons
-    // Copy the entire picture, then modify the copy using original values
-    int numComp = (sps.ChromaArrayType != 0) ? 3 : 1;
-
-    // Save copies of all planes
     std::vector<uint16_t> origPlane[3];
     for (int c = 0; c < numComp; c++) {
         origPlane[c].assign(pic->planes[c].begin(), pic->planes[c].end());
