@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Phase 7 — Main 10 Profile (10-bit 4:2:0)**:
+  - 10-bit decoding pixel-perfect (I-frame + full pipeline I+P+B with deblock+SAO)
+  - 2 new oracle tests: `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`
+  - `oracle_test.sh` now supports 10-bit output format via optional `PIX_FMT` parameter
+
+### Fixed
+- **cu_skip_flag pred_mode not stored before decode_prediction_unit_inter** — skip CUs entered AMVP path (reading extra CABAC bin) instead of merge path because `pred_mode` was only stored in the CU grid AFTER the prediction unit decode. Latent bug masked in 8-bit tests by coincidental CABAC alignment; exposed by 10-bit bitstreams with different CABAC state.
+- **Multi-frame YUV output ignored bit depth** — the multi-frame output path in `main.cpp` cast all samples to `uint8_t`, producing 8-bit files for 10-bit content. Single-frame path (`write_yuv`) was correct. Also fixed chroma crop assuming 4:2:0 (`/2` hardcoded instead of using `SubWidthC`/`SubHeightC`).
+
+### Previously added
 - **Phase 6 — Loop Filters** (11/14 tests pass, 3 failures are multi-slice limitation):
   - Deblocking filter (§8.7.2) — boundary strength derivation, strong/weak luma filter, chroma filter (Bs==2)
   - SAO filter (§8.7.3) — edge offset (4 EO classes), band offset (32 bands), CTU merge (left/up)

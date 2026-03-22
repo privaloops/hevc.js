@@ -36,6 +36,17 @@ Ces bitstreams ont 1 seul CTU (64x64), ideal pour debugger CABAC et intra predic
 
 Source : Big Buck Bunny, encode HEVC Main profile, extrait sans re-encodage depuis hevc-gpu demo streams.
 
+## Main 10 bitstreams (10-bit 4:2:0)
+
+| Fichier | Taille | Resolution | Frames | Type | Deblock | SAO | Phase | MD5 (YUV decode) |
+|---------|--------|------------|--------|------|---------|-----|-------|------------------|
+| `i_64x64_10bit.265` | 2.4K | 64x64 | 1 | I-only | off | off | 7 | `230cf887beecf0dc1722a823f998de47` |
+| `full_qcif_10f_10bit.265` | 15K | 176x144 | 10 | I+P+B | **on** | **on** | 7 | `19efbf36509c6ecb86e42a7f709998b5` |
+
+Encodage : `x265 --input-depth 10 --output-depth 10 --profile main10 --preset medium/ultrafast --no-wpp --no-info --qp 22`
+
+Reference : `ffmpeg -y -i fixture.265 -pix_fmt yuv420p10le fixture_ref.yuv`
+
 ## Parametres d'encodage communs
 
 ```

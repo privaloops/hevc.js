@@ -275,22 +275,33 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             for (auto* pic : pics) {
-                // Write each plane with conformance window cropping
+                int sub_w = hevc::SubWidthC(pic->chroma_format);
+                int sub_h = hevc::SubHeightC(pic->chroma_format);
+                int bd[3] = { pic->bit_depth_luma, pic->bit_depth_chroma, pic->bit_depth_chroma };
+
                 for (int c = 0; c < 3; c++) {
-                    int cropLeft = (c == 0) ? pic->conf_win_left : pic->conf_win_left / 2;
-                    int cropRight = (c == 0) ? pic->conf_win_right : pic->conf_win_right / 2;
-                    int cropTop = (c == 0) ? pic->conf_win_top : pic->conf_win_top / 2;
-                    int cropBottom = (c == 0) ? pic->conf_win_bottom : pic->conf_win_bottom / 2;
-                    int outW = pic->width[c] - cropLeft - cropRight;
-                    int outH = pic->height[c] - cropTop - cropBottom;
+                    if (pic->width[c] == 0 || pic->height[c] == 0) continue;
+
+                    int cSubW = (c == 0) ? 1 : sub_w;
+                    int cSubH = (c == 0) ? 1 : sub_h;
+                    int cropLeft   = pic->conf_win_left   / cSubW;
+                    int cropRight  = pic->conf_win_right  / cSubW;
+                    int cropTop    = pic->conf_win_top    / cSubH;
+                    int cropBottom = pic->conf_win_bottom  / cSubH;
 
                     for (int y = cropTop; y < pic->height[c] - cropBottom; y++) {
-                        for (int x = cropLeft; x < pic->width[c] - cropRight; x++) {
-                            uint8_t val = static_cast<uint8_t>(pic->sample(c, x, y));
-                            fwrite(&val, 1, 1, f);
+                        const uint16_t* row = &pic->planes[c][y * pic->stride[c]];
+                        int outW = pic->width[c] - cropLeft - cropRight;
+
+                        if (bd[c] <= 8) {
+                            for (int x = 0; x < outW; x++) {
+                                uint8_t val = static_cast<uint8_t>(row[cropLeft + x]);
+                                fwrite(&val, 1, 1, f);
+                            }
+                        } else {
+                            fwrite(row + cropLeft, sizeof(uint16_t), outW, f);
                         }
                     }
-                    (void)outW; (void)outH;
                 }
             }
             fclose(f);
