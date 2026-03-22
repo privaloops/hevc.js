@@ -4,6 +4,7 @@
 #include "filters/sao.h"
 #include "common/types.h"
 
+#include <cstring>
 #include <vector>
 
 namespace hevc {
@@ -37,10 +38,13 @@ void apply_sao(DecodingContext& ctx) {
     if (!anySao) return;
 
     // §8.7.3.1: SAO operates on a copy of the deblocked picture
-    // We need the pre-SAO samples for EO neighbor comparisons
-    std::vector<uint16_t> origPlane[3];
+    // Use persistent backup buffers (avoids heap allocation per frame)
+    auto* origPlane = ctx.sao_backup;
     for (int c = 0; c < numComp; c++) {
-        origPlane[c].assign(pic->planes[c].begin(), pic->planes[c].end());
+        auto& plane = pic->planes[c];
+        auto& backup = origPlane[c];
+        backup.resize(plane.size());
+        std::memcpy(backup.data(), plane.data(), plane.size() * sizeof(uint16_t));
     }
 
     // Process each CTU
