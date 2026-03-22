@@ -245,17 +245,19 @@ int decode_coeff_abs_level_remaining(CabacEngine& cabac, int cRiceParam) {
 // Phase 5 — Inter prediction syntax elements
 // ============================================================
 
-// §9.3.3.7 — inter_pred_idc: spec Table 9-36
+// §9.3.3.9 — inter_pred_idc: spec Table 9-47
 // 0=PRED_L0, 1=PRED_L1, 2=PRED_BI
-int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctbLog2Size) {
-    // §9.3.4.2.3: ctxInc = (nPbW + nPbH != (1 << ctbLog2Size)) ? ctxDepth : 4
-    // For simplicity: if PU is full CTB size → ctxInc=4, else ctxInc depends on CU depth
-    int ctxInc = (nPbW + nPbH == (1 << ctbLog2Size)) ? 4 : 0; // simplified
+int decode_inter_pred_idc(CabacEngine& cabac, int nPbW, int nPbH, int ctDepth) {
+    // §9.3.4.2.3 Table 9-48: binIdx 0 ctxInc = (nPbW+nPbH != 12) ? CtDepth : 4
+    int ctxInc = (nPbW + nPbH != 12) ? ctDepth : 4;
     int bin0 = cabac.decode_decision(CTX_INTER_PRED_IDC + ctxInc);
-    if (bin0 == 0) return 0; // PRED_L0
-    if (nPbW + nPbH == 12) return 2; // PRED_BI for smallest PU
+    // Table 9-47: (nPbW+nPbH)==12: "0"→PRED_L0, "1"→PRED_L1 (no PRED_BI)
+    if (nPbW + nPbH == 12)
+        return bin0 ? 1 : 0;  // PRED_L1 or PRED_L0
+    // Table 9-47: (nPbW+nPbH)!=12: "1"→PRED_BI, "00"→PRED_L0, "01"→PRED_L1
+    if (bin0 == 1) return 2;  // PRED_BI
     int bin1 = cabac.decode_decision(CTX_INTER_PRED_IDC + 4);
-    return bin1 ? 2 : 1; // PRED_BI or PRED_L1
+    return bin1 ? 1 : 0;     // PRED_L1 or PRED_L0
 }
 
 // §9.3.3.5 — ref_idx: TU binarization, max=numRefIdxActive
