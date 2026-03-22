@@ -53,22 +53,13 @@ void DecodingContext::set_chroma_mode(int x, int y, int size, int mode) {
 // SAO parsing stub (§7.3.8.3)
 // ============================================================
 
-struct SaoParams {
-    int sao_type_idx[3] = {};  // per component
-    int sao_offset_abs[3][4] = {};
-    int sao_offset_sign[3][4] = {};
-    int sao_band_position[3] = {};
-    int sao_eo_class[3] = {};
-    bool merge_left = false;
-    bool merge_up = false;
-};
-
-static void decode_sao(DecodingContext& ctx, int rx, int ry,
-                       SaoParams* /*sao_store*/) {
-    // §7.3.8.3 — Parse SAO parameters, store but don't apply (Phase 6)
+static void decode_sao(DecodingContext& ctx, int rx, int ry) {
+    // §7.3.8.3 — Parse SAO parameters and store for Phase 6 filtering
     auto& cabac = *ctx.cabac;
     auto& sh = *ctx.sh;
     int CtbAddrInRs = ry * ctx.sps->PicWidthInCtbsY + rx;
+    auto& sao = ctx.sao_params[ry * ctx.sao_params_stride + rx];
+    sao = DecodingContext::SaoParams{}; // reset
 
     bool sao_merge_left_flag = false;
     bool sao_merge_up_flag = false;
@@ -92,50 +83,84 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry,
             sao_merge_up_flag = decode_sao_merge_flag(cabac);
     }
 
-    if (!sao_merge_left_flag && !sao_merge_up_flag) {
-        int numComp = (ctx.sps->ChromaArrayType != 0) ? 3 : 1;
-        int sao_type_idx_chroma = 0; // §7.4.9.3: SaoTypeIdx[2] = SaoTypeIdx[1]
-        for (int cIdx = 0; cIdx < numComp; cIdx++) {
-            if ((sh.slice_sao_luma_flag && cIdx == 0) ||
-                (sh.slice_sao_chroma_flag && cIdx > 0)) {
-                int sao_type_idx = 0;
-                if (cIdx == 0) {
-                    sao_type_idx = decode_sao_type_idx(cabac);
-                } else if (cIdx == 1) {
-                    sao_type_idx = decode_sao_type_idx(cabac);
-                    sao_type_idx_chroma = sao_type_idx; // save for cIdx==2
-                } else {
-                    // §7.4.9.3: SaoTypeIdx[2][rx][ry] = SaoTypeIdx[1][rx][ry]
-                    sao_type_idx = sao_type_idx_chroma;
+    if (sao_merge_left_flag) {
+        // Copy all params from left CTU
+        sao = ctx.sao_params[ry * ctx.sao_params_stride + (rx - 1)];
+        return;
+    }
+    if (sao_merge_up_flag) {
+        // Copy all params from above CTU
+        sao = ctx.sao_params[(ry - 1) * ctx.sao_params_stride + rx];
+        return;
+    }
+
+    int numComp = (ctx.sps->ChromaArrayType != 0) ? 3 : 1;
+    int sao_type_idx_chroma = 0; // §7.4.9.3: SaoTypeIdx[2] = SaoTypeIdx[1]
+    for (int cIdx = 0; cIdx < numComp; cIdx++) {
+        if ((sh.slice_sao_luma_flag && cIdx == 0) ||
+            (sh.slice_sao_chroma_flag && cIdx > 0)) {
+            int sao_type_idx = 0;
+            if (cIdx == 0) {
+                sao_type_idx = decode_sao_type_idx(cabac);
+            } else if (cIdx == 1) {
+                sao_type_idx = decode_sao_type_idx(cabac);
+                sao_type_idx_chroma = sao_type_idx;
+            } else {
+                // §7.4.9.3: SaoTypeIdx[2][rx][ry] = SaoTypeIdx[1][rx][ry]
+                sao_type_idx = sao_type_idx_chroma;
+            }
+            sao.sao_type_idx[cIdx] = sao_type_idx;
+
+            if (sao_type_idx != 0) {
+                int bitDepth = (cIdx == 0) ? ctx.sps->BitDepthY : ctx.sps->BitDepthC;
+                int maxOff = (1 << (std::min(bitDepth, 10) - 5)) - 1;
+                int sao_offset_abs_val[4] = {};
+                for (int i = 0; i < 4; i++) {
+                    // sao_offset_abs: TR cMax=maxOff, bypass
+                    int val = 0;
+                    for (int k = 0; k < maxOff; k++) {
+                        if (cabac.decode_bypass() == 0) break;
+                        val++;
+                    }
+                    sao_offset_abs_val[i] = val;
                 }
-                if (sao_type_idx != 0) {
-                    int bitDepth = (cIdx == 0) ? ctx.sps->BitDepthY : ctx.sps->BitDepthC;
-                    int maxOff = (1 << (std::min(bitDepth, 10) - 5)) - 1;
-                    int sao_offset_abs_val[4] = {};
+                int sao_offset_sign[4] = {};
+                if (sao_type_idx == 1) {
+                    // Band offset: sign parsed, band_position parsed
                     for (int i = 0; i < 4; i++) {
-                        // sao_offset_abs: TR cMax=maxOff, bypass
-                        int val = 0;
-                        for (int k = 0; k < maxOff; k++) {
-                            if (cabac.decode_bypass() == 0) break;
-                            val++;
-                        }
-                        sao_offset_abs_val[i] = val;
+                        if (sao_offset_abs_val[i] != 0)
+                            sao_offset_sign[i] = cabac.decode_bypass();
                     }
-                    if (sao_type_idx == 1) {
-                        // Band offset
-                        // §7.3.8.3: sao_offset_sign parsed only when abs != 0
-                        for (int i = 0; i < 4; i++) {
-                            if (sao_offset_abs_val[i] != 0)
-                                cabac.decode_bypass(); // sao_offset_sign
-                        }
-                        cabac.decode_bypass_bins(5); // sao_band_position
-                    } else {
-                        // Edge offset
-                        if (cIdx == 0)
-                            cabac.decode_bypass_bins(2); // sao_eo_class_luma
-                        if (cIdx == 1)
-                            cabac.decode_bypass_bins(2); // sao_eo_class_chroma
+                    sao.sao_band_position[cIdx] = cabac.decode_bypass_bins(5);
+                } else {
+                    // Edge offset: sign is fixed per category, eo_class parsed
+                    if (cIdx == 0)
+                        sao.sao_eo_class[cIdx] = cabac.decode_bypass_bins(2);
+                    if (cIdx == 1) {
+                        int eo_class = cabac.decode_bypass_bins(2);
+                        sao.sao_eo_class[1] = eo_class;
+                        sao.sao_eo_class[2] = eo_class; // §7.4.9.3: Cr shares Cb eo_class
                     }
+                }
+
+                // §7.4.9.3: Derive SaoOffsetVal
+                // sao_offset_val[cIdx][0..4] maps to categories 0..4
+                // Category 2 (flat) always has offset 0
+                sao.sao_offset_val[cIdx][2] = 0; // flat
+                if (sao_type_idx == 2) {
+                    // Edge offset: categories 0,1 positive; 3,4 negative
+                    sao.sao_offset_val[cIdx][0] = sao_offset_abs_val[0];   // valley
+                    sao.sao_offset_val[cIdx][1] = sao_offset_abs_val[1];   // concave
+                    sao.sao_offset_val[cIdx][3] = -sao_offset_abs_val[2];  // convex
+                    sao.sao_offset_val[cIdx][4] = -sao_offset_abs_val[3];  // peak
+                } else {
+                    // Band offset: sign from bitstream
+                    for (int i = 0; i < 4; i++) {
+                        int val = sao_offset_abs_val[i];
+                        if (sao_offset_sign[i]) val = -val;
+                        sao.sao_offset_val[cIdx][i] = val;
+                    }
+                    sao.sao_offset_val[cIdx][4] = 0; // unused for band
                 }
             }
         }
@@ -433,7 +458,7 @@ void decode_coding_tree_unit(DecodingContext& ctx, int xCtb, int yCtb) {
     if (ctx.sh->slice_sao_luma_flag || ctx.sh->slice_sao_chroma_flag) {
         int rx = xCtb >> ctx.sps->CtbLog2SizeY;
         int ry = yCtb >> ctx.sps->CtbLog2SizeY;
-        decode_sao(ctx, rx, ry, nullptr);
+        decode_sao(ctx, rx, ry);
     }
 
     // QP group reset
@@ -669,6 +694,61 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             cu.cu_transquant_bypass = cu_transquant_bypass;
         }
 
+    // Phase 6: initialize grids for this CU
+    if (ctx.log2_tu_size_grid) {
+        int stride = ctx.filter_grid_stride;
+        for (int dy = 0; dy < cbSize; dy += 4) {
+            for (int dx = 0; dx < cbSize; dx += 4) {
+                int gx = (x0 + dx) / 4;
+                int gy = (y0 + dy) / 4;
+                ctx.log2_tu_size_grid[gy * stride + gx] = static_cast<uint8_t>(log2CbSize);
+                ctx.cbf_luma_grid[gy * stride + gx] = 0;
+            }
+        }
+
+        // §8.7.2.2: CU left/top edges (transform block boundary at trafoDepth=0)
+        // Left edge (vertical): edgeFlags[0][k] for k=0..cbSize-1
+        for (int dy = 0; dy < cbSize; dy += 4) {
+            ctx.edge_flags_v[(y0 + dy) / 4 * stride + x0 / 4] = 1;
+        }
+        // Top edge (horizontal): edgeFlags[k][0] for k=0..cbSize-1
+        for (int dx = 0; dx < cbSize; dx += 4) {
+            ctx.edge_flags_h[y0 / 4 * stride + (x0 + dx) / 4] = 1;
+        }
+
+        // §8.7.2.3: PU boundary edges within CU
+        if (part_mode == PartMode::PART_Nx2N || part_mode == PartMode::PART_NxN) {
+            int px = x0 + cbSize / 2;
+            for (int dy = 0; dy < cbSize; dy += 4)
+                ctx.edge_flags_v[(y0 + dy) / 4 * stride + px / 4] = 1;
+        }
+        if (part_mode == PartMode::PART_nLx2N) {
+            int px = x0 + cbSize / 4;
+            for (int dy = 0; dy < cbSize; dy += 4)
+                ctx.edge_flags_v[(y0 + dy) / 4 * stride + px / 4] = 1;
+        }
+        if (part_mode == PartMode::PART_nRx2N) {
+            int px = x0 + 3 * cbSize / 4;
+            for (int dy = 0; dy < cbSize; dy += 4)
+                ctx.edge_flags_v[(y0 + dy) / 4 * stride + px / 4] = 1;
+        }
+        if (part_mode == PartMode::PART_2NxN || part_mode == PartMode::PART_NxN) {
+            int py = y0 + cbSize / 2;
+            for (int dx = 0; dx < cbSize; dx += 4)
+                ctx.edge_flags_h[py / 4 * stride + (x0 + dx) / 4] = 1;
+        }
+        if (part_mode == PartMode::PART_2NxnU) {
+            int py = y0 + cbSize / 4;
+            for (int dx = 0; dx < cbSize; dx += 4)
+                ctx.edge_flags_h[py / 4 * stride + (x0 + dx) / 4] = 1;
+        }
+        if (part_mode == PartMode::PART_2NxnD) {
+            int py = y0 + 3 * cbSize / 4;
+            for (int dx = 0; dx < cbSize; dx += 4)
+                ctx.edge_flags_h[py / 4 * stride + (x0 + dx) / 4] = 1;
+        }
+    }
+
     // Transform tree (only for non-skip, non-PCM)
     if (!cu_skip) {
         bool rqt_root_cbf = true;
@@ -869,6 +949,27 @@ void decode_transform_tree(DecodingContext& ctx, int x0, int y0,
 
         decode_transform_unit(ctx, x0, y0, xBase, yBase, log2TrafoSize, trafoDepth, blkIdx,
                               cbf_luma, cbf_cb, cbf_cr);
+
+        // Phase 6: store TU info for deblocking
+        if (ctx.cbf_luma_grid && ctx.log2_tu_size_grid) {
+            int trSize = 1 << log2TrafoSize;
+            int stride = ctx.filter_grid_stride;
+            for (int dy = 0; dy < trSize; dy += 4) {
+                for (int dx = 0; dx < trSize; dx += 4) {
+                    int gx = (x0 + dx) / 4;
+                    int gy = (y0 + dy) / 4;
+                    ctx.cbf_luma_grid[gy * stride + gx] = cbf_luma ? 1 : 0;
+                    ctx.log2_tu_size_grid[gy * stride + gx] = static_cast<uint8_t>(log2TrafoSize);
+                }
+            }
+            // §8.7.2.2: TU left edge (vertical) — always 1 for internal edges
+            // (CU edge was already set in decode_coding_unit)
+            for (int dy = 0; dy < trSize; dy += 4)
+                ctx.edge_flags_v[(y0 + dy) / 4 * stride + x0 / 4] = 1;
+            // §8.7.2.2: TU top edge (horizontal)
+            for (int dx = 0; dx < trSize; dx += 4)
+                ctx.edge_flags_h[y0 / 4 * stride + (x0 + dx) / 4] = 1;
+        }
     }
 }
 
