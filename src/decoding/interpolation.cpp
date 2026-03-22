@@ -52,64 +52,77 @@ static void interpolate_luma(const Picture& refPic,
     int shift3 = std::max(2, 14 - bitDepth);
     int picW = refPic.width[0];
     int picH = refPic.height[0];
+    int stride0 = refPic.stride[0];
+    const uint16_t* plane0 = refPic.planes[0].data();
 
-    // Clamp helper for out-of-bounds reference access
-    auto ref = [&](int x, int y) -> int {
-        x = std::max(0, std::min(x, picW - 1));
-        y = std::max(0, std::min(y, picH - 1));
-        return refPic.planes[0][y * refPic.stride[0] + x];
+    // Fast direct access (no bounds check) — used for interior PUs
+    auto refDirect = [&](int x, int y) -> int {
+        return plane0[y * stride0 + x];
     };
 
-    if (xFrac == 0 && yFrac == 0) {
-        // §8.5.3.3.3: integer position → A << shift3
-        for (int y = 0; y < nPbH; y++)
-            for (int x = 0; x < nPbW; x++)
-                pred[y * nPbW + x] = static_cast<int16_t>(ref(xInt + x, yInt + y) << shift3);
-    } else if (yFrac == 0) {
-        // H-only: apply 8-tap horizontal filter
-        const int16_t* f = luma_filter[xFrac];
-        for (int y = 0; y < nPbH; y++)
-            for (int x = 0; x < nPbW; x++) {
-                int sum = 0;
-                for (int k = 0; k < 8; k++)
-                    sum += f[k] * ref(xInt + x + k - 3, yInt + y);
-                pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift1);
-            }
-    } else if (xFrac == 0) {
-        // V-only: apply 8-tap vertical filter
-        const int16_t* f = luma_filter[yFrac];
-        for (int y = 0; y < nPbH; y++)
-            for (int x = 0; x < nPbW; x++) {
-                int sum = 0;
-                for (int k = 0; k < 8; k++)
-                    sum += f[k] * ref(xInt + x, yInt + y + k - 3);
-                pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift1);
-            }
+    // Safe clamped access — used for edge PUs
+    auto refClamp = [&](int x, int y) -> int {
+        x = std::max(0, std::min(x, picW - 1));
+        y = std::max(0, std::min(y, picH - 1));
+        return plane0[y * stride0 + x];
+    };
+
+    // Check if all reference accesses are within bounds (including filter margin)
+    bool interior = (xInt - 3 >= 0) && (yInt - 3 >= 0) &&
+                    (xInt + nPbW + 4 <= picW) && (yInt + nPbH + 4 <= picH);
+
+    // Use a macro to avoid duplicating the filter code for interior vs edge
+    #define LUMA_INTERP(REF) do { \
+        if (xFrac == 0 && yFrac == 0) { \
+            for (int y = 0; y < nPbH; y++) \
+                for (int x = 0; x < nPbW; x++) \
+                    pred[y * nPbW + x] = static_cast<int16_t>(REF(xInt + x, yInt + y) << shift3); \
+        } else if (yFrac == 0) { \
+            const int16_t* f = luma_filter[xFrac]; \
+            for (int y = 0; y < nPbH; y++) \
+                for (int x = 0; x < nPbW; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 8; k++) \
+                        sum += f[k] * REF(xInt + x + k - 3, yInt + y); \
+                    pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+        } else if (xFrac == 0) { \
+            const int16_t* f = luma_filter[yFrac]; \
+            for (int y = 0; y < nPbH; y++) \
+                for (int x = 0; x < nPbW; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 8; k++) \
+                        sum += f[k] * REF(xInt + x, yInt + y + k - 3); \
+                    pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+        } else { \
+            int tmpH = nPbH + 7; \
+            int16_t tmp[64 * 71]; \
+            const int16_t* fH = luma_filter[xFrac]; \
+            for (int y = 0; y < tmpH; y++) \
+                for (int x = 0; x < nPbW; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 8; k++) \
+                        sum += fH[k] * REF(xInt + x + k - 3, yInt + y - 3); \
+                    tmp[y * nPbW + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+            const int16_t* fV = luma_filter[yFrac]; \
+            for (int y = 0; y < nPbH; y++) \
+                for (int x = 0; x < nPbW; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 8; k++) \
+                        sum += fV[k] * tmp[(y + k) * nPbW + x]; \
+                    pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift2); \
+                } \
+        } \
+    } while(0)
+
+    if (interior) {
+        LUMA_INTERP(refDirect);
     } else {
-        // 2D: H-pass first (extended precision), then V-pass
-        // H-pass: need extra rows for V-filter margin (3 above, 4 below)
-        int tmpH = nPbH + 7;  // -3..nPbH+3
-        std::vector<int16_t> tmp(nPbW * tmpH);
-        const int16_t* fH = luma_filter[xFrac];
-        for (int y = 0; y < tmpH; y++)
-            for (int x = 0; x < nPbW; x++) {
-                int sum = 0;
-                for (int k = 0; k < 8; k++)
-                    sum += fH[k] * ref(xInt + x + k - 3, yInt + y - 3);
-                // §8.5.3.3.3: H-pass shift = shift1, NO clip
-                tmp[y * nPbW + x] = static_cast<int16_t>(sum >> shift1);
-            }
-        // V-pass on intermediate samples
-        const int16_t* fV = luma_filter[yFrac];
-        for (int y = 0; y < nPbH; y++)
-            for (int x = 0; x < nPbW; x++) {
-                int sum = 0;
-                for (int k = 0; k < 8; k++)
-                    sum += fV[k] * tmp[(y + k) * nPbW + x];
-                // §8.5.3.3.3: V-pass shift = shift2
-                pred[y * nPbW + x] = static_cast<int16_t>(sum >> shift2);
-            }
+        LUMA_INTERP(refClamp);
     }
+    #undef LUMA_INTERP
 }
 
 // ============================================================
@@ -125,55 +138,73 @@ static void interpolate_chroma(const Picture& refPic, int cIdx,
     int shift3 = std::max(2, 14 - bitDepth);
     int picW = refPic.width[cIdx];
     int picH = refPic.height[cIdx];
+    int strideC = refPic.stride[cIdx];
+    const uint16_t* planeC = refPic.planes[cIdx].data();
 
-    auto ref = [&](int x, int y) -> int {
+    auto refDirect = [&](int x, int y) -> int {
+        return planeC[y * strideC + x];
+    };
+    auto refClamp = [&](int x, int y) -> int {
         x = std::max(0, std::min(x, picW - 1));
         y = std::max(0, std::min(y, picH - 1));
-        return refPic.planes[cIdx][y * refPic.stride[cIdx] + x];
+        return planeC[y * strideC + x];
     };
 
-    if (xFrac == 0 && yFrac == 0) {
-        for (int y = 0; y < nPbHC; y++)
-            for (int x = 0; x < nPbWC; x++)
-                pred[y * nPbWC + x] = static_cast<int16_t>(ref(xInt + x, yInt + y) << shift3);
-    } else if (yFrac == 0) {
-        const int16_t* f = chroma_filter[xFrac];
-        for (int y = 0; y < nPbHC; y++)
-            for (int x = 0; x < nPbWC; x++) {
-                int sum = 0;
-                for (int k = 0; k < 4; k++)
-                    sum += f[k] * ref(xInt + x + k - 1, yInt + y);
-                pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1);
-            }
-    } else if (xFrac == 0) {
-        const int16_t* f = chroma_filter[yFrac];
-        for (int y = 0; y < nPbHC; y++)
-            for (int x = 0; x < nPbWC; x++) {
-                int sum = 0;
-                for (int k = 0; k < 4; k++)
-                    sum += f[k] * ref(xInt + x, yInt + y + k - 1);
-                pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1);
-            }
+    // Chroma filter margin is 1 (4-tap: positions -1..+2)
+    bool interior = (xInt - 1 >= 0) && (yInt - 1 >= 0) &&
+                    (xInt + nPbWC + 2 <= picW) && (yInt + nPbHC + 2 <= picH);
+
+    #define CHROMA_INTERP(REF) do { \
+        if (xFrac == 0 && yFrac == 0) { \
+            for (int y = 0; y < nPbHC; y++) \
+                for (int x = 0; x < nPbWC; x++) \
+                    pred[y * nPbWC + x] = static_cast<int16_t>(REF(xInt + x, yInt + y) << shift3); \
+        } else if (yFrac == 0) { \
+            const int16_t* f = chroma_filter[xFrac]; \
+            for (int y = 0; y < nPbHC; y++) \
+                for (int x = 0; x < nPbWC; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 4; k++) \
+                        sum += f[k] * REF(xInt + x + k - 1, yInt + y); \
+                    pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+        } else if (xFrac == 0) { \
+            const int16_t* f = chroma_filter[yFrac]; \
+            for (int y = 0; y < nPbHC; y++) \
+                for (int x = 0; x < nPbWC; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 4; k++) \
+                        sum += f[k] * REF(xInt + x, yInt + y + k - 1); \
+                    pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+        } else { \
+            int tmpH = nPbHC + 3; \
+            int16_t tmp[32 * 35]; \
+            const int16_t* fH = chroma_filter[xFrac]; \
+            for (int y = 0; y < tmpH; y++) \
+                for (int x = 0; x < nPbWC; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 4; k++) \
+                        sum += fH[k] * REF(xInt + x + k - 1, yInt + y - 1); \
+                    tmp[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1); \
+                } \
+            const int16_t* fV = chroma_filter[yFrac]; \
+            for (int y = 0; y < nPbHC; y++) \
+                for (int x = 0; x < nPbWC; x++) { \
+                    int sum = 0; \
+                    for (int k = 0; k < 4; k++) \
+                        sum += fV[k] * tmp[(y + k) * nPbWC + x]; \
+                    pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift2); \
+                } \
+        } \
+    } while(0)
+
+    if (interior) {
+        CHROMA_INTERP(refDirect);
     } else {
-        int tmpH = nPbHC + 3;
-        std::vector<int16_t> tmp(nPbWC * tmpH);
-        const int16_t* fH = chroma_filter[xFrac];
-        for (int y = 0; y < tmpH; y++)
-            for (int x = 0; x < nPbWC; x++) {
-                int sum = 0;
-                for (int k = 0; k < 4; k++)
-                    sum += fH[k] * ref(xInt + x + k - 1, yInt + y - 1);
-                tmp[y * nPbWC + x] = static_cast<int16_t>(sum >> shift1);
-            }
-        const int16_t* fV = chroma_filter[yFrac];
-        for (int y = 0; y < nPbHC; y++)
-            for (int x = 0; x < nPbWC; x++) {
-                int sum = 0;
-                for (int k = 0; k < 4; k++)
-                    sum += fV[k] * tmp[(y + k) * nPbWC + x];
-                pred[y * nPbWC + x] = static_cast<int16_t>(sum >> shift2);
-            }
+        CHROMA_INTERP(refClamp);
     }
+    #undef CHROMA_INTERP
 }
 
 // ============================================================
@@ -288,8 +319,10 @@ void perform_inter_prediction(DecodingContext& ctx,
     int compH = nPbH / subH;
     int nSamples = compW * compH;
 
-    std::vector<int16_t> predL0(nSamples);
-    std::vector<int16_t> predL1(nSamples);
+    int16_t predL0_buf[64 * 64];  // max PU 64x64
+    int16_t predL1_buf[64 * 64];
+    int16_t* predL0 = predL0_buf;
+    int16_t* predL1 = predL1_buf;
 
     // L0 prediction
     if (predFlagL0 && refIdxL0 >= 0) {
@@ -302,7 +335,7 @@ void perform_inter_prediction(DecodingContext& ctx,
                 int xFrac = mvL0.x & 3;
                 int yFrac = mvL0.y & 3;
                 interpolate_luma(*refPic, xInt, yInt, xFrac, yFrac,
-                                  compW, compH, bitDepth, predL0.data());
+                                  compW, compH, bitDepth, predL0);
             } else {
                 // §8.5.3.3.2: chroma MV derivation from luma MV
                 // mvC = (mvL * SubWidth/Height + 2) >> 2... actually:
@@ -325,7 +358,7 @@ void perform_inter_prediction(DecodingContext& ctx,
                 int xFrac = mvCx & 7;
                 int yFrac = mvCy & 7;
                 interpolate_chroma(*refPic, cIdx, xInt, yInt, xFrac, yFrac,
-                                    compW, compH, bitDepth, predL0.data());
+                                    compW, compH, bitDepth, predL0);
             }
         }
     }
@@ -340,7 +373,7 @@ void perform_inter_prediction(DecodingContext& ctx,
                 int xFrac = mvL1.x & 3;
                 int yFrac = mvL1.y & 3;
                 interpolate_luma(*refPic, xInt, yInt, xFrac, yFrac,
-                                  compW, compH, bitDepth, predL1.data());
+                                  compW, compH, bitDepth, predL1);
             } else {
                 int xPbC = xPb / subW;
                 int yPbC = yPb / subH;
@@ -349,7 +382,7 @@ void perform_inter_prediction(DecodingContext& ctx,
                 int xFrac = mvL1.x & 7;
                 int yFrac = mvL1.y & 7;
                 interpolate_chroma(*refPic, cIdx, xInt, yInt, xFrac, yFrac,
-                                    compW, compH, bitDepth, predL1.data());
+                                    compW, compH, bitDepth, predL1);
             }
         }
     }
@@ -363,14 +396,14 @@ void perform_inter_prediction(DecodingContext& ctx,
 
     if (weightedPredFlag) {
         // §8.5.3.3.4.3: Explicit weighted sample prediction
-        weighted_pred_explicit(predL0.data(), predL1.data(),
+        weighted_pred_explicit(predL0, predL1,
                                predFlagL0, predFlagL1,
                                refIdxL0, refIdxL1,
                                cIdx, nSamples, bitDepth,
                                ctx.sh->pred_weight_table, pred_samples);
     } else {
         // §8.5.3.3.4.2: Default weighted sample prediction
-        weighted_pred_default(predL0.data(), predL1.data(),
+        weighted_pred_default(predL0, predL1,
                                predFlagL0, predFlagL1,
                                nSamples, bitDepth, pred_samples);
     }
