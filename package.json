@@ -1,0 +1,49 @@
+{
+  "name": "hevc.js",
+  "version": "1.0.0",
+  "description": "HEVC/H.265 decoder in WebAssembly — 1080p@60fps, 236KB, zero dependencies",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./packages/core/dist/index.js",
+      "types": "./packages/core/dist/index.d.ts"
+    },
+    "./videojs": {
+      "import": "./packages/videojs/dist/index.js",
+      "types": "./packages/videojs/dist/index.d.ts"
+    },
+    "./wasm": "./packages/core/dist/wasm/hevc-decode.wasm"
+  },
+  "files": [
+    "packages/core/dist/",
+    "packages/videojs/dist/"
+  ],
+  "scripts": {
+    "build:wasm": "emcmake cmake -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm && cp build-wasm/hevc-decode.js build-wasm/hevc-decode.wasm packages/core/dist/wasm/",
+    "build:core": "pnpm --filter @hevcjs/core build",
+    "build:videojs": "pnpm --filter @hevcjs/videojs build",
+    "build:js": "pnpm -r build",
+    "build": "pnpm build:wasm && pnpm build:js",
+    "dev": "pnpm -r --parallel dev",
+    "test": "cd build && ctest --output-on-failure",
+    "test:native": "cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build && cd build && ctest --output-on-failure",
+    "clean": "rm -rf build build-wasm packages/*/dist"
+  },
+  "keywords": [
+    "hevc",
+    "h265",
+    "decoder",
+    "webassembly",
+    "wasm",
+    "video",
+    "codec"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/privaloops/hevc-decode.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
