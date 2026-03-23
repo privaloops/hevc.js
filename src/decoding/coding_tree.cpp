@@ -841,6 +841,10 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
         }
     }
 
+    // §8.6.1: Store CU position for QP derivation in transform units
+    ctx.cu_x0 = x0;
+    ctx.cu_y0 = y0;
+
     // Transform tree (only for non-skip, non-PCM)
     if (!cu_skip) {
         bool rqt_root_cbf = true;
@@ -869,6 +873,7 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             ctx.cu_at(x0 + i * sps.MinCbSizeY,
                       y0 + j * sps.MinCbSizeY).qp_y = qpY;
         }
+
 }
 
 // ============================================================
@@ -1088,8 +1093,8 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
         ctx.IsCuQpDeltaCoded = true;
     }
 
-    int qpY = derive_qp_y(ctx, x0, y0);
-
+    // §8.6.1: QP derivation uses CU position (xCb, yCb), not TU position
+    int qpY = derive_qp_y(ctx, ctx.cu_x0, ctx.cu_y0);
 
     // Luma residual
     if (cbf_luma) {

@@ -264,8 +264,9 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     }
 
     // §8.7: In-loop filters — deblocking then SAO (once, after all slices)
-    // §8.7: In-loop filters — deblocking then SAO (once, after all slices)
     ctx.sh = &slice_headers[last_independent_idx];
+
+
     apply_deblocking(ctx);
     apply_sao(ctx);
 
