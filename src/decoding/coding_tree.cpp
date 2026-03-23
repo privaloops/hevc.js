@@ -171,21 +171,44 @@ static void decode_sao(DecodingContext& ctx, int rx, int ry) {
 // split_cu_flag context derivation (§9.3.4.2.2)
 // ============================================================
 
+// §6.4.1: check if neighbour CTU at (nx,ny) is available (same slice, same tile, already decoded)
+static bool is_ctb_available(const DecodingContext& ctx, int curX, int curY, int nbX, int nbY) {
+    auto& sps = *ctx.sps;
+    auto& pps = *ctx.pps;
+    if (nbX < 0 || nbY < 0 ||
+        nbX >= static_cast<int>(sps.pic_width_in_luma_samples) ||
+        nbY >= static_cast<int>(sps.pic_height_in_luma_samples))
+        return false;
+    int ctbSize = 1 << sps.CtbLog2SizeY;
+    int curAddr = (curY / ctbSize) * sps.PicWidthInCtbsY + (curX / ctbSize);
+    int nbAddr  = (nbY / ctbSize) * sps.PicWidthInCtbsY + (nbX / ctbSize);
+    // Must be already decoded (in tile scan order)
+    if (pps.CtbAddrRsToTs[nbAddr] > pps.CtbAddrRsToTs[curAddr])
+        return false;
+    // §6.4.1: SliceAddrRs must match
+    if (ctx.slice_idx && ctx.slice_idx[nbAddr] != ctx.slice_idx[curAddr])
+        return false;
+    // Same tile check
+    if (pps.TileId.size() > 0 && pps.TileId[pps.CtbAddrRsToTs[nbAddr]] != pps.TileId[pps.CtbAddrRsToTs[curAddr]])
+        return false;
+    return true;
+}
+
 static int derive_split_cu_flag_ctx(const DecodingContext& ctx, int x0, int y0,
                                      int log2CbSize) {
     int ctxInc = 0;
 
-    // Left neighbour
+    // Left neighbour — §6.4.1 availability
     int xL = x0 - 1;
-    if (xL >= 0 && xL < static_cast<int>(ctx.sps->pic_width_in_luma_samples)) {
+    if (xL >= 0 && is_ctb_available(ctx, x0, y0, xL, y0)) {
         const auto& cuL = ctx.cu_at(xL, y0);
         if (cuL.log2CbSize > 0 && cuL.log2CbSize < log2CbSize)
             ctxInc++;
     }
 
-    // Above neighbour
+    // Above neighbour — §6.4.1 availability
     int yA = y0 - 1;
-    if (yA >= 0 && yA < static_cast<int>(ctx.sps->pic_height_in_luma_samples)) {
+    if (yA >= 0 && is_ctb_available(ctx, x0, y0, x0, yA)) {
         const auto& cuA = ctx.cu_at(x0, yA);
         if (cuA.log2CbSize > 0 && cuA.log2CbSize < log2CbSize)
             ctxInc++;
@@ -202,13 +225,13 @@ static int derive_cu_skip_flag_ctx(const DecodingContext& ctx, int x0, int y0) {
     int ctxInc = 0;
 
     int xL = x0 - 1;
-    if (xL >= 0) {
+    if (xL >= 0 && is_ctb_available(ctx, x0, y0, xL, y0)) {
         const auto& cuL = ctx.cu_at(xL, y0);
         if (cuL.pred_mode == PredMode::MODE_SKIP) ctxInc++;
     }
 
     int yA = y0 - 1;
-    if (yA >= 0) {
+    if (yA >= 0 && is_ctb_available(ctx, x0, y0, x0, yA)) {
         const auto& cuA = ctx.cu_at(x0, yA);
         if (cuA.pred_mode == PredMode::MODE_SKIP) ctxInc++;
     }
@@ -222,23 +245,23 @@ static int derive_cu_skip_flag_ctx(const DecodingContext& ctx, int x0, int y0) {
 
 static void derive_mpm(const DecodingContext& ctx, int x0, int y0, int /*puSize*/,
                         int candModeList[3]) {
-    // Left neighbour
+    // Left neighbour — §8.4.2 step 2 with §6.4.1 availability
     int xL = x0 - 1;
     int candA = 1; // DC default if not available
-    if (xL >= 0) {
+    if (xL >= 0 && is_ctb_available(ctx, x0, y0, xL, y0)) {
         const auto& cuL = ctx.cu_at(xL, y0);
         if (cuL.pred_mode == PredMode::MODE_INTRA)
             candA = ctx.intra_mode_at(xL, y0);
     }
 
-    // Above neighbour
+    // Above neighbour — §8.4.2 step 2: cross-CTU-row → DC, plus §6.4.1
     int yA = y0 - 1;
     int candB = 1; // DC default if not available
     if (yA >= 0) {
         // §8.4.2: if yPb-1 < ((yPb >> CtbLog2SizeY) << CtbLog2SizeY),
         // the above neighbour is in a different CTB row → use DC
         int ctbRowStart = (y0 >> ctx.sps->CtbLog2SizeY) << ctx.sps->CtbLog2SizeY;
-        if (yA >= ctbRowStart) {
+        if (yA >= ctbRowStart && is_ctb_available(ctx, x0, y0, x0, yA)) {
             const auto& cuA = ctx.cu_at(x0, yA);
             if (cuA.pred_mode == PredMode::MODE_INTRA)
                 candB = ctx.intra_mode_at(x0, yA);
@@ -307,12 +330,12 @@ static int derive_qp_y(DecodingContext& ctx, int x0, int y0) {
     int qpPredB = ctx.QpY_prev;
 
     int xL = x0 - 1;
-    if (xL >= 0) {
+    if (xL >= 0 && is_ctb_available(ctx, x0, y0, xL, y0)) {
         qpPredA = ctx.cu_at(xL, y0).qp_y;
     }
 
     int yA = y0 - 1;
-    if (yA >= 0) {
+    if (yA >= 0 && is_ctb_available(ctx, x0, y0, x0, yA)) {
         qpPredB = ctx.cu_at(x0, yA).qp_y;
     }
 
@@ -382,11 +405,9 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
     HEVC_LOG(TREE, "slice_segment_data: addr=%d type=%d QP=%d",
              sh.slice_segment_address, static_cast<int>(sh.slice_type), sh.SliceQpY);
 
-    // WPP context storage: save CABAC contexts after the 2nd CTU of each row
+    // WPP context storage is in DecodingContext (shared across slices)
     // §9.2.2: at the start of a new CTU row (WPP), contexts are restored from
     // the saved state after the 2nd CTU of the previous row
-    CabacContext wppSavedContexts[NUM_CABAC_CONTEXTS];
-    bool wppContextsAvailable = false;
 
     bool end_of_slice = false;
     while (!end_of_slice) {
@@ -398,14 +419,19 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
         HEVC_LOG(TREE, "CTU addr_rs=%d pos=(%d,%d) bits=%zu bins=%d",
                  CtbAddrInRs, xCtb, yCtb, bits_before, cabac.bin_count());
 
+        // Phase 10: record slice ownership for this CTU
+        if (ctx.slice_idx) {
+            ctx.slice_idx[CtbAddrInRs] = static_cast<uint8_t>(ctx.current_slice_idx);
+        }
+
         decode_coding_tree_unit(ctx, xCtb, yCtb);
         HEVC_LOG(TREE, "CTU addr_rs=%d consumed %zu bits, remaining=%zu",
                  CtbAddrInRs, bs.bits_read() - bits_before, bs.bits_remaining());
 
         // §9.2.2: WPP — save contexts after the 2nd CTU of each row (col index 1)
         if (pps.entropy_coding_sync_enabled_flag && ctuCol == 1) {
-            cabac.save_contexts(wppSavedContexts);
-            wppContextsAvailable = true;
+            cabac.save_contexts(ctx.wpp_saved_contexts);
+            ctx.wpp_contexts_available = true;
         }
 
         end_of_slice = decode_end_of_slice_segment_flag(cabac);
@@ -434,8 +460,8 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
                     bs.byte_alignment();
                     cabac.init_decoder(bs);
                     // §9.2.2: restore contexts from 2nd CTU of previous row
-                    if (wppContextsAvailable) {
-                        cabac.load_contexts(wppSavedContexts);
+                    if (ctx.wpp_contexts_available) {
+                        cabac.load_contexts(ctx.wpp_saved_contexts);
                     } else {
                         // First row had < 2 CTUs: re-init from slice
                         cabac.init_contexts(static_cast<int>(sh.slice_type),
