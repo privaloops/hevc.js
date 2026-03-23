@@ -159,6 +159,21 @@ Sous-étapes :
 
 **Critère de sortie** : Décoder du 1080p@30 en temps réel dans un navigateur. 4K@60 comme objectif stretch.
 
+### Phase 10 — Multi-Slice (`docs/phases/phase-10-multi-slice.md`)
+
+**Objectif** : Décoder correctement les pictures contenant plusieurs slice segments (indépendants et dépendants). Corriger les 4 tests en échec dus à la limitation single-slice.
+
+Spec refs : §7.3.6.1 (slice segment header), §7.4.7.1 (sémantiques — `SliceAddrRs`, héritage dependent slices), §7.3.8.1 (slice segment data), §8.7.2.1 (deblocking cross-slice), §7.3.8.3 (SAO cross-slice), §9.3.2.1 (CABAC init dependent slices).
+
+Sous-étapes :
+1. **Slice index map** : Stocker l'appartenance slice de chaque CTU (per-CTB granularity)
+2. **Boucle multi-slice** : Itérer sur tous les VCL NALs d'une picture, appeler `decode_slice_segment_data()` pour chaque
+3. **Héritage dependent slices** : Copier les champs du slice indépendant précédent quand `dependent_slice_segment_flag == 1`
+4. **Cross-slice deblocking** : Utiliser la slice index map pour `filterLeftCbEdgeFlag` / `filterTopCbEdgeFlag` aux frontières inter-slice
+5. **Cross-slice SAO** : Respecter les frontières inter-slice pour le merge et l'application EO
+
+**Critère de sortie** : 126/126 tests pixel-perfect. `oracle_bbb1080_50f` et `oracle_bbb4k_25f` passent. Décodeur complet multi-slice.
+
 ## Dépendances entre phases
 
 ```
@@ -178,9 +193,13 @@ Phase 1 (Infra) ──→ Phase 2 (Bitstream) ──→ Phase 3 (Parsing)
                                     ▼         ▼          ▼
                               Phase 7    Phase 8    Phase 9
                            (Profiles)   (WASM)    (Perf)
+                                │
+                                v
+                          Phase 10 (Multi-Slice)
 ```
 
 Phases 7, 8, 9 sont partiellement parallélisables.
+Phase 10 dépend de Phase 6 (filtres) et Phase 7.5 (tiles — logique de boundary exclusion partagée).
 
 ## Stratégie de validation
 
@@ -228,6 +247,12 @@ Points critiques pour la conformité stricte à la spec, souvent source de misma
 | `cabac_init_flag` permutation | §9.2.1.1 | 4 | CABAC init tables inversées P/B |
 | AU boundary suffix SEI | §7.4.2.4.4 | 2 | Découpage incorrect des frames |
 | PCM byte alignment | §7.3.10.2 | 4 | Lecture décalée des samples PCM |
+| Slices suivants ignorés | §7.3.8.1 | 10 | Seul le premier slice décodé — CTUs des slices 2+ manquants |
+| Dependent slice héritage absent | §7.4.7.1 | 10 | Champs (QP, type, SAO flags) à zéro au lieu d'hérités du slice indépendant |
+| `SliceAddrRs` ≠ `slice_segment_address` pour dependent | §7.4.7.1 | 10 | SAO merge checks faux — zone "in slice" trop petite |
+| Cross-slice deblocking single boundary | §8.7.2.1 | 10 | Seule la frontière du dernier slice exclue — edges inter-slice 1↔2 filtrées à tort |
+| Deblocking params per-slice | §8.7.2.5.3 | 10 | `slice_beta_offset_div2` / `slice_tc_offset_div2` du mauvais slice utilisés aux frontières |
+| SAO EO cross-slice non vérifié | §8.7.3.2 | 10 | Samples EO traversent les frontières de slice quand le flag est 0 |
 
 ## Goulots de performance identifiés
 

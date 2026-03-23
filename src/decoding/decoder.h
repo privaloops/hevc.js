@@ -48,7 +48,7 @@ public:
 
 private:
     DecodeStatus decode_picture(const std::vector<NalUnit>& nals,
-                                 size_t first_vcl_idx);
+                                 size_t first_vcl_idx, size_t vcl_count);
 
     ParameterSetManager ps_mgr_;
     DPB dpb_;
@@ -74,6 +74,9 @@ private:
 
     // Phase 9: SAO backup buffers (reused across frames to avoid per-frame allocation)
     std::vector<uint16_t> sao_backup_[3];
+
+    // Phase 10: slice index per CTU
+    std::vector<uint8_t> slice_idx_buf_;
 };
 
 } // namespace hevc

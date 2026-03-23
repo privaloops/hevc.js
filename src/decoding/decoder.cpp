@@ -27,20 +27,19 @@ DecodeStatus Decoder::decode(const uint8_t* data, size_t size) {
             ps_mgr_.process_nal(nals[i]);
             i++;
         } else if (is_vcl(type)) {
-            // Found start of a picture — decode it
-            auto status = decode_picture(nals, i);
-            if (status != DecodeStatus::OK) return status;
-
-            // Skip remaining VCL NALs of this picture
+            // Collect all VCL NALs belonging to the same picture
+            size_t first_vcl = i;
             i++;
             while (i < nals.size() && is_vcl(nals[i].header.nal_unit_type)) {
-                // Check if this is a new picture (first_slice_segment_in_pic_flag)
-                // For now, treat consecutive VCL NALs as same picture until next param set
                 BitstreamReader bs(nals[i].rbsp.data(), nals[i].rbsp.size());
                 bool first_slice = bs.read_flag();
-                if (first_slice) break; // New picture
+                if (first_slice) break; // New picture starts here
                 i++;
             }
+            size_t vcl_count = i - first_vcl;
+
+            auto status = decode_picture(nals, first_vcl, vcl_count);
+            if (status != DecodeStatus::OK) return status;
         } else {
             // Non-VCL, non-parameter-set NAL (SEI, AUD, etc.) — skip
             i++;
@@ -51,12 +50,12 @@ DecodeStatus Decoder::decode(const uint8_t* data, size_t size) {
 }
 
 DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
-                                      size_t first_vcl_idx) {
+                                      size_t first_vcl_idx, size_t vcl_count) {
     const auto& nal = nals[first_vcl_idx];
 
-    // Parse slice header
-    SliceHeader sh;
-    if (!ps_mgr_.parse_slice_header(sh, nal)) {
+    // Parse first slice header (always independent)
+    SliceHeader first_sh;
+    if (!ps_mgr_.parse_slice_header(first_sh, nal)) {
         fprintf(stderr, "Error: failed to parse slice header\n");
         return DecodeStatus::ERROR;
     }
@@ -68,12 +67,12 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         return DecodeStatus::ERROR;
     }
 
-    HEVC_LOG(PARSE, "Decoding picture: %dx%d type=%d QP=%d",
+    HEVC_LOG(PARSE, "Decoding picture: %dx%d type=%d QP=%d slices=%zu",
              sps->pic_width_in_luma_samples, sps->pic_height_in_luma_samples,
-             static_cast<int>(sh.slice_type), sh.SliceQpY);
+             static_cast<int>(first_sh.slice_type), first_sh.SliceQpY, vcl_count);
 
-    // §8.3.1 — POC derivation
-    int32_t poc = dpb_.derive_poc(sh, *sps, nal.header.nal_unit_type,
+    // §8.3.1 — POC derivation (from first slice only)
+    int32_t poc = dpb_.derive_poc(first_sh, *sps, nal.header.nal_unit_type,
                                    nal.header.TemporalId());
 
     // Allocate picture in DPB
@@ -83,7 +82,7 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         static_cast<int>(sps->pic_height_in_luma_samples),
         fmt, sps->BitDepthY, sps->BitDepthC);
     pic->poc = poc;
-    pic->needed_for_output = sh.pic_output_flag;
+    pic->needed_for_output = first_sh.pic_output_flag;
 
     // §8.1: IRAP with NoRaslOutputFlag starts a new CVS
     if (is_irap(nal.header.nal_unit_type)) {
@@ -106,13 +105,13 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     }
 
     // §8.3.2 — RPS derivation and picture marking
-    dpb_.derive_rps(sh, *sps, nal.header.nal_unit_type, poc);
+    dpb_.derive_rps(first_sh, *sps, nal.header.nal_unit_type, poc);
 
     // §8.3.4 — Reference picture list construction (P and B slices)
-    if (sh.slice_type != SliceType::I) {
-        dpb_.construct_ref_pic_lists(sh, *sps, *pps);
+    if (first_sh.slice_type != SliceType::I) {
+        dpb_.construct_ref_pic_lists(first_sh, *sps, *pps);
         // §8.3.5 — Collocated picture derivation
-        dpb_.derive_colpic(sh);
+        dpb_.derive_colpic(first_sh);
     }
 
     // Allocate CU info grid (min-CB granularity)
@@ -153,12 +152,17 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     sao_params_buf_.resize(ctbGridSize);
     std::fill(sao_params_buf_.begin(), sao_params_buf_.end(), DecodingContext::SaoParams{});
 
-    // Setup decoding context
+    // Phase 10: slice index per CTU
+    slice_idx_buf_.resize(ctbGridSize);
+    std::fill(slice_idx_buf_.begin(), slice_idx_buf_.end(), 0);
+
+    // Setup decoding context (shared across all slices)
+    // Note: CabacEngine is re-initialized per-slice via init_contexts + init_decoder
     CabacEngine cabac;
     DecodingContext ctx;
+    ctx.wpp_contexts_available = false;
     ctx.sps = sps;
     ctx.pps = pps;
-    ctx.sh = &sh;
     ctx.cabac = &cabac;
     ctx.pic = pic;
     ctx.dpb = &dpb_;
@@ -177,32 +181,79 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     ctx.sao_params = sao_params_buf_.data();
     ctx.sao_params_stride = sps->PicWidthInCtbsY;
     ctx.sao_backup = sao_backup_;
+    ctx.slice_idx = slice_idx_buf_.data();
 
-    // Create bitstream reader for slice data (RBSP already extracted by NalParser)
-    BitstreamReader bs(nal.rbsp.data(), nal.rbsp.size());
+    // Decode each slice segment — store headers for per-CTU filter parameter lookup
+    std::vector<SliceHeader> slice_headers(vcl_count);
+    std::vector<const SliceHeader*> slice_header_ptrs(vcl_count);
+    int last_independent_idx = 0;
+    for (size_t s = 0; s < vcl_count; s++) {
+        const auto& slice_nal = nals[first_vcl_idx + s];
 
-    // Skip slice header (re-parse to advance the bitstream position)
-    {
-        SliceHeader sh_skip;
-        sh_skip.parse(bs, *sps, *pps, nal.header.nal_unit_type,
-                       nal.header.TemporalId());
+        // Parse slice header
+        if (s == 0) {
+            slice_headers[s] = first_sh;
+        } else {
+            if (!ps_mgr_.parse_slice_header(slice_headers[s], slice_nal)) {
+                fprintf(stderr, "Error: failed to parse slice header for slice %zu\n", s);
+                return DecodeStatus::ERROR;
+            }
+            // §7.4.7.1: dependent slices inherit fields from the independent slice
+            if (slice_headers[s].dependent_slice_segment_flag) {
+                uint32_t saved_address = slice_headers[s].slice_segment_address;
+                bool saved_dependent = slice_headers[s].dependent_slice_segment_flag;
+                bool saved_first = slice_headers[s].first_slice_segment_in_pic_flag;
+                slice_headers[s] = slice_headers[last_independent_idx];
+                slice_headers[s].slice_segment_address = saved_address;
+                slice_headers[s].dependent_slice_segment_flag = saved_dependent;
+                slice_headers[s].first_slice_segment_in_pic_flag = saved_first;
+            } else {
+                last_independent_idx = static_cast<int>(s);
+            }
+        }
+        slice_header_ptrs[s] = &slice_headers[s];
     }
 
-    // Byte align after slice header
-    HEVC_LOG(PARSE, "Slice header consumed %zu bits, byte_aligned=%d",
-             bs.bits_read(), bs.byte_aligned());
-    if (!bs.byte_aligned())
-        bs.byte_alignment();
-    HEVC_LOG(PARSE, "Slice data starts at bit %zu (byte %zu), remaining=%zu bits",
-             bs.bits_read(), bs.bits_read() / 8, bs.bits_remaining());
+    ctx.slice_headers = slice_header_ptrs.data();
+    ctx.num_slices = static_cast<int>(vcl_count);
 
-    // Decode slice data
-    if (!decode_slice_segment_data(ctx, bs)) {
-        fprintf(stderr, "Error: failed to decode slice data\n");
-        return DecodeStatus::ERROR;
+    for (size_t s = 0; s < vcl_count; s++) {
+        const auto& slice_nal = nals[first_vcl_idx + s];
+
+        ctx.sh = &slice_headers[s];
+        ctx.current_slice_idx = static_cast<int>(s);
+
+        HEVC_LOG(PARSE, "Slice %zu: addr=%d type=%d QP=%d dependent=%d",
+                 s, slice_headers[s].slice_segment_address,
+                 static_cast<int>(slice_headers[s].slice_type),
+                 slice_headers[s].SliceQpY, slice_headers[s].dependent_slice_segment_flag);
+
+        // Create bitstream reader for this slice's RBSP
+        BitstreamReader bs(slice_nal.rbsp.data(), slice_nal.rbsp.size());
+
+        // Skip slice header (re-parse to advance the bitstream position)
+        {
+            SliceHeader sh_skip;
+            sh_skip.parse(bs, *sps, *pps, slice_nal.header.nal_unit_type,
+                           slice_nal.header.TemporalId());
+        }
+
+        // Byte align after slice header
+        if (!bs.byte_aligned())
+            bs.byte_alignment();
+        HEVC_LOG(PARSE, "Slice %zu data starts at bit %zu, remaining=%zu bits",
+                 s, bs.bits_read(), bs.bits_remaining());
+
+        // Decode slice data
+        if (!decode_slice_segment_data(ctx, bs)) {
+            fprintf(stderr, "Error: failed to decode slice %zu data\n", s);
+            return DecodeStatus::ERROR;
+        }
     }
 
-    // §8.7: In-loop filters — deblocking then SAO
+    // §8.7: In-loop filters — deblocking then SAO (once, after all slices)
+    // §8.7: In-loop filters — deblocking then SAO (once, after all slices)
+    ctx.sh = &slice_headers[last_independent_idx];
     apply_deblocking(ctx);
     apply_sao(ctx);
 
