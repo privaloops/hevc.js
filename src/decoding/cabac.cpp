@@ -1,7 +1,22 @@
 #include "decoding/cabac.h"
 #include "common/debug.h"
+#include <cstdlib>
+#include <cstdio>
 
 namespace hevc {
+
+// Bin-by-bin trace — enabled by HEVC_TRACE_BINS environment variable
+static FILE* trace_file() {
+    static FILE* f = nullptr;
+    static bool checked = false;
+    if (!checked) {
+        checked = true;
+        const char* path = std::getenv("HEVC_TRACE_BINS");
+        if (path && path[0])
+            f = std::fopen(path, "w");
+    }
+    return f;
+}
 
 // §9.3.4.3.1 — Initialization of the arithmetic decoding engine
 void CabacEngine::init_decoder(BitstreamReader& bs) {
@@ -9,6 +24,10 @@ void CabacEngine::init_decoder(BitstreamReader& bs) {
     ivlCurrRange_ = 510;
     ivlOffset_ = static_cast<uint16_t>(bs.read_bits(9));
     HEVC_LOG(CABAC, "init_decoder: ivlCurrRange=%d ivlOffset=%d", ivlCurrRange_, ivlOffset_);
+
+    if (FILE* f = trace_file())
+        std::fprintf(f, "=== INIT_DECODER R=%d O=%d binCount=%d ===\n",
+                     ivlCurrRange_, ivlOffset_, bin_count_);
 }
 
 // §9.3.1.1 — Context initialization
@@ -80,7 +99,12 @@ int CabacEngine::decode_decision(int ctxIdx) {
 
     renormalize();
     bin_count_++;
-    // CABAC_TRACE_BINS: enable with -DCABAC_TRACE_BINS for bin-by-bin debugging
+
+    if (FILE* f = trace_file())
+        std::fprintf(f, "D %d ctx=%d st=%d mps=%d R=%d O=%d val=%d\n",
+                     bin_count_, ctxIdx, pStateIdx, valMps,
+                     ivlCurrRange_, ivlOffset_, binVal);
+
     return binVal;
 }
 
@@ -95,6 +119,11 @@ int CabacEngine::decode_bypass() {
     }
 
     bin_count_++;
+
+    if (FILE* f = trace_file())
+        std::fprintf(f, "B %d R=%d O=%d val=%d\n",
+                     bin_count_, ivlCurrRange_, ivlOffset_, val);
+
     return val;
 }
 
@@ -104,9 +133,17 @@ int CabacEngine::decode_terminate() {
     bin_count_++;
 
     if (ivlOffset_ >= ivlCurrRange_) {
+        if (FILE* f = trace_file())
+            std::fprintf(f, "T %d R=%d O=%d val=1\n",
+                         bin_count_, ivlCurrRange_, ivlOffset_);
         return 1;
     }
     renormalize();
+
+    if (FILE* f = trace_file())
+        std::fprintf(f, "T %d R=%d O=%d val=0\n",
+                     bin_count_, ivlCurrRange_, ivlOffset_);
+
     return 0;
 }
 

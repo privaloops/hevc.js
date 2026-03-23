@@ -78,6 +78,26 @@ struct DecodingContext {
     // Phase 9: SAO backup planes (reused across frames, owned by Decoder)
     std::vector<uint16_t>* sao_backup = nullptr;  // array of 3 vectors
 
+    // Phase 10: slice index per CTU (for cross-slice boundary detection)
+    uint8_t* slice_idx = nullptr;          // array [PicSizeInCtbsY], indexed by CtbAddrInRs
+    int current_slice_idx = 0;             // slice index being decoded (set before each decode_slice_segment_data)
+
+    // Phase 10: per-slice headers for correct filter parameter lookup
+    const SliceHeader* const* slice_headers = nullptr;  // array of pointers, indexed by slice_idx
+    int num_slices = 0;
+
+    // Helper: get slice header for a CTU (for filters)
+    const SliceHeader& sh_at_ctb(int ctbAddrRs) const {
+        if (slice_idx && slice_headers && slice_idx[ctbAddrRs] < num_slices)
+            return *slice_headers[slice_idx[ctbAddrRs]];
+        return *sh;
+    }
+
+    // WPP context storage — shared across slices so that row N in slice S+1
+    // can restore contexts saved at col 1 of row N-1 in slice S
+    CabacContext wpp_saved_contexts[NUM_CABAC_CONTEXTS] = {};
+    bool wpp_contexts_available = false;
+
     // Helper: get CU info at luma sample position
     CUInfo& cu_at(int x, int y) {
         int minCbSize = sps->MinCbSizeY;
