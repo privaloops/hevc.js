@@ -241,11 +241,23 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
         // Byte align after slice header
         if (!bs.byte_aligned())
             bs.byte_alignment();
+        // Compute slice header coded size for EP byte conversion.
+        // The RBSP starts after the 2-byte NAL header. bs.byte_position() is
+        // the RBSP offset of slice data start. The coded offset includes EP bytes.
+        size_t slice_data_rbsp_pos = bs.byte_position();
+        size_t slice_header_coded_size = slice_data_rbsp_pos;
+        // Add back EP bytes that fall within the slice header portion
+        for (size_t ep : slice_nal.epb_positions) {
+            if (ep < slice_header_coded_size + 2) // +2 for NAL header offset in EP positions
+                slice_header_coded_size++;
+        }
+
         HEVC_LOG(PARSE, "Slice %zu data starts at bit %zu, remaining=%zu bits",
                  s, bs.bits_read(), bs.bits_remaining());
 
         // Decode slice data
-        if (!decode_slice_segment_data(ctx, bs)) {
+        if (!decode_slice_segment_data(ctx, bs, slice_nal.epb_positions,
+                                        slice_header_coded_size)) {
             fprintf(stderr, "Error: failed to decode slice %zu data\n", s);
             return DecodeStatus::ERROR;
         }

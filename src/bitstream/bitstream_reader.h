@@ -40,6 +40,11 @@ public:
     // Position
     size_t bits_read() const { return bit_pos_; }
     size_t bits_remaining() const;
+    size_t byte_position() const { return bit_pos_ / 8; }
+
+    // Seek to absolute byte position (resets cache).
+    // Used by WPP to jump to the start of each substream.
+    void seek_to_byte(size_t pos);
 
     // State
     bool eof() const;
@@ -65,5 +70,17 @@ private:
 
 // RBSP extraction — remove emulation prevention bytes (§7.3.1.1)
 std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size);
+
+// RBSP extraction with EP byte position tracking.
+// epb_positions receives the byte positions (in the original NAL) of each removed 0x03 byte.
+std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size,
+                                   std::vector<size_t>& epb_positions);
+
+// Convert a byte offset in coded slice data (which counts EP bytes) to the
+// corresponding byte offset in the RBSP buffer.
+// slice_data_start_coded = byte offset of slice data start in the original NAL.
+// epb_positions = positions of removed EP bytes from extract_rbsp.
+size_t coded_to_rbsp_offset(size_t coded_offset, size_t slice_data_start_coded,
+                            const std::vector<size_t>& epb_positions);
 
 } // namespace hevc

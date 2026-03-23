@@ -12,6 +12,7 @@ namespace hevc {
 struct NalUnit {
     NalUnitHeader header;
     std::vector<uint8_t> rbsp;  // RBSP data (emulation prevention removed)
+    std::vector<size_t> epb_positions;  // byte positions of removed EP bytes in original NAL
     size_t offset;              // byte offset in the original stream
     size_t size;                // original NAL size (before EP removal)
 };

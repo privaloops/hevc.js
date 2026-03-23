@@ -312,7 +312,7 @@ static int derive_chroma_intra_mode(int coded_mode, int luma_mode) {
 // QP derivation (§8.6.1)
 // ============================================================
 
-static int derive_qp_y(DecodingContext& ctx, int x0, int y0) {
+static int derive_qp_y(DecodingContext& ctx, int xCb, int yCb) {
     auto& sps = *ctx.sps;
     auto& pps = *ctx.pps;
     auto& sh = *ctx.sh;
@@ -325,22 +325,40 @@ static int derive_qp_y(DecodingContext& ctx, int x0, int y0) {
         return ctx.QpY_prev;
     }
 
-    // QP prediction: average of left and above neighbours
+    // §8.6.1: Derive QG top-left coordinates
+    int qgMask = (1 << pps.Log2MinCuQpDeltaSize) - 1;
+    int xQg = xCb - (xCb & qgMask);
+    int yQg = yCb - (yCb & qgMask);
+
+    // §8.6.1 step 2: qPY_A from CU at (xQg - 1, yQg)
     int qpPredA = ctx.QpY_prev;
+    if (xQg - 1 >= 0) {
+        // Check that (xQg-1, yQg) is in the same CTB as current
+        int ctbAddrCur = (yCb >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
+                         (xCb >> sps.CtbLog2SizeY);
+        int ctbAddrA   = (yQg >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
+                         ((xQg - 1) >> sps.CtbLog2SizeY);
+        if (pps.CtbAddrRsToTs[ctbAddrA] == pps.CtbAddrRsToTs[ctbAddrCur]) {
+            qpPredA = ctx.cu_at(xQg - 1, yQg).qp_y;
+        }
+    }
+
+    // §8.6.1 step 3: qPY_B from CU at (xQg, yQg - 1)
     int qpPredB = ctx.QpY_prev;
-
-    int xL = x0 - 1;
-    if (xL >= 0 && is_ctb_available(ctx, x0, y0, xL, y0)) {
-        qpPredA = ctx.cu_at(xL, y0).qp_y;
+    if (yQg - 1 >= 0) {
+        int ctbAddrCur = (yCb >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
+                         (xCb >> sps.CtbLog2SizeY);
+        int ctbAddrB   = ((yQg - 1) >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
+                         (xQg >> sps.CtbLog2SizeY);
+        if (pps.CtbAddrRsToTs[ctbAddrB] == pps.CtbAddrRsToTs[ctbAddrCur]) {
+            qpPredB = ctx.cu_at(xQg, yQg - 1).qp_y;
+        }
     }
 
-    int yA = y0 - 1;
-    if (yA >= 0 && is_ctb_available(ctx, x0, y0, x0, yA)) {
-        qpPredB = ctx.cu_at(x0, yA).qp_y;
-    }
-
+    // §8.6.1 step 4: predicted QP
     int qpPred = (qpPredA + qpPredB + 1) >> 1;
 
+    // §8.6.1 eq 8-283
     int QpY = ((qpPred + ctx.CuQpDeltaVal + 52 + 2 * sps.QpBdOffsetY) %
                (52 + sps.QpBdOffsetY)) - sps.QpBdOffsetY;
 
@@ -382,11 +400,40 @@ static void reconstruct_block(DecodingContext& ctx, int x0, int y0,
 // slice_segment_data (§7.3.8.1)
 // ============================================================
 
-bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
+bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
+                                const std::vector<size_t>& epb_positions,
+                                size_t slice_header_coded_size) {
     auto& sps = *ctx.sps;
     auto& pps = *ctx.pps;
     auto& sh = *ctx.sh;
     auto& cabac = *ctx.cabac;
+
+    // §7.3.8.1: Compute RBSP byte positions of WPP/tile substreams.
+    // entry_point_offsets are in bytes of the coded slice data (including EP bytes).
+    // We must convert to RBSP positions (EP bytes removed).
+    size_t slice_data_rbsp_start = bs.byte_position();
+    std::vector<size_t> substream_byte_pos;
+    if (sh.num_entry_point_offsets > 0) {
+        substream_byte_pos.resize(sh.num_entry_point_offsets + 1);
+        substream_byte_pos[0] = slice_data_rbsp_start;
+
+        // Cumulative coded offsets from slice data start
+        size_t coded_offset = 0;
+        for (uint32_t i = 0; i < sh.num_entry_point_offsets; i++) {
+            coded_offset += sh.entry_point_offset_minus1[i] + 1;
+            if (!epb_positions.empty()) {
+                // Convert coded offset to RBSP offset accounting for EP bytes
+                size_t rbsp_off = coded_to_rbsp_offset(coded_offset,
+                                                        slice_header_coded_size,
+                                                        epb_positions);
+                substream_byte_pos[i + 1] = slice_data_rbsp_start + rbsp_off;
+            } else {
+                // No EP bytes tracked — use coded offset directly (works when no EP bytes)
+                substream_byte_pos[i + 1] = slice_data_rbsp_start + coded_offset;
+            }
+        }
+    }
+    uint32_t wpp_substream_idx = 0;
 
     // Initialize CABAC
     if (!sh.dependent_slice_segment_flag) {
@@ -402,12 +449,9 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
     int CtbAddrInTs = pps.CtbAddrRsToTs[sh.slice_segment_address];
     int CtbAddrInRs = sh.slice_segment_address;
 
-    HEVC_LOG(TREE, "slice_segment_data: addr=%d type=%d QP=%d",
-             sh.slice_segment_address, static_cast<int>(sh.slice_type), sh.SliceQpY);
-
-    // WPP context storage is in DecodingContext (shared across slices)
-    // §9.2.2: at the start of a new CTU row (WPP), contexts are restored from
-    // the saved state after the 2nd CTU of the previous row
+    HEVC_LOG(TREE, "slice_segment_data: addr=%d type=%d QP=%d entry_points=%u",
+             sh.slice_segment_address, static_cast<int>(sh.slice_type),
+             sh.SliceQpY, sh.num_entry_point_offsets);
 
     bool end_of_slice = false;
     while (!end_of_slice) {
@@ -447,23 +491,30 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs) {
                 cabac.decode_terminate(); // end_of_subset_one_bit
                 bs.byte_alignment();
                 cabac.init_decoder(bs);
+                // §8.6.1: Reset QpY_prev at first QG in a tile
+                ctx.QpY_prev = sh.SliceQpY;
             }
 
-            // WPP boundary (§9.3.4.3.6): at end of each CTU row, decode
-            // end_of_subset_one_bit + byte alignment + reinit CABAC + restore contexts
+            // WPP boundary (§7.3.8.1 / §9.2.2): at end of each CTU row,
+            // seek to the next substream (via entry_point_offset), reinit CABAC,
+            // and restore contexts from the 2nd CTU of the previous row.
             if (pps.entropy_coding_sync_enabled_flag) {
                 int prevRs = pps.CtbAddrTsToRs[CtbAddrInTs - 1];
                 int prevRow = prevRs / sps.PicWidthInCtbsY;
                 int curRow  = CtbAddrInRs / sps.PicWidthInCtbsY;
                 if (curRow != prevRow) {
-                    cabac.decode_terminate(); // end_of_subset_one_bit
-                    bs.byte_alignment();
+                    wpp_substream_idx++;
+                    // Seek to the exact byte position of this substream
+                    if (wpp_substream_idx < substream_byte_pos.size()) {
+                        bs.seek_to_byte(substream_byte_pos[wpp_substream_idx]);
+                    }
                     cabac.init_decoder(bs);
+                    // §8.6.1: Reset QpY_prev at first QG of each CTB row (WPP)
+                    ctx.QpY_prev = sh.SliceQpY;
                     // §9.2.2: restore contexts from 2nd CTU of previous row
                     if (ctx.wpp_contexts_available) {
                         cabac.load_contexts(ctx.wpp_saved_contexts);
                     } else {
-                        // First row had < 2 CTUs: re-init from slice
                         cabac.init_contexts(static_cast<int>(sh.slice_type),
                                             sh.SliceQpY, sh.cabac_init_flag);
                     }
@@ -804,11 +855,13 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
         }
     }
 
-    // Derive QP
+    // §8.6.1: Derive initial QP before transform tree.
+    // If cu_qp_delta is not yet coded, this returns QpY_prev (tentative).
+    // The final QP is determined after cu_qp_delta is decoded in the TU.
     int qpY = derive_qp_y(ctx, x0, y0);
     ctx.QpY_prev = qpY;
 
-    // Store QP in grid
+    // Store QP in grid (will be updated after cu_qp_delta if needed)
     for (int j = 0; j < n; j++)
         for (int i = 0; i < n; i++) {
             ctx.cu_at(x0 + i * sps.MinCbSizeY,
@@ -1035,6 +1088,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
 
     int qpY = derive_qp_y(ctx, x0, y0);
 
+
     // Luma residual
     if (cbf_luma) {
         int16_t coefficients[64 * 64] = {};
@@ -1058,6 +1112,7 @@ void decode_transform_unit(DecodingContext& ctx, int x0, int y0,
                                        cu.pred_mode == PredMode::MODE_INTRA,
                                        transform_skip, sps.BitDepthY,
                                        scaled, residual);
+
         } else {
             std::memcpy(residual, coefficients, sizeof(int16_t) * trSize * trSize);
         }
