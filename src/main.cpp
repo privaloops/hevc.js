@@ -101,6 +101,10 @@ static void dump_pps(const hevc::PPS& pps) {
     printf("  constrained_intra_pred     = %d\n", pps.constrained_intra_pred_flag ? 1 : 0);
     printf("  transform_skip_enabled     = %d\n", pps.transform_skip_enabled_flag ? 1 : 0);
     printf("  cu_qp_delta_enabled        = %d\n", pps.cu_qp_delta_enabled_flag ? 1 : 0);
+    if (pps.cu_qp_delta_enabled_flag) {
+        printf("  diff_cu_qp_delta_depth     = %d\n", pps.diff_cu_qp_delta_depth);
+        printf("  Log2MinCuQpDeltaSize       = %d\n", pps.Log2MinCuQpDeltaSize);
+    }
     printf("  cb_qp_offset               = %d\n", pps.pps_cb_qp_offset);
     printf("  cr_qp_offset               = %d\n", pps.pps_cr_qp_offset);
     printf("  weighted_pred              = %d\n", pps.weighted_pred_flag ? 1 : 0);
@@ -111,6 +115,11 @@ static void dump_pps(const hevc::PPS& pps) {
            pps.num_tile_rows_minus1 + 1);
     printf("  entropy_coding_sync        = %d\n", pps.entropy_coding_sync_enabled_flag ? 1 : 0);
     printf("  deblocking_filter_disabled = %d\n", pps.pps_deblocking_filter_disabled_flag ? 1 : 0);
+    printf("  loop_filter_across_slices  = %d\n", pps.pps_loop_filter_across_slices_enabled_flag ? 1 : 0);
+    if (pps.cu_qp_delta_enabled_flag) {
+        printf("  diff_cu_qp_delta_depth     = %d\n", pps.diff_cu_qp_delta_depth);
+        printf("  Log2MinCuQpDeltaSize       = %d\n", pps.Log2MinCuQpDeltaSize);
+    }
     printf("  sign_data_hiding           = %d\n", pps.sign_data_hiding_enabled_flag ? 1 : 0);
     printf("  cabac_init_present         = %d\n", pps.cabac_init_present_flag ? 1 : 0);
     printf("  lists_modification_present = %d\n", pps.lists_modification_present_flag ? 1 : 0);
@@ -129,6 +138,7 @@ static void dump_slice(const hevc::SliceHeader& sh) {
         printf("  sao_luma                   = %d\n", sh.slice_sao_luma_flag ? 1 : 0);
         printf("  sao_chroma                 = %d\n", sh.slice_sao_chroma_flag ? 1 : 0);
         printf("  deblocking_disabled        = %d\n", sh.slice_deblocking_filter_disabled_flag ? 1 : 0);
+        printf("  loop_filter_across_slices  = %d\n", sh.slice_loop_filter_across_slices_enabled_flag ? 1 : 0);
         if (sh.slice_type != hevc::SliceType::I) {
             printf("  num_ref_idx_l0_active      = %d\n", sh.num_ref_idx_l0_active_minus1 + 1);
             if (sh.slice_type == hevc::SliceType::B) {

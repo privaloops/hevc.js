@@ -321,17 +321,16 @@ static int derive_qp_y(DecodingContext& ctx, int xCb, int yCb) {
         return sh.SliceQpY;
     }
 
-    if (!ctx.IsCuQpDeltaCoded) {
-        return ctx.QpY_prev;
-    }
-
     // §8.6.1: Derive QG top-left coordinates
     int qgMask = (1 << pps.Log2MinCuQpDeltaSize) - 1;
     int xQg = xCb - (xCb & qgMask);
     int yQg = yCb - (yCb & qgMask);
 
+    // §8.6.1 step 1: qPY_PREV — saved at QG boundary, not updated within QG
+    int qpPrev = ctx.QpY_prev_qg;
+
     // §8.6.1 step 2: qPY_A from CU at (xQg - 1, yQg)
-    int qpPredA = ctx.QpY_prev;
+    int qpPredA = qpPrev;
     if (xQg - 1 >= 0) {
         // Check that (xQg-1, yQg) is in the same CTB as current
         int ctbAddrCur = (yCb >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
@@ -344,7 +343,7 @@ static int derive_qp_y(DecodingContext& ctx, int xCb, int yCb) {
     }
 
     // §8.6.1 step 3: qPY_B from CU at (xQg, yQg - 1)
-    int qpPredB = ctx.QpY_prev;
+    int qpPredB = qpPrev;
     if (yQg - 1 >= 0) {
         int ctbAddrCur = (yCb >> sps.CtbLog2SizeY) * sps.PicWidthInCtbsY +
                          (xCb >> sps.CtbLog2SizeY);
@@ -444,6 +443,7 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
 
     // Init QP
     ctx.QpY_prev = sh.SliceQpY;
+    ctx.QpY_prev_qg = sh.SliceQpY;
 
     // CTU scan
     int CtbAddrInTs = pps.CtbAddrRsToTs[sh.slice_segment_address];
@@ -493,6 +493,7 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
                 cabac.init_decoder(bs);
                 // §8.6.1: Reset QpY_prev at first QG in a tile
                 ctx.QpY_prev = sh.SliceQpY;
+                ctx.QpY_prev_qg = sh.SliceQpY;
             }
 
             // WPP boundary (§7.3.8.1 / §9.2.2): at end of each CTU row,
@@ -511,6 +512,7 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
                     cabac.init_decoder(bs);
                     // §8.6.1: Reset QpY_prev at first QG of each CTB row (WPP)
                     ctx.QpY_prev = sh.SliceQpY;
+                    ctx.QpY_prev_qg = sh.SliceQpY;
                     // §9.2.2: restore contexts from 2nd CTU of previous row
                     if (ctx.wpp_contexts_available) {
                         cabac.load_contexts(ctx.wpp_saved_contexts);
@@ -538,10 +540,11 @@ void decode_coding_tree_unit(DecodingContext& ctx, int xCtb, int yCtb) {
         decode_sao(ctx, rx, ry);
     }
 
-    // QP group reset
+    // QP group reset (CTU level)
     if (ctx.pps->cu_qp_delta_enabled_flag) {
         ctx.IsCuQpDeltaCoded = false;
         ctx.CuQpDeltaVal = 0;
+        ctx.QpY_prev_qg = ctx.QpY_prev;
     }
 
     decode_coding_quadtree(ctx, xCtb, yCtb, ctx.sps->CtbLog2SizeY, 0);
@@ -572,10 +575,11 @@ void decode_coding_quadtree(DecodingContext& ctx, int x0, int y0,
         split = decode_split_cu_flag(*ctx.cabac, ctxInc);
     }
 
-    // QP group boundary
+    // QP group boundary — §8.6.1
     if (pps.cu_qp_delta_enabled_flag && log2CbSize >= pps.Log2MinCuQpDeltaSize) {
         ctx.IsCuQpDeltaCoded = false;
         ctx.CuQpDeltaVal = 0;
+        ctx.QpY_prev_qg = ctx.QpY_prev;
     }
 
     if (split) {
@@ -855,9 +859,7 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
         }
     }
 
-    // §8.6.1: Derive initial QP before transform tree.
-    // If cu_qp_delta is not yet coded, this returns QpY_prev (tentative).
-    // The final QP is determined after cu_qp_delta is decoded in the TU.
+    // §8.6.1: Derive QpY for this CU. Uses CuQpDeltaVal (0 if not coded).
     int qpY = derive_qp_y(ctx, x0, y0);
     ctx.QpY_prev = qpY;
 
