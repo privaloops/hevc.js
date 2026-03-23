@@ -230,6 +230,12 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     // §8.1 step 4: mark current picture as short-term reference
     dpb_.mark_current_as_short_term_ref();
 
+    // §C.5.2.3: mark current picture as "needed for output"
+    // (PicOutputFlag is 1 for all pictures in Main profile)
+    if (dpb_.current_pic()) {
+        dpb_.current_pic()->needed_for_output = true;
+    }
+
     return DecodeStatus::OK;
 }
 

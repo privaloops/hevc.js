@@ -142,6 +142,33 @@ TEST(IncrementalDecode, FeedDrainMatchesBatch) {
         EXPECT_EQ(all_inc_pics[i]->poc, batch_pics[i]->poc)
             << "POC mismatch at frame " << i;
     }
+
+    // Verify: PIXEL-PERFECT match between batch and incremental
+    for (size_t i = 0; i < min_count; i++) {
+        auto* bp = batch_pics[i];
+        auto* ip = all_inc_pics[i];
+        ASSERT_EQ(bp->planes[0].size(), ip->planes[0].size())
+            << "Y plane size mismatch at frame " << i;
+        bool y_match = (bp->planes[0] == ip->planes[0]);
+        bool cb_match = (bp->planes[1] == ip->planes[1]);
+        bool cr_match = (bp->planes[2] == ip->planes[2]);
+        EXPECT_TRUE(y_match) << "Y plane pixel mismatch at frame " << i
+            << " (poc=" << bp->poc << ")";
+        EXPECT_TRUE(cb_match) << "Cb plane pixel mismatch at frame " << i;
+        EXPECT_TRUE(cr_match) << "Cr plane pixel mismatch at frame " << i;
+        if (!y_match) {
+            // Find first differing pixel
+            for (size_t j = 0; j < bp->planes[0].size(); j++) {
+                if (bp->planes[0][j] != ip->planes[0][j]) {
+                    int row = j / bp->stride[0];
+                    int col = j % bp->stride[0];
+                    FAIL() << "First Y diff at pixel (" << col << "," << row
+                           << ") batch=" << bp->planes[0][j]
+                           << " inc=" << ip->planes[0][j];
+                }
+            }
+        }
+    }
 }
 
 // ============================================================
