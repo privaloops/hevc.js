@@ -44,7 +44,8 @@ struct DecodingContext {
     int cu_info_stride = 0;       // = PicWidthInMinCbsY
 
     // QP tracking
-    int QpY_prev = 0;            // QP of previous CU in coding order
+    int QpY_prev = 0;            // QP of last CU in previous QG (§8.6.1)
+    int QpY_prev_qg = 0;         // Saved QpY_prev at QG boundary start
     bool IsCuQpDeltaCoded = false;
     int CuQpDeltaVal = 0;
 
