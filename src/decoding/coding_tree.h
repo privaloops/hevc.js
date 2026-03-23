@@ -127,7 +127,12 @@ struct DecodingContext {
 // ============================================================
 
 // Decode a complete slice segment (§7.3.8.1)
-bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs);
+// epb_positions: byte positions of removed emulation prevention bytes in the NAL
+//                (needed to convert entry_point_offsets to RBSP positions for WPP)
+// slice_header_coded_size: size of the slice header in the coded NAL (before EP removal)
+bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
+                                const std::vector<size_t>& epb_positions = {},
+                                size_t slice_header_coded_size = 0);
 
 // Decode a coding tree unit (§7.3.8.2)
 void decode_coding_tree_unit(DecodingContext& ctx, int xCtb, int yCtb);

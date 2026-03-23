@@ -256,3 +256,24 @@ Le WPP fonctionne pour les I-frames mais echoue pour les P/B-frames. Le contexte
 ### Milestone atteint
 
 **Phase 7 Main 10 = pixel-perfect** : `oracle_i_64x64_10bit`, `oracle_full_qcif_10f_10bit`. 124/128 tests passent (4 echecs = multi-slice, inchange).
+
+## Session 2026-03-23 — WPP crash + QP derivation bugs
+
+### WPP substream seek (CRITICAL)
+
+Avec WPP, chaque rangee CTB est un substream separe. Les `entry_point_offset_minus1` donnent la taille en octets de chaque substream dans le coded slice data. Le CABAC engine lit des bits en avance via `renormalize()` (`read_bits_safe`), ce qui decale progressivement la position du BitstreamReader. Sans repositionnement explicite via `seek_to_byte`, l'erreur s'accumule et le decodeur crash (`read past end`) apres quelques rangees.
+
+**Piege** : les entry_point_offsets comptent les emulation prevention bytes (spec §7.4.7.1 : "emulation prevention bytes are counted as part of the slice segment data"). Le BitstreamReader opere sur le RBSP (EP bytes supprimes). Il faut convertir les offsets coded → RBSP en comptant les EP bytes avant chaque offset.
+
+### QP derivation : coordonnees QG, pas CU (CRITICAL)
+
+La spec §8.6.1 dit que les predicteurs QP (qPY_A, qPY_B) sont lus aux positions `(xQg-1, yQg)` et `(xQg, yQg-1)` ou (xQg, yQg) sont les coordonnees du quantization group, PAS du CU. Erreur invisible sur les petits streams (QG = CTB = toute l'image) mais provoque des erreurs QP systematiques de ±4 sur les streams larges (1080p+) ou `cu_qp_delta_enabled_flag` est actif.
+
+### WPP QpY_prev reset
+
+La spec §8.6.1 dit explicitement : "qPY_PREV is set equal to SliceQpY when the current quantization group is the first quantization group in a CTB row of a tile and entropy_coding_sync_enabled_flag is equal to 1". Facile a oublier car le texte est noye dans une liste de conditions. Meme reset requis pour les frontieres de tiles.
+
+### Bugs restants identifies
+
+- **Deblocking ±1** : 10 pixels a ±1 a la frontiere CTB y=32 sur BBB 1080p. Le filtre fort ne s'applique pas alors qu'il devrait. A investiguer.
+- **QP ±2 ARTE** : erreur QP residuelle sur le stream ARTE (CTB=64). Probablement lie a la meme famille de bugs QP derivation. A investiguer.

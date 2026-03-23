@@ -155,6 +155,15 @@ bool BitstreamReader::eof() const {
     return bit_pos_ >= size_ * 8;
 }
 
+void BitstreamReader::seek_to_byte(size_t pos) {
+    assert(pos <= size_);
+    bit_pos_ = pos * 8;
+    byte_pos_ = pos;
+    cache_ = 0;
+    cache_bits_ = 0;
+    refill();
+}
+
 // Emulation prevention byte removal (§7.3.1.1)
 // In the byte stream, 0x000003 is an emulation prevention sequence.
 // Remove the 0x03 byte to produce the RBSP.
@@ -184,6 +193,57 @@ std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size) {
     }
 
     return rbsp;
+}
+
+std::vector<uint8_t> extract_rbsp(const uint8_t* nal_data, size_t nal_size,
+                                   std::vector<size_t>& epb_positions) {
+    std::vector<uint8_t> rbsp;
+    rbsp.reserve(nal_size);
+    epb_positions.clear();
+
+    size_t i = 0;
+    while (i < nal_size) {
+        if (i + 2 < nal_size &&
+            nal_data[i] == 0x00 &&
+            nal_data[i + 1] == 0x00 &&
+            nal_data[i + 2] == 0x03 &&
+            (i + 3 >= nal_size || nal_data[i + 3] <= 0x03))
+        {
+            rbsp.push_back(0x00);
+            rbsp.push_back(0x00);
+            epb_positions.push_back(i + 2);  // position of the 0x03 byte
+            i += 3;
+        } else {
+            rbsp.push_back(nal_data[i]);
+            i++;
+        }
+    }
+
+    return rbsp;
+}
+
+size_t coded_to_rbsp_offset(size_t coded_offset, size_t slice_data_start_coded,
+                            const std::vector<size_t>& epb_positions) {
+    // coded_offset is relative to slice data start in the coded (NAL) domain.
+    // We need to subtract the number of EP bytes that fall before this position.
+    size_t abs_coded = slice_data_start_coded + coded_offset;
+    size_t epb_count = 0;
+    for (size_t pos : epb_positions) {
+        if (pos < abs_coded)
+            epb_count++;
+        else
+            break;
+    }
+    // RBSP offset = coded offset from NAL start - EP bytes before it
+    // But we want RBSP offset from slice data start in RBSP
+    size_t slice_data_start_rbsp = slice_data_start_coded;
+    for (size_t pos : epb_positions) {
+        if (pos < slice_data_start_coded)
+            slice_data_start_rbsp--;
+        else
+            break;
+    }
+    return (abs_coded - epb_count) - slice_data_start_rbsp;
 }
 
 } // namespace hevc
