@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **WPP substream seek (§7.3.8.1)**: BitstreamReader was never repositioned at WPP row boundaries, causing crash (`read past end`) at CTU 899 on BBB 1080p. Now computes absolute RBSP positions from `entry_point_offset_minus1` and seeks to correct substream start.
+- **EP byte accounting in entry_point_offsets (§7.4.7.1)**: entry_point_offsets count emulation prevention bytes, but substream positions were computed in RBSP space (EP bytes removed). Added `coded_to_rbsp_offset` conversion using tracked EP byte positions from `extract_rbsp`.
+- **QP derivation uses QG coordinates (§8.6.1)**: `derive_qp_y` was using CU coordinates `(xCb, yCb)` for neighbor QP prediction instead of quantization group coordinates `(xQg, yQg)`. Caused systematic QP errors (+4 to -4) on streams with `cu_qp_delta_enabled_flag`.
+- **WPP QpY_prev reset (§8.6.1)**: `qPY_PREV` was not reset to `SliceQpY` at the first quantization group of each CTB row when `entropy_coding_sync_enabled_flag` is set. Same reset added for tile boundaries.
+
 ### Added
 - **hevc.js monorepo restructure**:
   - pnpm workspace with `packages/core/` (TypeScript WASM wrapper) and `packages/videojs/` (Video.js Tech + fMP4 demuxer + renderer)

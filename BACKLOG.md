@@ -11,8 +11,8 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | **Termine** | 11/14 tests pass. Deblocking + SAO pixel-perfect. 3 echecs = multi-slice (limitation connue). |
-| 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
+| 6 — Loop Filters | **Termine** | 11/14 tests phase6 pass. 3 echecs (bbb1080, bbb4k, xslice_256) = deblocking ±1 + QP residuel sur 1080p+. |
+| 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
 | 10 — Multi-Slice | **En cours** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking. I-frame pixel-perfect. 5 diffs chroma B-frame restants. |
@@ -148,6 +148,23 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
 
 ### Bug fixes
 - [x] Chroma deblocking saute quand luma decision dE==0 (le `continue` sautait aussi le chroma)
+- [x] WPP substream seek : crash `read past end` au CTU 899 BBB 1080p (§7.3.8.1)
+- [x] EP byte accounting dans entry_point_offsets (§7.4.7.1)
+- [x] QP derivation avec coordonnees QG au lieu de CU (§8.6.1)
+- [x] WPP/tile QpY_prev reset a SliceQpY (§8.6.1)
+- [ ] Deblocking ±1 a la frontiere CTB y=32 BBB 1080p (filtre fort non applique)
+  - 10 pixels a ±1 dans le frame 0 I-frame, y=30-31 autour de x=178-195
+  - La frontiere horizontale deblocking a y=32 (CTB boundary) devrait appliquer le filtre fort (dE=2) mais ne filtre rien (dE=0 ou Bs=0)
+  - HM modifie p0-p2/q0-q2 (y=29-34), notre filtre ne touche aucun pixel
+  - L'erreur se propage via inter prediction dans tous les frames suivants
+  - Comparer avec HM : beta/tC/Bs/dSam pour cette edge specifique
+- [ ] QP ±2 residuel sur stream ARTE CTB=64
+  - Stream ARTE : Main profile 8-bit, CTB=64, WPP, cu_qp_delta_enabled_flag=1
+  - Premier pixel faux a (76,44) diff=-2 dans le frame 0 I-frame (CTU 1, CU a (64,32))
+  - 75% des pixels ont diff=+2 (offset DC systematique)
+  - CTU colonne 0 est entierement correct, l'erreur commence au CTU 1
+  - Probablement meme famille que le bug QP derivation fixe (§8.6.1) mais avec CTB=64 le QG sizing est different
+  - Tester en natif : `ffmpeg -i <arte_hls> -c:v copy -bsf:v hevc_mp4toannexb -an /tmp/arte.265` puis `./build/hevc-decode /tmp/arte.265 -o /tmp/arte.yuv`
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
