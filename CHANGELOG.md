@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **EP byte accounting in entry_point_offsets (§7.4.7.1)**: entry_point_offsets count emulation prevention bytes, but substream positions were computed in RBSP space (EP bytes removed). Added `coded_to_rbsp_offset` conversion using tracked EP byte positions from `extract_rbsp`.
 - **QP derivation uses QG coordinates (§8.6.1)**: `derive_qp_y` was using CU coordinates `(xCb, yCb)` for neighbor QP prediction instead of quantization group coordinates `(xQg, yQg)`. Caused systematic QP errors (+4 to -4) on streams with `cu_qp_delta_enabled_flag`.
 - **WPP QpY_prev reset (§8.6.1)**: `qPY_PREV` was not reset to `SliceQpY` at the first quantization group of each CTB row when `entropy_coding_sync_enabled_flag` is set. Same reset added for tile boundaries.
+- **QP derivation shortcut removed (§8.6.1)**: `derive_qp_y` incorrectly returned `QpY_prev` when `IsCuQpDeltaCoded` was false. The spec requires full neighbor-based `qPY_PRED` computation even with `CuQpDeltaVal=0`.
+- **QpY_prev_qg tracking (§8.6.1)**: `qPY_PREV` was updated after every CU, but the spec defines it as the QP of the last CU in the *previous* QG. Introduced `QpY_prev_qg` saved at QG boundary start. Fixes catastrophic decode errors on `cu_qp_delta_enabled` streams (BBB 4K: 12M→<2K diffs/frame, all I-frames now pixel-perfect).
+- **SAO cross-slice boundary (§8.7.3.2)**: SAO edge offset did not check `slice_loop_filter_across_slices_enabled_flag` before accessing neighbor samples in adjacent slices. Also added cross-tile boundary check. Fixes `conf_b_xslice_256` (pixel-perfect).
 
 ### Added
 - **hevc.js monorepo restructure**:

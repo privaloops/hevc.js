@@ -11,11 +11,11 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | **Termine** | 11/14 tests phase6 pass. 3 echecs (bbb1080, bbb4k, xslice_256) = deblocking ±1 + QP residuel sur 1080p+. |
+| 6 — Loop Filters | **Termine** | 12/14 tests phase6 pass. 2 echecs (bbb1080, bbb4k) = deblocking P/B avec cu_qp_delta residuel. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
-| 10 — Multi-Slice | **En cours** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking. I-frame pixel-perfect. 5 diffs chroma B-frame restants. |
+| 10 — Multi-Slice | **Termine** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking + SAO. conf_b_xslice_256 pixel-perfect. |
 
 ## Phase 1 — Terminee
 
@@ -152,19 +152,15 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
 - [x] EP byte accounting dans entry_point_offsets (§7.4.7.1)
 - [x] QP derivation avec coordonnees QG au lieu de CU (§8.6.1)
 - [x] WPP/tile QpY_prev reset a SliceQpY (§8.6.1)
-- [ ] Deblocking ±1 a la frontiere CTB y=32 BBB 1080p (filtre fort non applique)
-  - 10 pixels a ±1 dans le frame 0 I-frame, y=30-31 autour de x=178-195
-  - La frontiere horizontale deblocking a y=32 (CTB boundary) devrait appliquer le filtre fort (dE=2) mais ne filtre rien (dE=0 ou Bs=0)
-  - HM modifie p0-p2/q0-q2 (y=29-34), notre filtre ne touche aucun pixel
-  - L'erreur se propage via inter prediction dans tous les frames suivants
-  - Comparer avec HM : beta/tC/Bs/dSam pour cette edge specifique
-- [ ] QP ±2 residuel sur stream ARTE CTB=64
-  - Stream ARTE : Main profile 8-bit, CTB=64, WPP, cu_qp_delta_enabled_flag=1
-  - Premier pixel faux a (76,44) diff=-2 dans le frame 0 I-frame (CTU 1, CU a (64,32))
-  - 75% des pixels ont diff=+2 (offset DC systematique)
-  - CTU colonne 0 est entierement correct, l'erreur commence au CTU 1
-  - Probablement meme famille que le bug QP derivation fixe (§8.6.1) mais avec CTB=64 le QG sizing est different
-  - Tester en natif : `ffmpeg -i <arte_hls> -c:v copy -bsf:v hevc_mp4toannexb -an /tmp/arte.265` puis `./build/hevc-decode /tmp/arte.265 -o /tmp/arte.yuv`
+- [x] QP derivation : retrait du shortcut `!IsCuQpDeltaCoded → QpY_prev` (§8.6.1)
+- [x] QpY_prev_qg : qPY_PREV sauvegarde au debut de chaque QG, pas mis a jour dans le QG (§8.6.1)
+  - Fixe le decode catastrophique des streams cu_qp_delta_enabled (BBB 4K : 12M→<2K diffs)
+  - Fixe aussi le bug ARTE CTB=64 (meme famille)
+- [x] SAO cross-slice boundary check (§8.7.3.2) — verifie slice_loop_filter_across_slices_enabled_flag
+- [ ] Deblocking P/B frames avec cu_qp_delta : erreurs residuelles (~5K diffs frame 1 BBB 1080p, <2K BBB 4K)
+  - I-frames pixel-perfect, erreurs uniquement dans P/B frames
+  - Propagation via inter prediction dans les frames suivants
+  - Probablement deblocking QP incorrect a certains edges avec cu_qp_delta variable
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
@@ -289,16 +285,17 @@ Voir `docs/phases/phase-10-multi-slice.md` pour le plan detaille.
 - [x] Remplacer check `addr < sh.slice_segment_address` par `slice_idx[p] != slice_idx[q]`
 - [x] Gerer `slice_loop_filter_across_slices_enabled_flag` per-slice (cote Q)
 - [x] Gerer `slice_beta_offset_div2` / `slice_tc_offset_div2` per-slice (via sh_at_ctb)
-- [ ] `conf_b_xslice_256` pixel-perfect — **5 chroma diffs restants (max_diff=1)**
+- [x] `conf_b_xslice_256` pixel-perfect — SAO cross-slice boundary fix (§8.7.3.2)
 
-### 10.5 -- Cross-Slice SAO (PARTIEL)
+### 10.5 -- Cross-Slice SAO (FAIT)
 - [x] Verifier parsing SAO merge (leftCtbInSliceSeg / upCtbInSliceSeg) avec boucle multi-slice
-- [ ] 5 diffs chroma Cb (max_diff=1) au bord de slice (y_chroma=32/63) — probablement deblocking chroma edge case
-- [ ] `oracle_bbb1080_50f` + `oracle_bbb4k_25f` — **bugs pre-existants** (crash 1080p, decode incorrect 4K), non lies au multi-slice
+- [x] SAO cross-slice boundary check (§8.7.3.2) — fixe les 5 diffs chroma
+- [ ] `oracle_bbb1080_50f` — I-frames pixel-perfect, P/B frames avec erreurs residuelles (deblocking + cu_qp_delta)
+- [ ] `oracle_bbb4k_25f` — I-frames pixel-perfect, P/B frames avec erreurs residuelles (<2K diffs)
 
 ### Bugs identifies (non multi-slice)
-- [ ] `oracle_bbb1080_50f` crash (BitstreamReader read past end) — bug pre-existant, present avant le multi-slice
-- [ ] `oracle_bbb4k_25f` decode incorrect (12M pixels diff, PSNR 5dB) — bug pre-existant
+- [x] QP derivation cu_qp_delta (§8.6.1) — shortcut `!IsCuQpDeltaCoded` et QpY_prev_qg
+- [ ] Deblocking P/B frames cu_qp_delta — erreurs residuelles propagees via inter prediction
 
 ## Taches transverses
 

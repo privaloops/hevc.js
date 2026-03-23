@@ -273,7 +273,20 @@ La spec §8.6.1 dit que les predicteurs QP (qPY_A, qPY_B) sont lus aux positions
 
 La spec §8.6.1 dit explicitement : "qPY_PREV is set equal to SliceQpY when the current quantization group is the first quantization group in a CTB row of a tile and entropy_coding_sync_enabled_flag is equal to 1". Facile a oublier car le texte est noye dans une liste de conditions. Meme reset requis pour les frontieres de tiles.
 
+## Session 2026-03-23 — QP derivation cu_qp_delta + SAO cross-slice
+
+### qPY_PREV scope (CRITICAL)
+
+La spec §8.6.1 definit `qPY_PREV` comme "the QpY of the last CU in the **previous quantization group**". Notre code mettait a jour `QpY_prev` apres chaque CU, ce qui double-comptait le `CuQpDeltaVal` quand les voisins A/B retombaient sur `QpY_prev` (hors du CTB courant). Introduit `QpY_prev_qg` sauvegarde au debut de chaque QG. Corrige le decode catastrophique BBB 4K (12M diffs → <2K).
+
+### derive_qp_y shortcut removal
+
+Le shortcut `if (!IsCuQpDeltaCoded) return QpY_prev` semblait correct mais ne l'est pas : la spec ne fait pas ce raccourci. Meme quand `CuQpDeltaVal=0`, le `qPY_PRED` doit etre calcule avec les voisins A/B (qui peuvent etre dans le meme CTB et avoir un QP different de `QpY_prev`). Visible uniquement avec `diff_cu_qp_delta_depth > 0` (QG < CTB).
+
+### SAO cross-slice boundary (§8.7.3.2)
+
+Le SAO edge offset doit verifier si les voisins sont dans un slice different quand `slice_loop_filter_across_slices_enabled_flag == 0`. La logique spec est asymetrique : si le voisin est dans un slice anterieur (Z-scan), on verifie le flag du slice courant ; si dans un slice posterieur, on verifie le flag du voisin. Invisible sur les streams single-slice.
+
 ### Bugs restants identifies
 
-- **Deblocking ±1** : 10 pixels a ±1 a la frontiere CTB y=32 sur BBB 1080p. Le filtre fort ne s'applique pas alors qu'il devrait. A investiguer.
-- **QP ±2 ARTE** : erreur QP residuelle sur le stream ARTE (CTB=64). Probablement lie a la meme famille de bugs QP derivation. A investiguer.
+- **Deblocking P/B cu_qp_delta** : erreurs residuelles dans P/B frames avec cu_qp_delta_enabled (~5K diffs frame 1 BBB 1080p, <2K BBB 4K). I-frames pixel-perfect. Propagation via inter prediction.
