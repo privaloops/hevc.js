@@ -157,10 +157,21 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
   - Fixe le decode catastrophique des streams cu_qp_delta_enabled (BBB 4K : 12M→<2K diffs)
   - Fixe aussi le bug ARTE CTB=64 (meme famille)
 - [x] SAO cross-slice boundary check (§8.7.3.2) — verifie slice_loop_filter_across_slices_enabled_flag
-- [ ] Deblocking P/B frames avec cu_qp_delta : erreurs residuelles (~5K diffs frame 1 BBB 1080p, <2K BBB 4K)
-  - I-frames pixel-perfect, erreurs uniquement dans P/B frames
-  - Propagation via inter prediction dans les frames suivants
-  - Probablement deblocking QP incorrect a certains edges avec cu_qp_delta variable
+- [ ] **Deblocking P/B frames avec cu_qp_delta** (§8.7.2.5.3 / §8.6.1)
+  - **Symptome** : I-frames pixel-perfect, P/B frames avec erreurs localisees qui propagent via inter prediction
+  - **BBB 1080p** (CTB=32, QG=8x8, WPP) : frame 1 = 5048 diffs (max_diff=88), localises a CTU rows 7-9, x=304-320 (y=243-256, autour de la frontiere CTB y=256). Frames 0,12,24,36,48 (I) = pixel-perfect.
+  - **BBB 4K** (CTB=64, QG=32x32, WPP) : frame 7 = 1782 diffs (max_diff=7), frames 9-10 = 8 diffs (max_diff=1). Frames 0-6 (I+P) = pixel-perfect.
+  - **Hypothese** : le deblocking filter (§8.7.2.5.3) utilise `cu.qp_y` des CUs P/Q pour calculer `beta` et `tC`. Si le QP stocke dans le CU grid est incorrect pour certaines CUs inter (skip ou merge sans residuel), les parametres de filtre sont faux → ±1 a ±88 aux edges.
+  - **Spec a relire** : §8.7.2.5.3 (decision luma block edges — derivation de beta/tC depuis QpP et QpQ), §8.6.1 (QP des CUs sans residuel : `CuQpDeltaVal` infere a 0 → `QpY = qPY_PRED`).
+  - **Piste 1** : verifier que `cu.qp_y` est correctement derive pour les CUs skip/merge dans les P/B frames. Le QP devrait etre `qPY_PRED` (voisins), pas `QpY_prev`.
+  - **Piste 2** : comparer avec HM les valeurs beta/tC/Bs a la frontiere CTB y=256, x=304-320 du frame 1 BBB 1080p.
+  - **Tests** : `oracle_bbb1080_50f` (cible : 126/126), `oracle_bbb4k_25f` (cible : 126/126)
+  - **Commande de repro** :
+    ```bash
+    ./build/hevc-decode tests/conformance/fixtures/bbb1080_50f.265 -o /tmp/test.yuv
+    ffmpeg -y -i tests/conformance/fixtures/bbb1080_50f.265 -pix_fmt yuv420p /tmp/ref.yuv
+    python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv 1920 1088
+    ```
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
@@ -290,12 +301,11 @@ Voir `docs/phases/phase-10-multi-slice.md` pour le plan detaille.
 ### 10.5 -- Cross-Slice SAO (FAIT)
 - [x] Verifier parsing SAO merge (leftCtbInSliceSeg / upCtbInSliceSeg) avec boucle multi-slice
 - [x] SAO cross-slice boundary check (§8.7.3.2) — fixe les 5 diffs chroma
-- [ ] `oracle_bbb1080_50f` — I-frames pixel-perfect, P/B frames avec erreurs residuelles (deblocking + cu_qp_delta)
-- [ ] `oracle_bbb4k_25f` — I-frames pixel-perfect, P/B frames avec erreurs residuelles (<2K diffs)
+- [x] `oracle_bbb1080_50f` / `oracle_bbb4k_25f` — I-frames pixel-perfect apres fix QP derivation. P/B frames : voir bug deblocking cu_qp_delta dans Phase 6.
 
 ### Bugs identifies (non multi-slice)
 - [x] QP derivation cu_qp_delta (§8.6.1) — shortcut `!IsCuQpDeltaCoded` et QpY_prev_qg
-- [ ] Deblocking P/B frames cu_qp_delta — erreurs residuelles propagees via inter prediction
+- [ ] Deblocking P/B frames cu_qp_delta (§8.7.2.5.3) — voir description detaillee dans Phase 6 Bug fixes
 
 ## Taches transverses
 
