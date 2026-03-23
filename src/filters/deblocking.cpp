@@ -51,7 +51,6 @@ static bool is_boundary_excluded(const DecodingContext& ctx,
                                   int x, int y, EdgeType edgeType) {
     auto& sps = *ctx.sps;
     auto& pps = *ctx.pps;
-    auto& sh = *ctx.sh;
     int picW = sps.pic_width_in_luma_samples;
     int picH = sps.pic_height_in_luma_samples;
 
@@ -61,8 +60,11 @@ static bool is_boundary_excluded(const DecodingContext& ctx,
     if (edgeType == EDGE_VER && x >= picW) return true;
     if (edgeType == EDGE_HOR && y >= picH) return true;
 
-    // Slice deblocking disabled
-    if (sh.slice_deblocking_filter_disabled_flag) return true;
+    // §8.7.2.1: slice_deblocking_filter_disabled_flag for the slice containing Q-side
+    int ctbSize = 1 << sps.CtbLog2SizeY;
+    int addr_q = (y / ctbSize) * sps.PicWidthInCtbsY + (x / ctbSize);
+    auto& sh_q = ctx.sh_at_ctb(addr_q);
+    if (sh_q.slice_deblocking_filter_disabled_flag) return true;
 
     // Tile boundary
     if (!pps.loop_filter_across_tiles_enabled_flag && !pps.TileId.empty()) {
@@ -92,25 +94,27 @@ static bool is_boundary_excluded(const DecodingContext& ctx,
         }
     }
 
-    // Slice boundary
-    if (!sh.slice_loop_filter_across_slices_enabled_flag) {
-        // Check if the two sides of the edge are in different slices
-        // Simple check: the "p" side (before the edge) might be before slice_segment_address
-        int ctbSize = 1 << sps.CtbLog2SizeY;
+    // Slice boundary — §8.7.2.1: exclude edges at slice boundaries
+    // when slice_loop_filter_across_slices_enabled_flag == 0
+    if (ctx.slice_idx) {
+        int addr_p;
         if (edgeType == EDGE_VER) {
-            int addr_q = (y / ctbSize) * sps.PicWidthInCtbsY + (x / ctbSize);
-            int addr_p = (y / ctbSize) * sps.PicWidthInCtbsY + ((x - 1) / ctbSize);
-            if (addr_p < static_cast<int>(sh.slice_segment_address) &&
-                addr_q >= static_cast<int>(sh.slice_segment_address))
-                return true;
+            addr_p = (y / ctbSize) * sps.PicWidthInCtbsY + ((x - 1) / ctbSize);
         } else {
-            int addr_q = (y / ctbSize) * sps.PicWidthInCtbsY + (x / ctbSize);
-            int addr_p = ((y - 1) / ctbSize) * sps.PicWidthInCtbsY + (x / ctbSize);
-            if (addr_p < static_cast<int>(sh.slice_segment_address) &&
-                addr_q >= static_cast<int>(sh.slice_segment_address))
+            addr_p = ((y - 1) / ctbSize) * sps.PicWidthInCtbsY + (x / ctbSize);
+        }
+        if (ctx.slice_idx[addr_q] != ctx.slice_idx[addr_p]) {
+            // §8.7.2.1: "left/top boundary of the slice and
+            // slice_loop_filter_across_slices_enabled_flag is equal to 0"
+            // This applies to the Q-side slice
+            if (!sh_q.slice_loop_filter_across_slices_enabled_flag)
                 return true;
         }
     }
+
+    // §8.7.2.1: Also check P-side — if the P-side slice has deblocking disabled,
+    // the edge should still be excluded
+    // (The filterLeftCbEdgeFlag/filterTopCbEdgeFlag is per-CU, driven by Q-side slice only)
 
     return false;
 }
@@ -353,10 +357,7 @@ static void filter_chroma_sample(int p[2], int q[2], int tC, int bitDepth,
 void apply_deblocking(DecodingContext& ctx) {
     auto& sps = *ctx.sps;
     auto& pps = *ctx.pps;
-    auto& sh = *ctx.sh;
     auto* pic = ctx.pic;
-
-    if (sh.slice_deblocking_filter_disabled_flag) return;
 
     int picW = sps.pic_width_in_luma_samples;
     int picH = sps.pic_height_in_luma_samples;
@@ -412,17 +413,22 @@ void apply_deblocking(DecodingContext& ctx) {
                     bool bypassP = cuP.cu_transquant_bypass;
                     bool bypassQ = cuQ.cu_transquant_bypass;
 
+                    // §8.7.2.5.3: slice parameters for the slice containing q0,0
+                    int ctbSizeF = 1 << sps.CtbLog2SizeY;
+                    int addrQ = (yQ / ctbSizeF) * sps.PicWidthInCtbsY + (xQ / ctbSizeF);
+                    auto& sh_filt = ctx.sh_at_ctb(addrQ);
+
                     // ---- LUMA ----
                     {
                         int QpP = cuP.qp_y;
                         int QpQ = cuQ.qp_y;
                         int qPL = ((QpQ + QpP + 1) >> 1); // eq 8-347
 
-                        int Q_beta = Clip3(0, 51, qPL + (sh.slice_beta_offset_div2 << 1));
+                        int Q_beta = Clip3(0, 51, qPL + (sh_filt.slice_beta_offset_div2 << 1));
                         int betaPrime = beta_table[Q_beta];
                         int beta = betaPrime * (1 << (bitDepthY - 8)); // eq 8-349
 
-                        int Q_tc = Clip3(0, 53, qPL + 2*(bS - 1) + (sh.slice_tc_offset_div2 << 1));
+                        int Q_tc = Clip3(0, 53, qPL + 2*(bS - 1) + (sh_filt.slice_tc_offset_div2 << 1));
                         int tcPrime = tc_table[Q_tc];
                         int tC = tcPrime * (1 << (bitDepthY - 8)); // eq 8-351
 
@@ -545,7 +551,7 @@ void apply_deblocking(DecodingContext& ctx) {
                                     QpC = std::min(qPi, 51);
                                 }
 
-                                int Q_tc = Clip3(0, 53, QpC + 2 + (sh.slice_tc_offset_div2 << 1));
+                                int Q_tc = Clip3(0, 53, QpC + 2 + (sh_filt.slice_tc_offset_div2 << 1));
                                 int tcPrime = tc_table[Q_tc];
                                 int tC = tcPrime * (1 << (bitDepthC - 8));
 

@@ -15,6 +15,7 @@ Etat d'avancement par phase et prochaines taches.
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP I-only OK, P/B en cours. |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
+| 10 — Multi-Slice | **A faire** | Boucle multi-slice, dependent slices, cross-slice deblocking/SAO. 4 tests en echec. |
 
 ## Phase 1 — Terminee
 
@@ -244,6 +245,41 @@ Voir `docs/phases/phase-08-wasm.md` pour le plan detaille.
 | 720p | 187 fps | — |
 | 1080p | 77 fps | 61 fps |
 | 4K | 27.5 fps | 21 fps |
+
+## Phase 10 -- Multi-Slice
+
+Voir `docs/phases/phase-10-multi-slice.md` pour le plan detaille.
+
+### 10.1 -- Slice Index Map (per-CTU)
+- [ ] Ajouter `slice_idx_buf_` dans Decoder et `slice_idx` dans DecodingContext
+- [ ] Initialiser a 0 en debut de picture
+- [ ] Ecrire l'index du slice courant pour chaque CTU decode dans `decode_slice_segment_data()`
+- [ ] Non-regression : tous les tests existants passent
+
+### 10.2 -- Boucle Multi-Slice dans `decode_picture()`
+- [ ] Collecter tous les VCL NALs d'une meme picture dans `decode()`
+- [ ] Boucler sur chaque NAL VCL : parse header, bitstream, `decode_slice_segment_data()`
+- [ ] POC et ref lists depuis le premier slice uniquement
+- [ ] Filtres appliques une seule fois apres tous les slices
+- [ ] `conf_i_multislice_256` pixel-perfect
+
+### 10.3 -- Heritage Dependent Slices
+- [ ] `SliceHeader::parse()` accepte `const SliceHeader* prev_independent_sh`
+- [ ] Copier tous les champs du parent quand `dependent_slice_segment_flag == 1`
+- [ ] Deriver `SliceAddrRs` correctement pour dependent slices (S7.4.7.1)
+
+### 10.4 -- Cross-Slice Deblocking
+- [ ] Remplacer check `addr < sh.slice_segment_address` par `slice_idx[p] != slice_idx[q]`
+- [ ] Gerer `slice_loop_filter_across_slices_enabled_flag` per-slice (cote Q)
+- [ ] Gerer `slice_beta_offset_div2` / `slice_tc_offset_div2` per-slice
+- [ ] `conf_b_xslice_256` pixel-perfect
+
+### 10.5 -- Cross-Slice SAO
+- [ ] Verifier parsing SAO merge (leftCtbInSliceSeg / upCtbInSliceSeg) avec boucle multi-slice
+- [ ] Application SAO : respecter frontieres inter-slice pour EO
+- [ ] Stocker `slice_sao_luma_flag` / `slice_sao_chroma_flag` per-CTU ou per-slice
+- [ ] `oracle_bbb1080_50f` + `oracle_bbb4k_25f` pixel-perfect
+- [ ] **Jalon** : 126/126 tests — decodeur complet multi-slice
 
 ## Taches transverses
 

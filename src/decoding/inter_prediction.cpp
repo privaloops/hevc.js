@@ -62,6 +62,14 @@ static bool is_pu_available(const DecodingContext& ctx,
         int nbAddr = nbCtbY * sps.PicWidthInCtbsY + nbCtbX;
         int curAddr = curCtbY * sps.PicWidthInCtbsY + curCtbX;
         if (nbAddr > curAddr) return false;
+        // §6.4.1: SliceAddrRs must match
+        if (ctx.slice_idx && ctx.slice_idx[nbAddr] != ctx.slice_idx[curAddr])
+            return false;
+        // §6.4.1: TileId must match
+        auto& pps = *ctx.pps;
+        if (!pps.TileId.empty() &&
+            pps.TileId[pps.CtbAddrRsToTs[nbAddr]] != pps.TileId[pps.CtbAddrRsToTs[curAddr]])
+            return false;
     } else {
         // Same CTU — z-scan check
         auto zscan = [](int bx, int by) -> uint32_t {
@@ -483,6 +491,14 @@ static bool is_amvp_nb_available(const DecodingContext& ctx,
         int nbAddr = nbCtbY * ctx.sps->PicWidthInCtbsY + nbCtbX;
         int curAddr = curCtbY * ctx.sps->PicWidthInCtbsY + curCtbX;
         if (nbAddr > curAddr) return false;
+        // §6.4.1: SliceAddrRs must match
+        if (ctx.slice_idx && ctx.slice_idx[nbAddr] != ctx.slice_idx[curAddr])
+            return false;
+        // §6.4.1: TileId must match
+        auto& pps = *ctx.pps;
+        if (!pps.TileId.empty() &&
+            pps.TileId[pps.CtbAddrRsToTs[nbAddr]] != pps.TileId[pps.CtbAddrRsToTs[curAddr]])
+            return false;
     } else {
         // Same CTU — z-scan check
         int minTb = ctx.sps->MinTbSizeY;

@@ -105,11 +105,22 @@ static void build_reference_samples(const DecodingContext& ctx, int x0, int y0,
         int refCtbX = rx / ctbSize;
         int refCtbY = ry / ctbSize;
 
-        // Different CTU: available if CTU was already decoded
+        // Different CTU: available if CTU was already decoded AND in same slice/tile (§6.4.1)
         if (refCtbX != curCtbX || refCtbY != curCtbY) {
             int refCtbAddr = refCtbY * sps.PicWidthInCtbsY + refCtbX;
             int curCtbAddr = curCtbY * sps.PicWidthInCtbsY + curCtbX;
-            return refCtbAddr < curCtbAddr;
+            if (refCtbAddr >= curCtbAddr) return false;
+            // §6.4.1: SliceAddrRs must match
+            if (ctx.slice_idx && ctx.slice_idx[refCtbAddr] != ctx.slice_idx[curCtbAddr])
+                return false;
+            // §6.4.1: TileId must match
+            if (ctx.pps->TileId.size() > 0) {
+                int ts_ref = ctx.pps->CtbAddrRsToTs[refCtbAddr];
+                int ts_cur = ctx.pps->CtbAddrRsToTs[curCtbAddr];
+                if (ctx.pps->TileId[ts_ref] != ctx.pps->TileId[ts_cur])
+                    return false;
+            }
+            return true;
         }
 
         // Same CTU: compare Z-scan addresses at min-TB granularity

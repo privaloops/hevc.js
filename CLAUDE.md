@@ -110,9 +110,11 @@ Exemples de bugs trouvés par relecture de spec (pas par debug) :
 | Phase 5 (Inter) | `oracle_p_qcif_10f`, `oracle_b_qcif_10f` |
 | Phase 6 (Filters) | `oracle_i_64x64_deblock`, `oracle_i_64x64_sao`, `oracle_i_64x64_full`, `oracle_full_qcif_10f` |
 | Phase 6+ (Realworld) | `oracle_bbb1080_50f`, `oracle_bbb4k_25f` |
+| Phase 10 (Multi-Slice) | `conf_i_multislice_256`, `conf_b_xslice_256`, `oracle_bbb1080_50f`, `oracle_bbb4k_25f` |
 
 Le test `oracle_full_qcif_10f` (label `milestone`) = **Main profile complet**. Quand il passe, le décodeur est conforme.
 Les tests `oracle_bbb1080_50f` et `oracle_bbb4k_25f` valident sur du contenu réel (Big Buck Bunny).
+Le jalon 126/126 tests = **decodeur complet multi-slice** (Phase 10).
 
 ### Debugging d'un oracle FAIL
 
@@ -247,6 +249,7 @@ Avant de travailler sur une phase, lis ces fichiers dans cet ordre :
 | **4 — Intra** | `BACKLOG.md` → `docs/phases/phase-04-intra.md` → `docs/spec/09-parsing.md` + `docs/spec/tables/cabac-*.md` → `docs/spec/08-decoding/08-05-intra-prediction.md` + `docs/spec/tables/intra-tables.md` → `docs/spec/08-decoding/08-06-transform-quant.md` + `docs/spec/tables/transform-matrices.md` |
 | **5 — Inter** | `BACKLOG.md` → `docs/phases/phase-05-inter.md` → `docs/spec/08-decoding/08-03-reference-pictures.md` → `docs/spec/08-decoding/08-04-inter-prediction.md` + `docs/spec/tables/merge-table.md` |
 | **6 — Filters** | `BACKLOG.md` → `docs/phases/phase-06-loop-filters.md` → `docs/spec/08-decoding/08-07-deblocking.md` → `docs/spec/08-decoding/08-08-sao.md` |
+| **10 — Multi-Slice** | `BACKLOG.md` → `docs/phases/phase-10-multi-slice.md` → `src/decoding/decoder.cpp` (boucle decode) → `src/syntax/slice_header.cpp` (dependent slices) → `src/filters/deblocking.cpp` (cross-slice) → `src/filters/sao.cpp` (cross-slice) |
 
 Pour la cross-reference complete (spec section → source → doc → test) : voir `docs/cross-reference.md`.
 
