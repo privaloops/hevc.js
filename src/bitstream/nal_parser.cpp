@@ -94,7 +94,7 @@ std::vector<NalUnit> NalParser::parse(const uint8_t* data, size_t size) {
         nal.header = parse_header(data + nal_start);
 
         // Extract RBSP: skip 2-byte header, remove emulation prevention bytes
-        nal.rbsp = extract_rbsp(data + nal_start + 2, nal_size - 2);
+        nal.rbsp = extract_rbsp(data + nal_start + 2, nal_size - 2, nal.epb_positions);
 
         HEVC_LOG(NAL, "NAL #%zu: type=%d (%s) size=%zu layer=%d temporal=%d offset=%zu",
                  nals.size(),
