@@ -157,14 +157,26 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
   - Fixe le decode catastrophique des streams cu_qp_delta_enabled (BBB 4K : 12M→<2K diffs)
   - Fixe aussi le bug ARTE CTB=64 (meme famille)
 - [x] SAO cross-slice boundary check (§8.7.3.2) — verifie slice_loop_filter_across_slices_enabled_flag
-- [ ] **Deblocking P/B frames avec cu_qp_delta** (§8.7.2.5.3 / §8.6.1)
+- [ ] **MV derivation P/B frames — streams real-world** (§8.5)
   - **Symptome** : I-frames pixel-perfect, P/B frames avec erreurs localisees qui propagent via inter prediction
-  - **BBB 1080p** (CTB=32, QG=8x8, WPP) : frame 1 = 5048 diffs (max_diff=88), localises a CTU rows 7-9, x=304-320 (y=243-256, autour de la frontiere CTB y=256). Frames 0,12,24,36,48 (I) = pixel-perfect.
+  - **BBB 1080p** (CTB=32, QG=8x8, WPP) : frame 1 = 4517 diffs (max_diff=88), x=288-512, y=243-307. Frames I = pixel-perfect.
   - **BBB 4K** (CTB=64, QG=32x32, WPP) : frame 7 = 1782 diffs (max_diff=7), frames 9-10 = 8 diffs (max_diff=1). Frames 0-6 (I+P) = pixel-perfect.
-  - **Hypothese** : le deblocking filter (§8.7.2.5.3) utilise `cu.qp_y` des CUs P/Q pour calculer `beta` et `tC`. Si le QP stocke dans le CU grid est incorrect pour certaines CUs inter (skip ou merge sans residuel), les parametres de filtre sont faux → ±1 a ±88 aux edges.
-  - **Spec a relire** : §8.7.2.5.3 (decision luma block edges — derivation de beta/tC depuis QpP et QpQ), §8.6.1 (QP des CUs sans residuel : `CuQpDeltaVal` infere a 0 → `QpY = qPY_PRED`).
-  - **Piste 1** : verifier que `cu.qp_y` est correctement derive pour les CUs skip/merge dans les P/B frames. Le QP devrait etre `qPY_PRED` (voisins), pas `QpY_prev`.
-  - **Piste 2** : comparer avec HM les valeurs beta/tC/Bs a la frontiere CTB y=256, x=304-320 du frame 1 BBB 1080p.
+  - **Hypotheses eliminees** :
+    - Deblocking : scan complet §8.7.2 — code conforme a la spec ligne par ligne
+    - QP : QP grid correct (derive_qp_y conforme a §8.6.1)
+    - TU coords : fix applique (TU→CU coords dans decode_transform_unit) mais ne change rien
+    - Deblocking order : per-CTB a empire, revertee
+  - **Ce qui est etabli** :
+    - Les pixels reconstruits different AVANT le deblocking a x>=304 (comparaison YUV directe frame 1)
+    - P-side (x<=303) identique entre notre decodeur et HM, Q-side (x>=304) differe
+    - CU(288,256) frame 1 : les deux decodeurs s'accordent sur PART_Nx2N 32x32
+    - Left PU (288,256) : MV=(3,2) merge idx=0 — identique dans les deux decodeurs
+    - Right PU (304,256) : notre decodeur decode AMVP, mvp_flag=1, mvp=(0,0), mvd=(1,-1) → MV=(1,-1)
+    - Le MV de HM pour le right PU n'a pas pu etre extrait (format de trace HM per-CU, pas per-PU)
+  - **Pistes restantes** :
+    - Verifier merge_flag du 2e PU : est-ce que HM decode merge ou AMVP pour ce PU ?
+    - Si AMVP : verifier la liste de candidats AMVP (A0/A1/B0/B1/B2) et mvp_l0_flag
+    - Ajouter des marqueurs CTU a la trace CABAC bins pour comparaison bin-by-bin
   - **Tests** : `oracle_bbb1080_50f` (cible : 126/126), `oracle_bbb4k_25f` (cible : 126/126)
   - **Commande de repro** :
     ```bash

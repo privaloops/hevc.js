@@ -418,6 +418,7 @@ void apply_deblocking(DecodingContext& ctx) {
                     int addrQ = (yQ / ctbSizeF) * sps.PicWidthInCtbsY + (xQ / ctbSizeF);
                     auto& sh_filt = ctx.sh_at_ctb(addrQ);
 
+
                     // ---- LUMA ----
                     {
                         int QpP = cuP.qp_y;
@@ -431,6 +432,7 @@ void apply_deblocking(DecodingContext& ctx) {
                         int Q_tc = Clip3(0, 53, qPL + 2*(bS - 1) + (sh_filt.slice_tc_offset_div2 << 1));
                         int tcPrime = tc_table[Q_tc];
                         int tC = tcPrime * (1 << (bitDepthY - 8)); // eq 8-351
+
 
                         // Decision process — §8.7.2.5.3
                         // Read p0..p3 and q0..q3 for lines k=0 and k=3
