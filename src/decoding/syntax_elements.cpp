@@ -38,12 +38,20 @@ int decode_part_mode(CabacEngine& cabac, PredMode pred_mode,
     if (bin0) return static_cast<int>(PartMode::PART_2Nx2N);
 
     if (log2CbSize == log2MinCbSize) {
-        // No AMP at min CU size
-        int bin1 = cabac.decode_decision(CTX_PART_MODE + 1);
-        if (bin1) return static_cast<int>(PartMode::PART_2NxN);
-        int bin2 = cabac.decode_decision(CTX_PART_MODE + 2);
-        if (bin2) return static_cast<int>(PartMode::PART_Nx2N);
-        return static_cast<int>(PartMode::PART_NxN);
+        // Table 9-45: binarization depends on log2CbSize
+        if (log2CbSize > 3) {
+            // log2CbSize > 3: NxN available — "01"=2NxN, "001"=Nx2N, "000"=NxN
+            int bin1 = cabac.decode_decision(CTX_PART_MODE + 1);
+            if (bin1) return static_cast<int>(PartMode::PART_2NxN);
+            int bin2 = cabac.decode_decision(CTX_PART_MODE + 2);
+            if (bin2) return static_cast<int>(PartMode::PART_Nx2N);
+            return static_cast<int>(PartMode::PART_NxN);
+        } else {
+            // log2CbSize == 3: no NxN for inter — "01"=2NxN, "00"=Nx2N
+            int bin1 = cabac.decode_decision(CTX_PART_MODE + 1);
+            if (bin1) return static_cast<int>(PartMode::PART_2NxN);
+            return static_cast<int>(PartMode::PART_Nx2N);
+        }
     }
 
     if (log2CbSize > 3) {
