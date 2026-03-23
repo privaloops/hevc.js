@@ -305,7 +305,7 @@ window.loadHLS = async function() {
   // 1. Parse manifest
   const manifestResp = await fetch(url);
   const manifestText = await manifestResp.text();
-  const baseUrl = url;
+  const baseUrl = new URL(url, location.href).href;
   const { initUri, segments } = parseM3U8(manifestText, baseUrl);
   log(`Manifest: ${segments.length} segments, init=${initUri ? 'yes' : 'no'}`);
 
