@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Thread pool WPP parallel decode (Phase 9B)**: Persistent `ThreadPool` class with N worker threads (N = `hardware_concurrency`), job queue with mutex + condition variable. Replaces the V1 thread-per-row approach (which created/destroyed 34 `std::thread` per frame + spin-wait). Workers survive across frames, eliminating thread creation overhead. Per-row `std::condition_variable` replaces spin-wait with `__builtin_ia32_pause()`/`yield`, freeing CPU for actual decode work.
+  - `src/common/thread_pool.h/.cpp` — generic thread pool (submit + wait_all)
+  - `decode_wpp_parallel()` reintroduced in `coding_tree.cpp` with pool + condvar sync
+  - Thread pool owned by `Decoder`, passed to `DecodingContext`, reused across all frames
+  - **Results**: 1080p WPP 128 fps (+29% vs V1 99 fps), 4K WPP 31 fps (+15% vs V1 27 fps)
+  - **Bug fixed**: deadlock due to `condition_variable::notify_all()` without holding mutex — signal lost between predicate check and sleep. Fix: store `completed_col` under `lock_guard` before notify.
+  - 128/128 tests pixel-perfect
+
 ### Fixed
 - **Merge candidate availability §6.4.2 + early part_mode**: `is_pu_available` applied z-scan (§6.4.1) before sameCb, violating §6.4.2. Additionally, `part_mode` was only written to CU grid after all PUs, so partition-specific merge exclusions (lines 279-288) used stale values. These correlated bugs masked each other — the z-scan rejection hid the stale `part_mode`. Fix: early `part_mode` write + sameCb-first check in `is_pu_available`. Fixes BBB 1080p frames 18+ (4677→0 diffs). **128/128 tests pixel-perfect.**
 - **Scaling list pred_mode lookup (§8.6.3)**: `perform_dequant` used `cu_at(0,0)` instead of `cu_at(x0,y0)` to determine pred_mode for scaling list matrix selection. For intra CUs in inter frames, the inter matrix was used instead of intra, producing wrong dequant values (±1 residual error per affected pixel). Default 8x8 matrices differ significantly (intra[7][7]=115 vs inter[7][7]=91). Fixes BBB 1080p frames 2-17 (29→0 diffs).

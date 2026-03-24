@@ -8,6 +8,7 @@
 
 #include "common/types.h"
 #include "common/picture.h"
+#include "common/thread_pool.h"
 #include "syntax/sps.h"
 #include "syntax/pps.h"
 #include "syntax/slice_header.h"
@@ -95,6 +96,9 @@ struct DecodingContext {
             return *slice_headers[slice_idx[ctbAddrRs]];
         return *sh;
     }
+
+    // Thread pool for WPP parallel decode (owned by Decoder, persists across frames)
+    ThreadPool* thread_pool = nullptr;
 
     // WPP context storage — shared across slices so that row N in slice S+1
     // can restore contexts saved at col 1 of row N-1 in slice S

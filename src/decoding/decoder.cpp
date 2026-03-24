@@ -161,6 +161,7 @@ DecodeStatus Decoder::decode_picture(const std::vector<NalUnit>& nals,
     CabacEngine cabac;
     DecodingContext ctx;
     ctx.wpp_contexts_available = false;
+    ctx.thread_pool = &thread_pool_;
     ctx.sps = sps;
     ctx.pps = pps;
     ctx.cabac = &cabac;
