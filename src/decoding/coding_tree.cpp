@@ -396,6 +396,140 @@ static void reconstruct_block(DecodingContext& ctx, int x0, int y0,
 }
 
 // ============================================================
+// WPP parallel decode — §7.3.8.1 with wavefront parallelism
+// Each CTU row is a job submitted to the thread pool.
+// Row N waits for col+1 of row N-1 (2-CTU diagonal dependency).
+// ============================================================
+
+static bool decode_wpp_parallel(DecodingContext& ctx, BitstreamReader& bs,
+                                 const std::vector<size_t>& substream_byte_pos) {
+    auto& sps = *ctx.sps;
+    auto& sh = *ctx.sh;
+
+    int numRows = sps.PicHeightInCtbsY;
+    int numCols = sps.PicWidthInCtbsY;
+    int startRow = (sh.slice_segment_address / numCols);
+
+    // Per-row synchronization: completed_col[row] = last completed column (-1 = not started)
+    std::vector<std::atomic<int>> completed_col(numRows);
+    for (int r = 0; r < numRows; r++)
+        completed_col[r].store(-1, std::memory_order_relaxed);
+
+    // Per-row WPP saved contexts (row r saves at col 1, row r+1 restores at start)
+    std::vector<CabacContext> wpp_ctx_storage(numRows * NUM_CABAC_CONTEXTS);
+    auto wpp_ctx_ptr = [&](int row) -> CabacContext* {
+        return &wpp_ctx_storage[row * NUM_CABAC_CONTEXTS];
+    };
+
+    // All readers share the same underlying data buffer (read-only)
+    const uint8_t* rbsp_data = bs.data();
+    size_t rbsp_size = bs.size();
+
+    int sliceType = static_cast<int>(sh.slice_type);
+
+    // Per-row sync: mutex + condvar per row for fine-grained waiting
+    std::vector<std::mutex> row_mutex(numRows);
+    std::vector<std::condition_variable> row_cv(numRows);
+
+    auto decode_row = [&](int row) {
+        // Per-row BitstreamReader and CabacEngine
+        BitstreamReader row_bs(rbsp_data, rbsp_size);
+        CabacEngine row_cabac;
+
+        // Seek to this row's substream
+        int substreamIdx = row - startRow;
+        if (substreamIdx >= 0 && substreamIdx < static_cast<int>(substream_byte_pos.size())) {
+            row_bs.seek_to_byte(substream_byte_pos[substreamIdx]);
+        }
+
+        // Init CABAC contexts
+        if (row == startRow) {
+            if (!sh.dependent_slice_segment_flag) {
+                row_cabac.init_contexts(sliceType, sh.SliceQpY, sh.cabac_init_flag);
+            }
+        } else {
+            // Wait for row-1 col 1 (2nd CTU) before restoring contexts
+            {
+                std::unique_lock<std::mutex> lock(row_mutex[row - 1]);
+                row_cv[row - 1].wait(lock, [&] {
+                    return completed_col[row - 1].load(std::memory_order_acquire) >= 1;
+                });
+            }
+            row_cabac.load_contexts(wpp_ctx_ptr(row - 1));
+        }
+        row_cabac.init_decoder(row_bs);
+
+        // Per-row DecodingContext (shallow copy — shared grids, pic, etc.)
+        DecodingContext row_ctx = ctx;
+        row_ctx.cabac = &row_cabac;
+        row_ctx.QpY_prev = sh.SliceQpY;
+        row_ctx.QpY_prev_qg = sh.SliceQpY;
+
+        for (int col = 0; col < numCols; col++) {
+            int CtbAddrInRs = row * numCols + col;
+
+            // Diagonal dependency: wait for row-1 to complete col+1
+            if (row > startRow && col > 0) {
+                int needed = std::min(col + 1, numCols - 1);
+                std::unique_lock<std::mutex> lock(row_mutex[row - 1]);
+                row_cv[row - 1].wait(lock, [&] {
+                    return completed_col[row - 1].load(std::memory_order_acquire) >= needed;
+                });
+            }
+
+            int xCtb = col << sps.CtbLog2SizeY;
+            int yCtb = row << sps.CtbLog2SizeY;
+
+            // Phase 10: record slice ownership
+            if (row_ctx.slice_idx) {
+                row_ctx.slice_idx[CtbAddrInRs] = static_cast<uint8_t>(ctx.current_slice_idx);
+            }
+
+            decode_coding_tree_unit(row_ctx, xCtb, yCtb);
+
+            // §9.3.2.4: save contexts after 2nd CTU (col 1) for next row
+            if (col == 1) {
+                row_cabac.save_contexts(wpp_ctx_ptr(row));
+            }
+
+            // Signal completion and notify waiting rows
+            {
+                std::lock_guard<std::mutex> lock(row_mutex[row]);
+                completed_col[row].store(col, std::memory_order_release);
+            }
+            row_cv[row].notify_all();
+
+            bool end_of_slice = decode_end_of_slice_segment_flag(row_cabac);
+            if (end_of_slice || col == numCols - 1)
+                break;
+        }
+
+        // Final notify for rows that might wait on last column
+        {
+            std::lock_guard<std::mutex> lock(row_mutex[row]);
+            completed_col[row].store(numCols - 1, std::memory_order_release);
+        }
+        row_cv[row].notify_all();
+    };
+
+    int num_active_rows = numRows - startRow;
+
+    if (num_active_rows <= 1 || !ctx.thread_pool || ctx.thread_pool->num_workers() <= 1) {
+        decode_row(startRow);
+        return true;
+    }
+
+    // Submit worker rows to thread pool; run first row on current thread
+    for (int r = startRow + 1; r < numRows; r++) {
+        ctx.thread_pool->submit([&decode_row, r]() { decode_row(r); });
+    }
+    decode_row(startRow);
+    ctx.thread_pool->wait_all();
+
+    return true;
+}
+
+// ============================================================
 // slice_segment_data (§7.3.8.1)
 // ============================================================
 
@@ -432,6 +566,14 @@ bool decode_slice_segment_data(DecodingContext& ctx, BitstreamReader& bs,
             }
         }
     }
+
+    // WPP parallel path: when entropy_coding_sync is enabled, tiles disabled,
+    // and we have entry point offsets, decode rows in parallel via thread pool.
+    if (pps.entropy_coding_sync_enabled_flag && !pps.tiles_enabled_flag &&
+        !substream_byte_pos.empty() && ctx.thread_pool && ctx.thread_pool->num_workers() > 1) {
+        return decode_wpp_parallel(ctx, bs, substream_byte_pos);
+    }
+
     uint32_t wpp_substream_idx = 0;
 
     // Initialize CABAC
