@@ -311,7 +311,7 @@ if (!sameCb) { availableN = available_zscan(xP,yP,xN,yN); }
 else { availableN = !(NxN && partIdx==1 && in_third_quadrant); }
 ```
 
-**Attention merge** : appliquer le meme fix a `is_pu_available` (merge) cause une regression massive (128K diffs). La raison est que `derive_spatial_merge_candidates` a des exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1) qui dependent du fait que `is_pu_available` rejette les voisins SW via z-scan. Ces deux logiques sont couplees. Ne pas toucher `is_pu_available` sans un audit complet du merge.
+**Attention merge** : appliquer le meme fix a `is_pu_available` (merge) sans stocker `part_mode` tot cause une regression massive (128K diffs). Cause : `derive_spatial_merge_candidates` lit `ctx.cu_at(xPb, yPb).part_mode` pour les exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1), mais `part_mode` n'est ecrit dans la grille qu'apres TOUS les PUs (ligne 794). Quand le fix rend les voisins sameCb disponibles, les exclusions utilisent un `part_mode` stale → mauvaises exclusions → regression. Le fix correct necessite les DEUX changements simultanes : `is_pu_available` + ecriture anticipee de `part_mode`. Voir session 2026-03-24b.
 
 ### oracle_compare.py height mismatch (MEDIUM)
 
@@ -322,3 +322,29 @@ La commande de repro dans le BACKLOG utilisait `h=1088` (pic_height_in_luma_samp
 ### Bugs #20
 
 20. **AMVP §6.4.2 + early pred_mode** — `is_amvp_nb_available` utilisait z-scan (§6.4.1) au lieu de §6.4.2 pour les voisins intra-CU + `pred_mode` stocke trop tard dans le CU grid. Causait 4517 diffs Y frame 1 BBB 1080p (max_diff=88). Fix: check `sameCb` dans AMVP + ecriture pred_mode avant PUs.
+
+## Session 2026-03-24b — Fix merge candidate availability §6.4.2 (128/128 tests!)
+
+### Merge `is_pu_available` — deux bugs correles (CRITICAL)
+
+Le meme pattern que le bug AMVP (#20), mais avec une subtilite supplementaire qui causait la regression du fix naif.
+
+**Bug 1 — `is_pu_available` z-scan avant sameCb** : identique au bug AMVP. La fonction appliquait §6.4.1 (z-scan) avant de verifier sameCb. §6.4.2 dit explicitement : si sameCb, ne PAS invoquer §6.4.1. Restructure pour matcher `is_amvp_nb_available`.
+
+**Bug 2 — `part_mode` non stocke tot** : `derive_spatial_merge_candidates` lit `ctx.cu_at(xPb, yPb).part_mode` (ligne 265) pour les exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1, PART_2NxN partIdx=1 → skip B1). Mais `part_mode` n'etait ecrit dans la grille qu'a la ligne 794 de `coding_tree.cpp`, APRES tous les PUs. Pour partIdx=1, la grille contenait le `part_mode` du CU precedent → exclusions incorrectes.
+
+**Pourquoi le fix naif regressait** : sans l'ecriture anticipee de `part_mode`, le fix de `is_pu_available` rendait les voisins sameCb disponibles, mais les exclusions utilisaient un `part_mode` stale. Par exemple, si le CU precedent avait `PART_2Nx2N` et le CU courant a `PART_Nx2N`, l'exclusion A1 ne se declenchait pas → candidat merge faux → MV faux → 128K diffs.
+
+**Fix** : deux changements simultanes :
+1. `coding_tree.cpp` : ecriture anticipee de `part_mode` dans la grille CU, a cote de l'ecriture anticipee de `pred_mode` (avant le traitement des PUs)
+2. `inter_prediction.cpp` : restructuration de `is_pu_available` pour checker sameCb avant z-scan (identique a `is_amvp_nb_available`)
+
+**Lecon** : quand un fix "naif" cause une regression, la cause n'est souvent PAS le fix lui-meme mais un bug latent correle. Le z-scan check incorrect masquait le bug de `part_mode` stale — les deux bugs se compensaient. La regression du fix naif etait le signal qu'un deuxieme bug existait, pas que le fix etait faux.
+
+### Bugs #21
+
+21. **Merge §6.4.2 + early part_mode** — `is_pu_available` utilisait z-scan (§6.4.1) avant sameCb + `part_mode` stocke trop tard pour les exclusions merge. Causait 4677 diffs frames 18-23 BBB 1080p (max_diff=49). Fix: check sameCb dans merge + ecriture part_mode avant PUs.
+
+### Milestone atteint
+
+**128/128 tests pixel-perfect** — tous les bitstreams de test passent. Le decodeur est conforme Main profile + Main 10 sur l'integralite des tests (toy, conformance, oracle, real-world BBB 1080p/4K).

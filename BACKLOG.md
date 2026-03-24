@@ -11,7 +11,7 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | **Termine** | 13/14 tests phase6 pass. 1 echec (bbb1080 frames 18+, merge availability §6.4.2). BBB 4K pixel-perfect. |
+| 6 — Loop Filters | **Termine** | 14/14 tests phase6 pass. BBB 1080p + BBB 4K pixel-perfect. 128/128 tests. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
@@ -191,11 +191,11 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
   - **Cause racine** : `perform_dequant` (transform.cpp) utilisait `cu_at(0,0)` au lieu de `cu_at(x0,y0)` pour determiner le pred_mode lors du choix de la matrice de scaling list. Pour un CU intra dans une frame inter, la mauvaise matrice (inter au lieu d'intra) etait selectionnee, causant un dequant scale legerement faux.
   - **Fix** : `transform.cpp` — utiliser `cu_at(x0, y0).pred_mode` (spec §8.6.3 : `CuPredMode[xTbY][yTbY]`).
   - **Resultat** : frames 0-17 pixel-perfect (18 frames corrigees). 125/126 tests passent.
-- [ ] **BBB 1080p frame 18+ — merge candidate `is_pu_available` §6.4.2** (nouveau bug identifie)
+- [x] **BBB 1080p frame 18+ — merge candidate `is_pu_available` §6.4.2** (RESOLU)
   - **Symptome** : frames 18-23 (GOP 2, poc 6+) : 4677 diffs, max_diff=49. Erreurs concentrees bord droit (X=1726-1919, Y=0-79).
-  - **Localisation** : epicentre CTB(55,0) y=24-31. Erreurs Y + U + V → MV faux (pas residual).
-  - **Analyse** : `is_pu_available` applique le z-scan check (§6.4.1) **avant** le sameCb check, alors que §6.4.2 dit de ne pas invoquer §6.4.1 pour les voisins intra-CU. Le fix naif (sameCb d'abord) cause 128K→1.7M diffs regression — probablement car le motion info du PU voisin n'est pas encore ecrit dans la grille quand le second PU est traite.
-  - **Pistes** : verifier que `decode_prediction_unit_inter` ecrit le motion info AVANT que le PU suivant ne lise les merge candidates. Possible race condition entre ecriture motion (per-4x4) et lecture merge (per-PU).
+  - **Cause racine** : deux bugs correles — (1) `is_pu_available` appliquait z-scan (§6.4.1) avant sameCb, violant §6.4.2. (2) `part_mode` n'etait pas stocke tot dans la grille CU, causant des exclusions merge incorrectes pour partIdx=1.
+  - **Fix** : ecriture anticipee de `part_mode` dans `coding_tree.cpp` + restructuration de `is_pu_available` pour checker sameCb avant z-scan.
+  - **Resultat** : 128/128 tests pixel-perfect.
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
@@ -330,7 +330,7 @@ Voir `docs/phases/phase-10-multi-slice.md` pour le plan detaille.
 ### Bugs identifies (non multi-slice)
 - [x] QP derivation cu_qp_delta (§8.6.1) — shortcut `!IsCuQpDeltaCoded` et QpY_prev_qg
 - [x] AMVP prediction block availability §6.4.2 — voir description detaillee dans Phase 6 Bug fixes
-- [ ] BBB 1080p residuel frame 2+ (29 diffs, max_diff=1) — voir Phase 6 Bug fixes
+- [x] BBB 1080p residuel frame 2+ (29 diffs, max_diff=1) — fixe par scaling list pred_mode lookup §8.6.3
 
 ## Taches transverses
 
