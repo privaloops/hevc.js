@@ -63,18 +63,24 @@ export class HEVCDecoder {
    * Create a new decoder instance. Loads the WASM module.
    */
   static async create(options?: DecoderOptions): Promise<HEVCDecoder> {
-    const wasmUrl = options?.wasmUrl;
-    const loadModule = async (url: string): Promise<EmscriptenModule> => {
-      const mod = await import(/* @vite-ignore */ url);
-      const fn = mod.default ?? mod;
-      const factoryOpts: Record<string, unknown> = {};
-      if (options?.wasmBinaryUrl) {
-        factoryOpts.locateFile = () => options.wasmBinaryUrl;
-      }
-      return fn(factoryOpts) as Promise<EmscriptenModule>;
-    };
+    const factoryOpts: Record<string, unknown> = {};
+    if (options?.wasmBinaryUrl) {
+      factoryOpts.locateFile = () => options.wasmBinaryUrl;
+    }
 
-    const module = await loadModule(wasmUrl ?? "./wasm/hevc-decode.js");
+    // 1. Check for globally loaded Emscripten module (via <script> tag)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = globalThis as any;
+    if (typeof g.HEVCDecoderModule === "function") {
+      const module = await g.HEVCDecoderModule(factoryOpts) as EmscriptenModule;
+      return new HEVCDecoder(module);
+    }
+
+    // 2. Try dynamic import (works with bundlers like Vite/Webpack)
+    const wasmUrl = options?.wasmUrl ?? "./wasm/hevc-decode.js";
+    const mod = await import(/* @vite-ignore */ wasmUrl);
+    const fn = mod.default ?? mod;
+    const module = await (fn(factoryOpts) as Promise<EmscriptenModule>);
     return new HEVCDecoder(module);
   }
 

@@ -5,7 +5,7 @@
  * falls back to WebGL canvas rendering.
  */
 
-import type { HEVCFrame } from "@hevcjs/core";
+import type { HEVCFrame } from "./types.js";
 
 /**
  * Renderer that converts YUV frames to a <video>-compatible MediaStream
