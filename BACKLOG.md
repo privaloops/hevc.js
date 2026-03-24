@@ -15,7 +15,26 @@ Etat d'avancement par phase et prochaines taches.
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
-| 11 — Player Plugins | **Termine** | @hevcjs/dashjs (dash.js), @hevcjs/hlsjs (hls.js), MSE intercept, SegmentTranscoder, mp4box.js demux, demo DASH 1080p+4K. |
+| 11 — Player Plugins | **En cours** | @hevcjs/dashjs, @hevcjs/hlsjs, MSE intercept, Web Worker. Seek hls.js à faire. Perf WASM à optimiser. |
+
+## Phase 11 — Player Plugins (en cours)
+
+### Fait
+- [x] `@hevcjs/dashjs` — plugin dash.js, `attachHevcSupport(player)`
+- [x] `@hevcjs/hlsjs` — plugin hls.js, `attachHevcSupport(hls)`, level filtering HEVC
+- [x] MSE intercept partagé dans `@hevcjs/core` (Proxy SourceBuffer, codec swap, events)
+- [x] `SegmentTranscoder` (demux mp4box.js → decode WASM → encode WebCodecs → mux fMP4)
+- [x] Web Worker pour transcodage off-main-thread (`transcode-worker.ts`)
+- [x] Demos dash.html + hls.html
+- [x] READMEs packages dashjs + hlsjs
+- [x] Renommage `@hevcjs/dash` → `@hevcjs/dashjs`, `@hevcjs/hls` → `@hevcjs/hlsjs`
+
+### A faire
+- [ ] **Seek hls.js** : hls.js n'appelle pas `abort()` sur le SourceBuffer lors d'un seek. Le proxy continue de transcoder les anciens segments. Nécessite soit un hook sur l'événement `seeking` du `<video>`, soit une intégration plus profonde avec le BufferController de hls.js.
+- [ ] **Seek dash.js (long stream)** : fonctionne sur les streams courts (buffer complet), à valider sur les streams longs.
+- [ ] **Performance décodeur WASM** : bottleneck principal (~50fps 720p, ~20fps 4K). Pistes : WASM pthreads (WPP multi-thread), SIMD intrinsics manuels, optimisation mémoire.
+- [ ] **Tests unitaires** : Vitest + happy-dom pour les packages JS, Playwright pour les demos.
+- [ ] **npm publish** : finaliser `package.json` racine, vérifier exports, publier `hevc.js`.
 | 10 — Multi-Slice | **Termine** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking + SAO. conf_b_xslice_256 pixel-perfect. |
 
 ## Phase 1 — Terminee
