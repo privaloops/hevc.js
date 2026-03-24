@@ -5,6 +5,7 @@
 
 namespace hevc {
 
+#ifdef HEVC_TRACE_CABAC
 // Bin-by-bin trace — enabled by HEVC_TRACE_BINS environment variable
 static FILE* trace_file() {
     static FILE* f = nullptr;
@@ -17,6 +18,7 @@ static FILE* trace_file() {
     }
     return f;
 }
+#endif
 
 // §9.3.4.3.1 — Initialization of the arithmetic decoding engine
 void CabacEngine::init_decoder(BitstreamReader& bs) {
@@ -25,9 +27,11 @@ void CabacEngine::init_decoder(BitstreamReader& bs) {
     ivlOffset_ = static_cast<uint16_t>(bs.read_bits(9));
     HEVC_LOG(CABAC, "init_decoder: ivlCurrRange=%d ivlOffset=%d", ivlCurrRange_, ivlOffset_);
 
+#ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "=== INIT_DECODER R=%d O=%d binCount=%d ===\n",
                      ivlCurrRange_, ivlOffset_, bin_count_);
+#endif
 }
 
 // §9.3.1.1 — Context initialization
@@ -72,12 +76,11 @@ void CabacEngine::init_contexts(int sliceType, int SliceQpY, bool cabac_init_fla
 
 // §9.3.4.3.2 — Arithmetic decoding of a bin with context
 int CabacEngine::decode_decision(int ctxIdx) {
-    uint8_t pStateIdx = contexts_[ctxIdx].pStateIdx;
-    uint8_t valMps    = contexts_[ctxIdx].valMps;
+    auto& ctx = contexts_[ctxIdx];
+    uint8_t pStateIdx = ctx.pStateIdx;
+    uint8_t valMps    = ctx.valMps;
 
-    uint8_t qRangeIdx = (ivlCurrRange_ >> 6) & 3;
-    uint16_t ivlLpsRange = rangeTabLps[pStateIdx][qRangeIdx];
-
+    uint16_t ivlLpsRange = rangeTabLps[pStateIdx][(ivlCurrRange_ >> 6) & 3];
     ivlCurrRange_ -= ivlLpsRange;
 
     int binVal;
@@ -86,31 +89,31 @@ int CabacEngine::decode_decision(int ctxIdx) {
         binVal = 1 - valMps;
         ivlOffset_ -= ivlCurrRange_;
         ivlCurrRange_ = ivlLpsRange;
-
         if (pStateIdx == 0)
-            contexts_[ctxIdx].valMps = 1 - valMps;
-
-        contexts_[ctxIdx].pStateIdx = transIdxLps[pStateIdx];
+            ctx.valMps = 1 - valMps;
+        ctx.pStateIdx = transIdxLps[pStateIdx];
     } else {
         // MPS path
         binVal = valMps;
-        contexts_[ctxIdx].pStateIdx = transIdxMps[pStateIdx];
+        ctx.pStateIdx = transIdxMps[pStateIdx];
     }
 
     renormalize();
     bin_count_++;
 
+#ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "D %d ctx=%d st=%d mps=%d R=%d O=%d val=%d\n",
                      bin_count_, ctxIdx, pStateIdx, valMps,
                      ivlCurrRange_, ivlOffset_, binVal);
+#endif
 
     return binVal;
 }
 
 // §9.3.4.3.4 — Bypass decoding
 int CabacEngine::decode_bypass() {
-    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
+    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bit_fast());
 
     int val = 0;
     if (ivlOffset_ >= ivlCurrRange_) {
@@ -120,9 +123,11 @@ int CabacEngine::decode_bypass() {
 
     bin_count_++;
 
+#ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "B %d R=%d O=%d val=%d\n",
                      bin_count_, ivlCurrRange_, ivlOffset_, val);
+#endif
 
     return val;
 }
@@ -133,16 +138,20 @@ int CabacEngine::decode_terminate() {
     bin_count_++;
 
     if (ivlOffset_ >= ivlCurrRange_) {
+#ifdef HEVC_TRACE_CABAC
         if (FILE* f = trace_file())
             std::fprintf(f, "T %d R=%d O=%d val=1\n",
                          bin_count_, ivlCurrRange_, ivlOffset_);
+#endif
         return 1;
     }
     renormalize();
 
+#ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "T %d R=%d O=%d val=0\n",
                      bin_count_, ivlCurrRange_, ivlOffset_);
+#endif
 
     return 0;
 }
@@ -160,7 +169,7 @@ int CabacEngine::decode_bypass_bins(int numBins) {
 void CabacEngine::renormalize() {
     while (ivlCurrRange_ < 256) {
         ivlCurrRange_ <<= 1;
-        ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bits_safe(1));
+        ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bit_fast());
     }
 }
 

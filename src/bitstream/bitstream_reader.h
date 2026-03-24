@@ -26,6 +26,16 @@ public:
     // Read bits with zero-padding past end (for CABAC renormalization)
     uint32_t read_bits_safe(int n);
 
+    // Fast single-bit read for CABAC hot path (inline, no n==0 check)
+    uint32_t read_bit_fast() {
+        if (cache_bits_ < 1) refill();
+        uint32_t bit = static_cast<uint32_t>(cache_ >> 63);
+        cache_ <<= 1;
+        cache_bits_--;
+        bit_pos_++;
+        return bit;
+    }
+
     // Exp-Golomb (§9.2)
     uint32_t read_ue();
     int32_t  read_se();
