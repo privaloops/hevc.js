@@ -14,7 +14,7 @@ Etat d'avancement par phase et prochaines taches.
 | 6 — Loop Filters | **Termine** | 14/14 tests phase6 pass. BBB 1080p + BBB 4K pixel-perfect. 128/128 tests. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
-| 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
+| 9 — Performance | **En cours** | 1080p@128fps natif WPP, 4K@31fps. Thread pool V2 fait. SIMD intrinsics a faire. |
 | 11 — Player Plugins | **En cours** | @hevcjs/dashjs, @hevcjs/hlsjs, MSE intercept, Web Worker. Seek hls.js à faire. Perf WASM à optimiser. |
 
 ## Phase 11 — Player Plugins (en cours)
@@ -293,12 +293,40 @@ Voir `docs/phases/phase-08-wasm.md` pour le plan detaille.
 - [x] CLI timing (fps, ms/frame)
 - [x] Benchmark script (`tools/benchmark.sh`)
 
-### 9.2 — WPP Multi-thread (A FAIRE)
-- [ ] Fix bug WPP P/B-frames (CABAC alignment aux frontieres de rangees CTU)
-- [ ] Thread pool natif (`std::thread`) pour decode parallele des rangees CTU
-- [ ] Dependance diagonale : rangee N attend le 2e CTU de la rangee N-1
+### 9.2 — WPP Multi-thread
+
+#### V1 — Thread per row (FAIT, remplace par V2)
+- [x] Fix bug WPP P/B-frames — n'existait plus (fixes Phase 6)
+- [x] Decode parallele des rangees CTU (`std::thread` par rangee)
+- [x] Dependance diagonale : rangee N attend le 2e CTU de la rangee N-1
+- [x] Sync via `std::atomic<int> completed_col[row]` + spin-wait
+
+#### V2 — Thread pool + condvar (FAIT)
+- [x] `ThreadPool` classe persistante (N workers = `hardware_concurrency`)
+- [x] Job queue mutex + condition variable (plus de spin-wait)
+- [x] Pool survit entre frames (pas de creation/destruction de threads)
+- [x] Sync per-row via `std::mutex` + `std::condition_variable` + `notify_all`
+- [x] Fix deadlock : store sous `lock_guard` avant `notify_all` (signal perdu sinon)
+- [x] 128/128 tests pixel-perfect
+- [x] Benchmark : 1080p WPP 128 fps (+29% vs V1), 4K WPP 31 fps (+15% vs V1)
+
+#### Ecart avec libde265 (analyse)
+
+| Resolution | hevc-decode 1T | hevc-decode WPP | libde265 1T | libde265 WPP | Ratio 1T | Ratio WPP |
+|-----------|---------------|----------------|------------|-------------|---------|----------|
+| 1080p | 63 fps | 128 fps | 84 fps | 477 fps | 0.75x | 0.27x |
+| 4K | 24 fps | 31 fps | 40 fps | 124 fps | 0.60x | 0.25x |
+
+L'ecart principal est en **single-thread** (0.6-0.75x) et se propage au WPP. Causes probables :
+1. **SIMD intrinsics manuels** : libde265 a des intrinsics NEON/SSE pour interpolation, transform, deblocking. Notre auto-vectorisation ne couvre pas tout.
+2. **Hotpath optimise** : libde265 inline les chemins chauds (CABAC, interp 8-tap) avec des tables precalculees.
+3. **Allocation** : notre code alloue des buffers temporaires dans certains hotpaths (interp chroma, residual).
+
+Pistes pour rattraper :
+- [ ] Profiler single-thread (instruments/perf) pour identifier le hotspot dominant
+- [ ] SIMD intrinsics NEON pour le hotspot (probablement interpolation luma 8-tap)
+- [ ] Reduire les allocations dans les hotpaths (pre-allouer)
 - [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
-- [ ] Benchmark WPP vs libde265 (cible : 4K@60fps)
 
 ### 9.3 — SIMD intrinsics manuels (OPTIONNEL)
 - [ ] Interpolation luma 8-tap SIMD
@@ -306,13 +334,12 @@ Voir `docs/phases/phase-08-wasm.md` pour le plan detaille.
 - [ ] Transform inverse SIMD
 - [ ] Deblocking SIMD
 
-### Resultats actuels
+### Resultats actuels (2026-03-24)
 
-| Resolution | Natif (1 thread) | WASM (Chrome) |
-|-----------|-----------------|---------------|
-| 720p | 187 fps | — |
-| 1080p | 77 fps | 61 fps |
-| 4K | 27.5 fps | 21 fps |
+| Resolution | Natif 1T | Natif WPP | WASM 1T | libde265 1T | libde265 WPP |
+|-----------|---------|----------|---------|------------|-------------|
+| 1080p | 63 fps | 128 fps | ~60 fps | 84 fps | 477 fps |
+| 4K | 24 fps | 31 fps | ~21 fps | 40 fps | 124 fps |
 
 ## Phase 10 -- Multi-Slice
 
