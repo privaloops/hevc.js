@@ -1,5 +1,5 @@
 {
-  "name": "@hevcjs/core",
+  "name": "@hevcjs/hlsjs",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -13,16 +13,26 @@
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch"
   },
   "dependencies": {
-    "mp4box": "^2.3.0"
+    "@hevcjs/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "hls.js": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hls.js": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "hls.js": "^1.5.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   }

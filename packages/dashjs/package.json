@@ -1,5 +1,5 @@
 {
-  "name": "@hevcjs/core",
+  "name": "@hevcjs/dashjs",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -13,16 +13,26 @@
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch"
   },
   "dependencies": {
-    "mp4box": "^2.3.0"
+    "@hevcjs/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "dashjs": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "dashjs": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "dashjs": "^4.7.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   }

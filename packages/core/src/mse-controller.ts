@@ -19,7 +19,7 @@ export class MSEController {
    * @param initSegment The fMP4 init segment (ftyp + moov)
    * @param codec MIME codec string (default: avc1.42001f)
    */
-  async init(initSegment: Uint8Array, codec = "avc1.42001f"): Promise<void> {
+  async init(initSegment: Uint8Array, codec = "avc1.640028"): Promise<void> {
     this._mediaSource = new MediaSource();
     this._video.src = URL.createObjectURL(this._mediaSource);
 
@@ -126,9 +126,7 @@ export class MSEController {
       };
 
       if (this._sourceBuffer.updating) {
-        // Queue it — will be processed in _onUpdateEnd
         this._queue.push(data);
-        // Wait for the queue to process this item
         const check = () => {
           if (!this._queue.includes(data)) { resolve(); return; }
           setTimeout(check, 10);

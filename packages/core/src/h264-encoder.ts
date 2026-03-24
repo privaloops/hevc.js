@@ -4,7 +4,7 @@
  * Pipeline: HEVCFrame (Uint16Array YUV planes) → VideoFrame(I420) → VideoEncoder → EncodedVideoChunk
  */
 
-import type { HEVCFrame } from "@hevcjs/core";
+import type { HEVCFrame } from "./types.js";
 
 export interface H264EncoderConfig {
   width: number;
@@ -20,14 +20,23 @@ export interface EncodedChunk {
   isKeyframe: boolean;
 }
 
+/**
+ * Pick an appropriate H.264 codec string based on resolution.
+ * Baseline L3.1 caps at 720p — higher resolutions need higher levels.
+ */
+function pickH264Codec(w: number, h: number): string {
+  const pixels = w * h;
+  if (pixels > 2073600) return "avc1.640033"; // > 1080p → High 5.1 (4K)
+  if (pixels > 921600)  return "avc1.64002a"; // > 720p  → High 4.2 (1080p)
+  return "avc1.640028";                        // ≤ 720p  → High 4.0
+}
+
 export class H264Encoder {
   private _encoder: VideoEncoder;
   private _width: number;
   private _height: number;
   private _fps: number;
   private _codecDescription: Uint8Array | null = null;
-  private _pendingChunks: EncodedChunk[] = [];
-  private _flushResolve: (() => void) | null = null;
 
   /** Callback invoked for each encoded chunk */
   onChunk: ((chunk: EncodedChunk) => void) | null = null;
@@ -46,14 +55,19 @@ export class H264Encoder {
     });
 
     this._encoder.configure({
-      codec: "avc1.42001f", // Baseline profile, level 3.1
+      codec: pickH264Codec(this._width, this._height),
       width: this._width,
       height: this._height,
       bitrate: config.bitrate ?? this._width * this._height * this._fps * 0.1, // ~0.1 bpp
       framerate: this._fps,
       hardwareAcceleration: "prefer-hardware",
-      avc: { format: "avc" }, // Annex B output (start codes)
+      avc: { format: "avc" },
     });
+  }
+
+  /** Get the H.264 codec string used by this encoder */
+  get codec(): string {
+    return pickH264Codec(this._width, this._height);
   }
 
   /** Get the avcC codec description (available after first keyframe) */
