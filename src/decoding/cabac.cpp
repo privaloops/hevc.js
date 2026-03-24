@@ -165,12 +165,14 @@ int CabacEngine::decode_bypass_bins(int numBins) {
     return value;
 }
 
-// §9.3.4.3.3 — Renormalization
+// §9.3.4.3.3 — Renormalization (batched: count shifts then read all bits at once)
 void CabacEngine::renormalize() {
-    while (ivlCurrRange_ < 256) {
-        ivlCurrRange_ <<= 1;
-        ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bit_fast());
-    }
+    if (ivlCurrRange_ >= 256) return;
+    // Count how many left-shifts needed to bring range into [256, 510]
+    int shift = __builtin_clz(static_cast<unsigned>(ivlCurrRange_)) - 23; // 32 - 9 = 23
+    ivlCurrRange_ <<= shift;
+    uint32_t bits = bs_->read_bits_safe(shift);
+    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << shift) | bits);
 }
 
 } // namespace hevc
