@@ -72,13 +72,18 @@ static bool is_pu_available(const DecodingContext& ctx,
         } else {
             // Same CTU — z-scan check
             int minTb = ctx.sps->MinTbSizeY;
+            // Z-scan (Morton code): interleave bits of bx and by
             auto zscan = [](int bx, int by) -> uint32_t {
-                uint32_t z = 0;
-                for (int i = 0; i < 8; i++) {
-                    z |= ((bx >> i) & 1) << (2 * i);
-                    z |= ((by >> i) & 1) << (2 * i + 1);
-                }
-                return z;
+                auto spread = [](uint32_t v) -> uint32_t {
+                    v &= 0xFF;
+                    v = (v | (v << 8)) & 0x00FF00FF;
+                    v = (v | (v << 4)) & 0x0F0F0F0F;
+                    v = (v | (v << 2)) & 0x33333333;
+                    v = (v | (v << 1)) & 0x55555555;
+                    return v;
+                };
+                return spread(static_cast<uint32_t>(bx)) |
+                       (spread(static_cast<uint32_t>(by)) << 1);
             };
             int ctbOrgX = curCtbX * ctbSize, ctbOrgY = curCtbY * ctbSize;
             uint32_t curZ = zscan((xPb - ctbOrgX) / minTb, (yPb - ctbOrgY) / minTb);
@@ -351,8 +356,9 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
     }
     int MaxNumMergeCand = sh.MaxNumMergeCand;
 
-    // Build merge candidate list
-    std::vector<MergeCandidate> mergeCandList;
+    // Build merge candidate list — fixed-size array (max 5 candidates per spec)
+    MergeCandidate mergeCandList[5];
+    int numCands = 0;
 
     // Step 1: Spatial candidates (§8.5.3.2.3)
     MergeCandidate spatialCands[5];
@@ -361,14 +367,13 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
                                      partIdx, spatialCands, spatialAvail);
 
     // §8.5.3.2.2 eq 8-119: add in order A1, B1, B0, A0, B2
-    for (int i = 0; i < 5 && static_cast<int>(mergeCandList.size()) < MaxNumMergeCand; i++) {
+    for (int i = 0; i < 5 && numCands < MaxNumMergeCand; i++) {
         if (spatialAvail[i])
-            mergeCandList.push_back(spatialCands[i]);
+            mergeCandList[numCands++] = spatialCands[i];
     }
 
     // Step 2-4: Temporal candidate (§8.5.3.2.8)
-    if (static_cast<int>(mergeCandList.size()) < MaxNumMergeCand &&
-        sh.slice_temporal_mvp_enabled_flag) {
+    if (numCands < MaxNumMergeCand && sh.slice_temporal_mvp_enabled_flag) {
         MergeCandidate colCand = {};
         MV mvL0Col = {};
         bool availL0 = derive_temporal_mv(ctx, xPb, yPb, nPbW, nPbH, 0, 0, mvL0Col);
@@ -387,19 +392,19 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
             }
         }
         if (colCand.pred_flag[0] || colCand.pred_flag[1])
-            mergeCandList.push_back(colCand);
+            mergeCandList[numCands++] = colCand;
     }
 
     // Step 7: Combined bi-pred candidates (§8.5.3.2.4) — B slices only
     if (sh.slice_type == SliceType::B) {
-        int numOrigMergeCand = static_cast<int>(mergeCandList.size());
+        int numOrigMergeCand = numCands;
         if (numOrigMergeCand > 1 && numOrigMergeCand < MaxNumMergeCand) {
             // Table 8-7
             static const int l0Idx[] = {0,1,0,2,1,2,0,3,1,3,2,3};
             static const int l1Idx[] = {1,0,2,0,2,1,3,0,3,1,3,2};
             for (int combIdx = 0;
                  combIdx < numOrigMergeCand * (numOrigMergeCand - 1) &&
-                 static_cast<int>(mergeCandList.size()) < MaxNumMergeCand;
+                 numCands < MaxNumMergeCand;
                  combIdx++) {
                 int l0 = l0Idx[combIdx];
                 int l1 = l1Idx[combIdx];
@@ -412,14 +417,14 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
                     Picture* ref1 = ctx.dpb->ref_pic_list1(c1.ref_idx[1]);
                     if (ref0 != ref1 ||
                         c0.mv[0].x != c1.mv[1].x || c0.mv[0].y != c1.mv[1].y) {
-                        MergeCandidate comb;
+                        MergeCandidate& comb = mergeCandList[numCands++];
+                        comb = {};
                         comb.mv[0] = c0.mv[0];
                         comb.ref_idx[0] = c0.ref_idx[0];
                         comb.pred_flag[0] = true;
                         comb.mv[1] = c1.mv[1];
                         comb.ref_idx[1] = c1.ref_idx[1];
                         comb.pred_flag[1] = true;
-                        mergeCandList.push_back(comb);
                     }
                 }
             }
@@ -435,8 +440,9 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
             numRefIdx = std::min(static_cast<int>(sh.num_ref_idx_l0_active_minus1 + 1),
                                   static_cast<int>(sh.num_ref_idx_l1_active_minus1 + 1));
         int zeroIdx = 0;
-        while (static_cast<int>(mergeCandList.size()) < MaxNumMergeCand) {
-            MergeCandidate zero = {};
+        while (numCands < MaxNumMergeCand) {
+            MergeCandidate& zero = mergeCandList[numCands++];
+            zero = {};
             zero.ref_idx[0] = (zeroIdx < numRefIdx) ? zeroIdx : 0;
             zero.pred_flag[0] = true;
             zero.mv[0] = {0, 0};
@@ -445,7 +451,6 @@ static PUMotionInfo derive_merge_mode(DecodingContext& ctx,
                 zero.pred_flag[1] = true;
                 zero.mv[1] = {0, 0};
             }
-            mergeCandList.push_back(zero);
             zeroIdx++;
         }
     }
@@ -509,13 +514,18 @@ static bool is_amvp_nb_available(const DecodingContext& ctx,
         } else {
             // Same CTU — z-scan check
             int minTb = ctx.sps->MinTbSizeY;
+            // Z-scan (Morton code): interleave bits of bx and by
             auto zscan = [](int bx, int by) -> uint32_t {
-                uint32_t z = 0;
-                for (int i = 0; i < 8; i++) {
-                    z |= ((bx >> i) & 1) << (2 * i);
-                    z |= ((by >> i) & 1) << (2 * i + 1);
-                }
-                return z;
+                auto spread = [](uint32_t v) -> uint32_t {
+                    v &= 0xFF;
+                    v = (v | (v << 8)) & 0x00FF00FF;
+                    v = (v | (v << 4)) & 0x0F0F0F0F;
+                    v = (v | (v << 2)) & 0x33333333;
+                    v = (v | (v << 1)) & 0x55555555;
+                    return v;
+                };
+                return spread(static_cast<uint32_t>(bx)) |
+                       (spread(static_cast<uint32_t>(by)) << 1);
             };
             int ctbOrgX = curCtbX * ctbSize, ctbOrgY = curCtbY * ctbSize;
             uint32_t curZ = zscan((xPb - ctbOrgX) / minTb, (yPb - ctbOrgY) / minTb);

@@ -324,21 +324,21 @@ L'ecart principal est en **single-thread** (0.6-0.75x) et se propage au WPP. Cau
 
 Pistes pour rattraper (priorisees par le profiling) :
 - [x] Profiler single-thread — xctrace Time Profiler, 4K BBB 120f (voir LEARNINGS.md)
-- [ ] **`derive_merge_mode` (10%)** — cache misses probable, optimiser acces grille CU/motion
-- [ ] **`apply_deblocking` (13%)** — SIMD NEON pour le filtrage strong/weak
+- [x] **`derive_merge_mode` (10%)** — std::vector→tableau fixe + zscan branchless → **+6-8%**
+- [x] **`apply_deblocking` (13%)** — acces direct aux plans via pointeur → **~1%** (marginal)
 - [ ] **`interpolate_luma` (8%)** — SIMD NEON filtre 8-tap
 - [ ] **`apply_sao` (8%)** — SIMD NEON offset+clip
 - [ ] **`interpolate_chroma` (6%)** — SIMD NEON filtre 4-tap
 - [ ] **`decode_residual_coding` (14%)** — branchless CABAC, tables pre-calculees
-- [ ] Reduire les allocations dans les hotpaths (pre-allouer)
+- [ ] Reduire les allocations dans les hotpaths restants
 - [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
 
-### Resultats actuels (2026-03-24)
+### Resultats actuels (2026-03-24, post-optimisations algorithmiques)
 
 | Resolution | Natif 1T | Natif WPP | WASM 1T | libde265 1T | libde265 WPP |
 |-----------|---------|----------|---------|------------|-------------|
-| 1080p | 63 fps | 128 fps | ~60 fps | 84 fps | 477 fps |
-| 4K | 24 fps | 31 fps | ~21 fps | 40 fps | 124 fps |
+| 1080p | 67 fps | 136 fps | ~60 fps | 84 fps | 477 fps |
+| 4K | 26 fps | 31 fps | ~21 fps | 40 fps | 124 fps |
 
 ## Phase 10 -- Multi-Slice
 
