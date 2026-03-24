@@ -329,7 +329,9 @@ Pistes pour rattraper (priorisees par le profiling) :
 - [ ] **`interpolate_luma` (8%)** — SIMD NEON filtre 8-tap
 - [ ] **`apply_sao` (8%)** — SIMD NEON offset+clip
 - [ ] **`interpolate_chroma` (6%)** — SIMD NEON filtre 4-tap
-- [ ] **`decode_residual_coding` (14%)** — branchless CABAC, tables pre-calculees
+- [ ] **CABAC (33% WASM!)** — `decode_decision` 13.6%, `decode_residual_coding` 15.5%, `decode_bypass` 4.3%. Branchless decode_decision, table-driven range update
+- [ ] **`read_bits_safe` (2.6% WASM)** — eliminer bounds checks hot path
+- [ ] **`copyPlane` (3.5% WASM)** — overhead JS, zero-copy possible
 - [ ] Reduire les allocations dans les hotpaths restants
 - [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
 
@@ -337,8 +339,8 @@ Pistes pour rattraper (priorisees par le profiling) :
 
 | Resolution | Natif 1T | Natif WPP | WASM 1T | libde265 1T | libde265 WPP |
 |-----------|---------|----------|---------|------------|-------------|
-| 1080p | 74 fps | 158 fps | ~80 fps | 84 fps | 477 fps |
-| 4K | 28 fps | — | ~17 fps | 40 fps | 124 fps |
+| 1080p | 77 fps | 164 fps | ~80 fps | 84 fps | 477 fps |
+| 4K | 29 fps | — | ~17 fps | 40 fps | 124 fps |
 
 ## Phase 10 -- Multi-Slice
 
