@@ -122,6 +122,7 @@ static void interpolate_luma(const Picture& refPic,
     } else {
         LUMA_INTERP(refClamp);
     }
+
     #undef LUMA_INTERP
 }
 

@@ -19,6 +19,7 @@ static const int eo_dy[4][2] = {{0, 0}, {-1, 1}, {-1, 1}, {-1, 1}};
 
 void apply_sao(DecodingContext& ctx) {
     auto& sps = *ctx.sps;
+    auto& pps = *ctx.pps;
     auto* pic = ctx.pic;
 
     if (!sps.sample_adaptive_offset_enabled_flag) return;
@@ -108,6 +109,52 @@ void apply_sao(DecodingContext& ctx) {
                             // §8.7.3.2: out-of-picture neighbors → no modification
                             if (xN1 < 0 || xN1 >= compW || yN1 < 0 || yN1 >= compH) continue;
                             if (xN2 < 0 || xN2 >= compW || yN2 < 0 || yN2 >= compH) continue;
+
+                            // §8.7.3.2: cross-slice boundary check
+                            // edgeIdx = 0 when neighbor is in a different slice and the
+                            // relevant slice_loop_filter_across_slices_enabled_flag == 0
+                            bool skipEdge = false;
+                            if (ctx.slice_idx) {
+                                int curAddr = (yY / ctbSize) * sps.PicWidthInCtbsY + (xY / ctbSize);
+                                int si_cur = ctx.slice_idx[curAddr];
+                                for (int nk = 0; nk < 2 && !skipEdge; nk++) {
+                                    int xNk = (nk == 0) ? xN1 : xN2;
+                                    int yNk = (nk == 0) ? yN1 : yN2;
+                                    int xYn = (cIdx == 0) ? xNk : xNk * subW;
+                                    int yYn = (cIdx == 0) ? yNk : yNk * subH;
+                                    int nbrAddr = (yYn / ctbSize) * sps.PicWidthInCtbsY + (xYn / ctbSize);
+                                    int si_nbr = ctx.slice_idx[nbrAddr];
+                                    if (si_cur != si_nbr) {
+                                        // §8.7.3.2: check the flag of the slice whose entry
+                                        // boundary is being crossed
+                                        if (si_nbr < si_cur) {
+                                            // neighbor in earlier slice → check current's flag
+                                            if (!ctx.sh_at_ctb(curAddr).slice_loop_filter_across_slices_enabled_flag)
+                                                skipEdge = true;
+                                        } else {
+                                            // neighbor in later slice → check neighbor's flag
+                                            if (!ctx.sh_at_ctb(nbrAddr).slice_loop_filter_across_slices_enabled_flag)
+                                                skipEdge = true;
+                                        }
+                                    }
+                                }
+                                // §8.7.3.2: cross-tile boundary check
+                                if (!skipEdge && !pps.loop_filter_across_tiles_enabled_flag
+                                    && !pps.TileId.empty()) {
+                                    int ts_cur = pps.CtbAddrRsToTs[curAddr];
+                                    for (int nk = 0; nk < 2 && !skipEdge; nk++) {
+                                        int xNk = (nk == 0) ? xN1 : xN2;
+                                        int yNk = (nk == 0) ? yN1 : yN2;
+                                        int xYn = (cIdx == 0) ? xNk : xNk * subW;
+                                        int yYn = (cIdx == 0) ? yNk : yNk * subH;
+                                        int nbrAddr = (yYn / ctbSize) * sps.PicWidthInCtbsY + (xYn / ctbSize);
+                                        int ts_nbr = pps.CtbAddrRsToTs[nbrAddr];
+                                        if (pps.TileId[ts_cur] != pps.TileId[ts_nbr])
+                                            skipEdge = true;
+                                    }
+                                }
+                            }
+                            if (skipEdge) continue;
 
                             int c_val = origPlane[cIdx][ySj * stride + xSi];
                             int a = origPlane[cIdx][yN1 * stride + xN1];
