@@ -2,12 +2,12 @@
  * TranscodePipeline — Orchestrates HEVC → H.264 transcoding for MSE playback.
  *
  * Pipeline per segment:
- *   fMP4 HEVC segment → demux → HEVC NALs → WASM decode → YUV frames
+ *   fMP4 HEVC segment → mp4box.js demux → HEVC NALs → WASM decode → YUV frames
  *   → VideoEncoder(H.264) → fMP4 mux → MSE SourceBuffer → <video>
  */
 
-import { HEVCDecoder } from "@hevcjs/core";
-import type { HEVCFrame } from "@hevcjs/core";
+import { HEVCDecoder } from "./decoder.js";
+import type { HEVCFrame } from "./types.js";
 import { FMP4Demuxer } from "./fmp4-demuxer.js";
 import { H264Encoder } from "./h264-encoder.js";
 import type { EncodedChunk } from "./h264-encoder.js";
@@ -50,19 +50,17 @@ export class TranscodePipeline {
 
   /**
    * Process an fMP4 init segment (moov with HEVC codec config).
-   * Extracts VPS/SPS/PPS from hvcC and feeds them to the decoder.
+   * Extracts track info via mp4box.js.
    */
-  processInitSegment(data: Uint8Array): void {
+  async processInitSegment(data: Uint8Array): Promise<void> {
     if (!this._initialized) throw new Error("Pipeline not initialized. Call init() first.");
-    this._demuxer.parseInit(data);
+    await this._demuxer.parseInit(data);
 
     const track = this._demuxer.videoTrack;
     if (!track) throw new Error("No video track in init segment");
 
     this._timescale = track.timescale;
-    if (track.width && track.height) {
-      this._fps = this._config.fps ?? 25;
-    }
+    this._fps = this._config.fps ?? 25;
   }
 
   /**
@@ -78,7 +76,6 @@ export class TranscodePipeline {
 
     // 2. Feed NAL units to WASM decoder
     for (const sample of samples) {
-      // Reassemble with Annex B start codes
       const totalSize = sample.nalUnits.reduce((sum, n) => sum + 4 + n.length, 0);
       const nalBuffer = new Uint8Array(totalSize);
       let offset = 0;
@@ -97,68 +94,12 @@ export class TranscodePipeline {
     const frames = this._decoder.drain();
     if (frames.length === 0) return;
 
-    // 4. Ensure encoder is created with correct dimensions
-    if (!this._encoder) {
-      this._encoder = new H264Encoder({
-        width: frames[0]!.width,
-        height: frames[0]!.height,
-        fps: this._fps,
-        bitrate: this._config.bitrate,
-      });
-    }
-
-    // 5. Encode frames → collect chunks
-    const chunks: EncodedChunk[] = [];
-    this._encoder.onChunk = (chunk) => chunks.push(chunk);
-
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i]!;
-      const timestampUs = Math.round((this._baseDecodeTime / this._timescale) * 1_000_000)
-        + Math.round((i / this._fps) * 1_000_000);
-      const isKeyframe = i === 0 && this._baseDecodeTime === 0; // First frame of first segment
-      this._encoder.encode(frame, timestampUs, isKeyframe);
-    }
-
-    await this._encoder.flush();
-
-    if (chunks.length === 0) return;
-
-    // 6. Initialize MSE with first encoded segment (need avcC)
-    if (!this._mseInitialized) {
-      const avcC = this._encoder.codecDescription;
-      if (!avcC) throw new Error("No avcC description from encoder");
-
-      const initSegment = this._muxer.generateInit({
-        width: frames[0]!.width,
-        height: frames[0]!.height,
-        timescale: this._timescale,
-        avcC,
-      });
-
-      await this._mse.init(initSegment);
-      this._mseInitialized = true;
-    }
-
-    // 7. Mux encoded chunks into fMP4 media segment
-    const muxerSamples = chunks.map((c) => ({
-      data: c.data,
-      duration: Math.round(c.duration * this._timescale / 1_000_000),
-      isKeyframe: c.isKeyframe,
-      compositionTimeOffset: 0,
-    }));
-
-    const mediaSegment = this._muxer.muxSegment(muxerSamples, this._baseDecodeTime);
-
-    // 8. Append to MSE
-    await this._mse.appendSegment(mediaSegment);
-
-    // Update base decode time for next segment
-    this._baseDecodeTime += muxerSamples.reduce((sum, s) => sum + s.duration, 0);
+    // 4-8. Encode, mux, append to MSE
+    await this._encodeAndAppend(frames);
   }
 
   /**
    * Process a raw HEVC bitstream (Annex B format, .265 file).
-   * Feeds the entire bitstream, drains, encodes, and appends to MSE.
    */
   async processRawBitstream(data: Uint8Array): Promise<void> {
     if (!this._decoder) throw new Error("Pipeline not initialized");
@@ -225,7 +166,7 @@ export class TranscodePipeline {
         timescale: this._timescale,
         avcC,
       });
-      await this._mse.init(initSegment);
+      await this._mse.init(initSegment, this._encoder!.codec);
       this._mseInitialized = true;
     }
 

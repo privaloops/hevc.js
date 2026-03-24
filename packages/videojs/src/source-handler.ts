@@ -18,8 +18,7 @@
  */
 
 import videojs from "video.js";
-import { TranscodePipeline } from "./transcode-pipeline.js";
-import { H264Encoder } from "./h264-encoder.js";
+import { TranscodePipeline, H264Encoder } from "@hevcjs/core";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type VjsStatic = any;
@@ -86,11 +85,9 @@ class HEVCSourceHandler {
 
       // Detect format and process
       if (isFMP4(data)) {
-        // fMP4: process as init + media segment
-        this._pipeline.processInitSegment(data);
+        await this._pipeline.processInitSegment(data);
         await this._pipeline.processMediaSegment(data);
       } else {
-        // Raw .265 bitstream
         await this._pipeline.processRawBitstream(data);
       }
 
@@ -132,7 +129,6 @@ if (vjs?.getTech) {
     Html5.registerSourceHandler(
       {
         canPlayType(type: string): string {
-          // Don't intercept if browser has native HEVC or no VideoEncoder
           if (hasNativeHevcSupport() || !hasVideoEncoder()) return "";
 
           const lower = type.toLowerCase();

@@ -3,13 +3,15 @@ import "./source-handler.js";
 
 export { HevcWasmTech } from "./tech.js";
 export { HEVCSourceHandler } from "./source-handler.js";
-export { FMP4Demuxer } from "./fmp4-demuxer.js";
-export type { DemuxedSample } from "./fmp4-demuxer.js";
-export { FrameRenderer } from "./renderer.js";
-export { H264Encoder } from "./h264-encoder.js";
-export type { H264EncoderConfig, EncodedChunk } from "./h264-encoder.js";
-export { FMP4Muxer } from "./fmp4-muxer.js";
-export type { MuxerInitConfig, MuxerSample } from "./fmp4-muxer.js";
-export { MSEController } from "./mse-controller.js";
-export { TranscodePipeline } from "./transcode-pipeline.js";
-export type { TranscodePipelineConfig } from "./transcode-pipeline.js";
+
+// Re-export shared modules from core
+export { FMP4Demuxer } from "@hevcjs/core";
+export type { DemuxedSample } from "@hevcjs/core";
+export { FrameRenderer } from "@hevcjs/core";
+export { H264Encoder } from "@hevcjs/core";
+export type { H264EncoderConfig, EncodedChunk } from "@hevcjs/core";
+export { FMP4Muxer } from "@hevcjs/core";
+export type { MuxerInitConfig, MuxerSample } from "@hevcjs/core";
+export { MSEController } from "@hevcjs/core";
+export { TranscodePipeline } from "@hevcjs/core";
+export type { TranscodePipelineConfig } from "@hevcjs/core";
