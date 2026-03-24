@@ -79,7 +79,7 @@ hls.<span class="fn">loadSource</span>(m3u8Url);</div>
 <script src="hls-bundle.js"></script>
 <script>
   // Install MSE intercept NOW, before hls.js caches MediaSource references
-  HevcHls.attachHevcSupport(null);
+  HevcHls.attachHevcSupport(null, { workerUrl: './transcode-worker.js' });
 </script>
 
 <!-- hls.js (loaded AFTER MSE is patched) -->
@@ -122,7 +122,9 @@ function loadHLS(presetUrl) {
   });
 
   // Attach HEVC support — patches MSE + filters levels to prefer HEVC
-  cleanup = HevcHls.attachHevcSupport(hls);
+  cleanup = HevcHls.attachHevcSupport(hls, {
+    workerUrl: './transcode-worker.js',
+  });
 
   // hls.js events
   hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {

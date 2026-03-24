@@ -19,6 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **SAO cross-slice boundary (§8.7.3.2)**: SAO edge offset did not check `slice_loop_filter_across_slices_enabled_flag` before accessing neighbor samples in adjacent slices. Also added cross-tile boundary check. Fixes `conf_b_xslice_256` (pixel-perfect).
 
 ### Added
+- **Web Worker transcoding**:
+  - `SegmentTranscoder` runs in a dedicated Web Worker — main thread stays free for UI
+  - `TranscodeWorkerClient` handles postMessage communication (init, initSegment, mediaSegment, abort)
+  - Worker auto-reinitializes after seek/abort
+  - `workerUrl` option in `attachHevcSupport()` enables Worker mode
+  - Fallback to main-thread when `workerUrl` is not provided
+
 - **`@hevcjs/dashjs` — dash.js HEVC plugin**:
   - `attachHevcSupport(player)` — one-line integration with dash.js
   - Transparent MSE interception: patches `MediaSource.isTypeSupported`, `addSourceBuffer`, `navigator.mediaCapabilities.decodingInfo`

@@ -16,9 +16,9 @@
  */
 
 import { H264Encoder, installMSEIntercept, uninstallMSEIntercept } from "@hevcjs/core";
-import type { SegmentTranscoderConfig } from "@hevcjs/core";
+import type { MSEInterceptConfig } from "@hevcjs/core";
 
-export interface HevcDashPluginConfig extends SegmentTranscoderConfig {
+export interface HevcDashPluginConfig extends MSEInterceptConfig {
   /**
    * Force HEVC transcoding even if the browser supports HEVC natively.
    * Useful for testing. Default: false.
@@ -60,6 +60,7 @@ export function attachHevcSupport(
     wasmUrl: config.wasmUrl,
     fps: config.fps,
     bitrate: config.bitrate,
+    workerUrl: config.workerUrl,
   });
 
   // 2. Register capabilities filter — tell dash.js to accept HEVC representations.

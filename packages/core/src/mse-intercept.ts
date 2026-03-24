@@ -9,17 +9,23 @@
 
 import { SegmentTranscoder } from "./segment-transcoder.js";
 import type { SegmentTranscoderConfig } from "./segment-transcoder.js";
+import { TranscodeWorkerClient } from "./transcode-worker-client.js";
 
 const HEVC_DETECT_RE = /hev1|hvc1/i;                // Detect HEVC in a string
 const HEVC_CODEC_RE = /hev1[^"']*|hvc1[^"']*/gi;   // Match full HEVC codec string (hev1.2.4.L123.B0)
 const H264_CODEC = "avc1.640033";                    // High Profile Level 5.1 — supports up to 4K
+
+export interface MSEInterceptConfig extends SegmentTranscoderConfig {
+  /** URL to the transcode worker script. When provided, transcoding runs off main thread. */
+  workerUrl?: string;
+}
 
 interface InterceptState {
   active: boolean;
   originalAddSourceBuffer: typeof MediaSource.prototype.addSourceBuffer;
   originalIsTypeSupported: typeof MediaSource.isTypeSupported;
   originalDecodingInfo: ((config: MediaDecodingConfiguration) => Promise<MediaCapabilitiesDecodingInfo>) | null;
-  config: SegmentTranscoderConfig;
+  config: MSEInterceptConfig;
 }
 
 let interceptState: InterceptState | null = null;
@@ -27,7 +33,7 @@ let interceptState: InterceptState | null = null;
 /**
  * Install the MSE intercept. Call before dash.js initializes.
  */
-export function installMSEIntercept(config: SegmentTranscoderConfig = {}): void {
+export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
   if (interceptState?.active) return;
 
   const originalAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
@@ -108,20 +114,38 @@ export function uninstallMSEIntercept(): void {
  */
 function createTranscodingProxy(
   realSB: SourceBuffer,
-  config: SegmentTranscoderConfig,
+  config: MSEInterceptConfig,
 ): SourceBuffer {
-  const transcoder = new SegmentTranscoder(config);
+  // Use Worker when workerUrl is provided, otherwise fall back to main thread
+  const useWorker = !!config.workerUrl;
+  let workerClient: TranscodeWorkerClient | null = null;
+  let transcoder: SegmentTranscoder | null = null;
+
   let initParsed = false;
   let initAppended = false;
   let fakeUpdating = false;
   const queue: Uint8Array[] = [];
   let processing = false;
 
-  // Init WASM decoder
-  transcoder.init().catch((err) => {
-    console.error("[hevc.js/dash] Failed to init transcoder:",
-      (err as Error)?.message ?? err, (err as Error)?.stack);
-  });
+  if (useWorker) {
+    workerClient = new TranscodeWorkerClient({
+      workerUrl: config.workerUrl!,
+      wasmUrl: config.wasmUrl,
+      fps: config.fps,
+      bitrate: config.bitrate,
+    });
+    workerClient.waitReady().then(() => {
+      console.log("[hevc.js] Worker transcoder ready");
+    }).catch((err) => {
+      console.error("[hevc.js] Worker init failed:", (err as Error)?.message ?? err);
+    });
+  } else {
+    transcoder = new SegmentTranscoder(config);
+    transcoder.init().catch((err) => {
+      console.error("[hevc.js] Main-thread transcoder init failed:",
+        (err as Error)?.message ?? err, (err as Error)?.stack);
+    });
+  }
 
   // Event listeners registered by dash.js
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
@@ -149,13 +173,16 @@ function createTranscodingProxy(
         return fakeUpdating || target.updating;
       }
 
-      // Override abort — cancel pending transcoding queue
+      // Override abort — cancel pending transcoding + reset state for seek
       if (prop === "abort") {
         return function (): void {
           queue.length = 0;
           processing = false;
           fakeUpdating = false;
-          console.log("[hevc.js] abort() — queue cleared");
+          initParsed = false;   // Next append will be a new init segment
+          initAppended = false;
+          if (workerClient) workerClient.abort();
+          console.log("[hevc.js] abort() — queue + transcoder reset");
           target.abort();
         };
       }
@@ -205,6 +232,29 @@ function createTranscodingProxy(
 
   const realAppend = realSB.appendBuffer.bind(realSB);
 
+  // Unified transcode interface — works with both Worker and main-thread
+  async function transcodeInit(segment: Uint8Array): Promise<void> {
+    if (workerClient) {
+      await workerClient.waitReady();
+      await workerClient.processInitSegment(segment);
+    } else {
+      while (!transcoder!.isInitialized) await new Promise(r => setTimeout(r, 10));
+      await transcoder!.processInitSegment(segment);
+    }
+  }
+
+  async function transcodeMedia(segment: Uint8Array): Promise<Uint8Array | null> {
+    if (workerClient) {
+      return workerClient.processMediaSegment(segment);
+    }
+    return transcoder!.processMediaSegment(segment);
+  }
+
+  function getInitResult(): { initSegment: Uint8Array; codec: string } | null {
+    if (workerClient) return workerClient.initResult;
+    return transcoder!.initResult;
+  }
+
   async function processNext(target: SourceBuffer): Promise<void> {
     if (processing) return;
     processing = true;
@@ -218,14 +268,9 @@ function createTranscodingProxy(
           await waitForUpdateEnd(target);
         }
 
-        // Wait for transcoder init
-        while (!transcoder.isInitialized) {
-          await new Promise(r => setTimeout(r, 10));
-        }
-
         if (!initParsed) {
           // Init segment: parse hvcC, extract params
-          await transcoder.processInitSegment(segment);
+          await transcodeInit(segment);
           initParsed = true;
           console.log("[hevc.js] Init segment parsed");
 
@@ -234,7 +279,6 @@ function createTranscodingProxy(
           dispatchOnProxy("update");
           dispatchOnProxy("updateend");
 
-          // If there's more in queue, set updating again
           if (queue.length > 0) {
             fakeUpdating = true;
             dispatchOnProxy("updatestart");
@@ -242,25 +286,24 @@ function createTranscodingProxy(
           continue;
         }
 
-        // Media segment: transcode
+        // Media segment: transcode (in Worker or main thread)
         console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B)...`);
-        const h264Segment = await transcoder.processMediaSegment(segment);
+        const h264Segment = await transcodeMedia(segment);
 
         // Append H.264 init segment on first successful transcode
-        if (!initAppended && transcoder.initResult) {
+        const initResult = getInitResult();
+        if (!initAppended && initResult) {
           initAppended = true;
           if (target.updating) await waitForUpdateEnd(target);
-          realAppend(transcoder.initResult.initSegment.buffer as ArrayBuffer);
+          realAppend(initResult.initSegment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
           console.log("[hevc.js] H.264 init segment appended");
         }
 
-        // Append transcoded media segment.
-        // The real SB fires updatestart/update/updateend — hls.js listens on those
-        // via the proxy's forwarded addEventListener. No synthetic events needed.
+        // Append transcoded media segment
         if (h264Segment) {
           if (target.updating) await waitForUpdateEnd(target);
-          fakeUpdating = false; // Let the real SB manage updating state from here
+          fakeUpdating = false;
           realAppend(h264Segment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
 
@@ -268,13 +311,11 @@ function createTranscodingProxy(
           const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
           console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
         } else {
-          // No data to append — signal completion ourselves
           fakeUpdating = false;
           dispatchOnProxy("update");
           dispatchOnProxy("updateend");
         }
 
-        // If more segments in queue, set updating for next round
         if (queue.length > 0) {
           fakeUpdating = true;
         }

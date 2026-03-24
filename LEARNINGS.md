@@ -364,6 +364,10 @@ Points cles :
 6. **`navigator.mediaCapabilities.decodingInfo()`** — dash.js 4.x l'utilise en priorite sur `MediaSource.isTypeSupported()`. Il faut patcher les deux.
 7. **Emscripten WASM glue** — n'est pas un ES module, `import()` echoue. Solution : charger via `<script>` tag + detecter le global `HEVCDecoderModule` dans `HEVCDecoder.create()`.
 
+8. **Web Worker pour le transcodage** — `SegmentTranscoder` tourne dans un Worker classique (pas module). Le WASM glue est charge via `importScripts()` dans le Worker. Le main thread envoie les segments via `postMessage` avec transfert zero-copy (`ArrayBuffer` transfer). Apres `abort()` (seek), le Worker detruit et recree le transcoder avec le meme config — le client reset `initParsed`/`initAppended` pour accepter un nouveau init segment.
+
+9. **`workerUrl` non passe au intercept** — bug subtil : les plugins dashjs/hlsjs passaient `wasmUrl`, `fps`, `bitrate` a `installMSEIntercept` mais oubliaient `workerUrl`. Le Worker n'etait jamais cree. Fix: inclure `workerUrl` dans l'appel.
+
 ### Architecture finale du monorepo
 
 Code partage dans `@hevcjs/core` (MSE intercept, SegmentTranscoder, demuxer mp4box.js, muxer fMP4, H264Encoder). Les plugins dashjs/hlsjs ne sont que des thin wrappers (~60 lignes chacun) qui appellent `installMSEIntercept()` + enregistrent les filtres specifiques au player.
