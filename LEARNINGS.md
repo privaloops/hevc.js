@@ -70,7 +70,51 @@ Le 4K ne beneficie pas des optimisations — possible causes :
 2. **Memory bandwidth** : le goulot 4K est probablement la bande passante memoire (lecture reference inter, ecriture prediction), pas le CPU. Nos optims reduisent le CPU mais pas les acces memoire.
 3. **WASM overhead** : le JIT V8 optimise moins bien les acces memoire indirects en 4K (plus de cache misses WASM → traps plus frequents).
 
-**Conclusion** : pour le 4K WASM, les gains viendront de la reduction des acces memoire (tile-based decode, memory pooling) ou du WASM multi-thread (SharedArrayBuffer WPP).
+**Conclusion initiale** (fausse) : on pensait que le 4K WASM etait memory-bound. Le profiling Chrome DevTools montre que c'est **CABAC-bound** (voir ci-dessous).
+
+### Profiling WASM 4K — Chrome DevTools Performance (Self Time)
+
+Build avec `--profiling-funcs` pour avoir les noms de fonctions dans le profiler Chrome.
+
+| Self Time | % | Fonction | Categorie |
+|-----------|---|----------|-----------|
+| 1321ms | 15.5% | `decode_residual_coding` | CABAC/Parsing |
+| 1195ms | 14.0% | `encode` (H.264 WebCodecs) | Pas notre code |
+| 1160ms | 13.6% | `CabacEngine::decode_decision` | CABAC |
+| 955ms | 11.2% | `apply_sao` | Filtres |
+| 492ms | 5.8% | `decode_transform_tree` | Transform |
+| 371ms | 4.3% | `CabacEngine::decode_bypass` | CABAC |
+| 348ms | 4.1% | `apply_deblocking` | Filtres |
+| 309ms | 3.6% | `interpolate_luma` | Inter |
+| 299ms | 3.5% | `copyPlane` (JS) | JS overhead |
+| 246ms | 2.9% | `perform_inter_prediction` | Inter |
+| 223ms | 2.6% | `BitstreamReader::read_bits_safe` | Bitstream |
+| 201ms | 2.4% | `interpolate_chroma` | Inter |
+| 111ms | 1.3% | `std::vector::__append` | Allocation |
+
+**Comparaison WASM vs Natif** :
+
+| Categorie | Natif | WASM | Facteur |
+|-----------|-------|------|---------|
+| CABAC | ~16% | **33%** | 2x plus couteux |
+| Filtres | ~21% | 15% | 0.7x |
+| Inter | ~31% | 9% | 0.3x |
+
+Le CABAC (branches + table lookups) est 2x plus couteux en WASM car V8 optimise mal les branches dependantes (branch prediction CPU pas exploitable via JIT). L'interpolation est paradoxalement moins couteuse car `-msimd128` auto-vectorise bien les boucles de filtre.
+
+**Pistes d'optimisation CABAC WASM** :
+1. Branchless `decode_decision` — eliminer les if/else dependants du range
+2. `read_bits_safe` (2.6%) — eliminer les bounds checks dans le hot path
+3. `apply_sao` (11.2%) — encore le plus gros filtre, optimisable
+4. `copyPlane` (3.5%) — overhead JS, potentiellement evitable avec zero-copy
+
+### Bug `|| true` dans le pre-scan SAO
+
+Le pre-check CTU pour PCM/transquant_bypass avait `if (pcmFilterDisabled || true)` — leftover de debug. Le `|| true` forcait le scan de la grille CU pour chaque CTU × 3 composantes, meme quand aucun CU n'est PCM. En 4K : 540 CTUs × 3 × 64 lookups = 103680 acces cu_at inutiles par frame.
+
+Fix : `if (pcmFilterDisabled || pps.transquant_bypass_enabled_flag)` — ne scanner que quand PCM ou bypass sont possibles dans le stream.
+
+Gain natif : +4% (4K 28→29 fps, 1080p 74→77 fps). Pas de gain WASM car le stream de test n'a ni PCM ni bypass (condition deja false).
 
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 

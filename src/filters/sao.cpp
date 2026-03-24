@@ -85,8 +85,8 @@ void apply_sao(DecodingContext& ctx) {
                 // Pre-check: does this CTU have any PCM or transquant_bypass CUs?
                 // If not, skip per-pixel cu_at() checks (common case).
                 bool ctbHasPcmOrBypass = false;
-                if (pcmFilterDisabled || true) {
-                    // Check the CU at CTU origin — fast path for uniform CTUs
+                if (pcmFilterDisabled || pps.transquant_bypass_enabled_flag) {
+                    // Only scan when PCM or transquant_bypass are possible in this stream
                     int xYctb = rx * ctbSize;
                     int yYctb = ry * ctbSize;
                     int minCb = sps.MinCbSizeY;
