@@ -339,8 +339,8 @@ Pistes pour rattraper (priorisees par le profiling) :
 
 | Resolution | Natif 1T | Natif WPP | WASM 1T | libde265 1T | libde265 WPP |
 |-----------|---------|----------|---------|------------|-------------|
-| 1080p | 77 fps | 164 fps | ~80 fps | 84 fps | 477 fps |
-| 4K | 29 fps | — | ~17 fps | 40 fps | 124 fps |
+| 1080p | 77 fps | 164 fps | ~85 fps | 84 fps | 477 fps |
+| 4K | 29 fps | — | ~18 fps | 40 fps | 124 fps |
 
 ## Phase 10 -- Multi-Slice
 
