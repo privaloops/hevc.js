@@ -34,6 +34,20 @@ Outil : `xcrun xctrace record --template "Time Profiler" --time-limit 10s`.
 4. `decode_residual_coding` a 14% est domine par les bins CABAC (decision + bypass) — peu SIMDisable mais optimisable via tables et branchless.
 5. L'ecart avec libde265 en single-thread (0.75x) correspond bien aux ~35% d'inter+filtres ou libde265 a des intrinsics manuels.
 
+### Optimisation 1 — derive_merge_mode : std::vector → tableau fixe (+6-8%)
+
+`derive_merge_mode` allouait un `std::vector<MergeCandidate>` a chaque appel pour construire la merge candidate list. Cette fonction est appelee pour chaque PU merge dans chaque frame inter — soit des milliers de fois par frame. MaxNumMergeCand <= 5 par la spec (§8.5.3.2.2), donc un tableau fixe `MergeCandidate[5]` + compteur `int numCands` suffit.
+
+**Aussi** : remplacement du z-scan (Morton code) par bit interleave branchless en 5 operations bitwise au lieu d'une boucle de 8 iterations. Utilise dans `is_pu_available` et `is_amvp_nb_available` (appelees 5+ fois par PU).
+
+**Gain mesure** : 1080p 1T 63→67 fps (+6%), 4K 1T 24→26 fps (+8%), 1080p WPP 128→136 fps (+6%).
+
+### Optimisation 2 — deblocking : acces direct aux plans via pointeur
+
+Remplacement de `pic->sample(0, x, y)` (qui recalcule `planes[c][y * stride[c] + x]` a chaque appel) par des pointeurs pre-calcules `lumaPlane + y * lumaStride + x`. Applique aux lectures decision (p0..p3, q0..q3 sur 2 lignes), lectures filtre (4 lignes), et ecritures filtre. Idem pour chroma.
+
+**Gain mesure** : marginal sur BBB (~1%), probablement plus visible sur des streams a fort Bs (beaucoup de filtrage strong). Le deblocking est a 13% du profil mais le goulot est plus dans `derive_bs` (comparaisons MV/POC) que dans les acces sample.
+
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 
 ### condition_variable + atomic : store sous le mutex (CRITICAL)
