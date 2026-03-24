@@ -82,9 +82,36 @@ void apply_sao(DecodingContext& ctx) {
                 int compH = pic->height[cIdx];
                 int stride = pic->stride[cIdx];
 
+                // Pre-check: does this CTU have any PCM or transquant_bypass CUs?
+                // If not, skip per-pixel cu_at() checks (common case).
+                bool ctbHasPcmOrBypass = false;
+                if (pcmFilterDisabled || true) {
+                    // Check the CU at CTU origin — fast path for uniform CTUs
+                    int xYctb = rx * ctbSize;
+                    int yYctb = ry * ctbSize;
+                    int minCb = sps.MinCbSizeY;
+                    int cbEnd_x = std::min(xYctb + ctbSize, (int)sps.pic_width_in_luma_samples);
+                    int cbEnd_y = std::min(yYctb + ctbSize, (int)sps.pic_height_in_luma_samples);
+                    for (int cy = yYctb; cy < cbEnd_y && !ctbHasPcmOrBypass; cy += minCb)
+                        for (int cx = xYctb; cx < cbEnd_x && !ctbHasPcmOrBypass; cx += minCb) {
+                            auto& cu = ctx.cu_at(cx, cy);
+                            if ((pcmFilterDisabled && cu.is_pcm) || cu.cu_transquant_bypass)
+                                ctbHasPcmOrBypass = true;
+                        }
+                }
+
+                // Pre-check: do we need cross-slice/tile boundary checks?
+                // Only needed if neighbors can be in a different slice/tile
+                bool needBoundaryCheck = (ctx.slice_idx != nullptr);
+
+                const uint16_t* origData = origPlane[cIdx].data();
+                uint16_t* destData = pic->planes[cIdx].data();
+
                 if (sao.sao_type_idx[cIdx] == 2) {
                     // Edge offset — §8.7.3.2
                     int eoClass = sao.sao_eo_class[cIdx];
+                    int dx0 = eo_dx[eoClass][0], dy0 = eo_dy[eoClass][0];
+                    int dx1 = eo_dx[eoClass][1], dy1 = eo_dy[eoClass][1];
 
                     for (int j = 0; j < nCtbSh; j++) {
                         int ySj = yCtb + j;
@@ -96,15 +123,17 @@ void apply_sao(DecodingContext& ctx) {
                             // §8.7.3.2: skip PCM and transquant_bypass
                             int xY = (cIdx == 0) ? xSi : xSi * subW;
                             int yY = (cIdx == 0) ? ySj : ySj * subH;
-                            auto& cu = ctx.cu_at(xY, yY);
-                            if ((pcmFilterDisabled && cu.is_pcm) || cu.cu_transquant_bypass)
-                                continue;
+                            if (ctbHasPcmOrBypass) {
+                                auto& cu = ctx.cu_at(xY, yY);
+                                if ((pcmFilterDisabled && cu.is_pcm) || cu.cu_transquant_bypass)
+                                    continue;
+                            }
 
                             // Neighbor positions
-                            int xN1 = xSi + eo_dx[eoClass][0];
-                            int yN1 = ySj + eo_dy[eoClass][0];
-                            int xN2 = xSi + eo_dx[eoClass][1];
-                            int yN2 = ySj + eo_dy[eoClass][1];
+                            int xN1 = xSi + dx0;
+                            int yN1 = ySj + dy0;
+                            int xN2 = xSi + dx1;
+                            int yN2 = ySj + dy1;
 
                             // §8.7.3.2: out-of-picture neighbors → no modification
                             if (xN1 < 0 || xN1 >= compW || yN1 < 0 || yN1 >= compH) continue;
@@ -114,7 +143,7 @@ void apply_sao(DecodingContext& ctx) {
                             // edgeIdx = 0 when neighbor is in a different slice and the
                             // relevant slice_loop_filter_across_slices_enabled_flag == 0
                             bool skipEdge = false;
-                            if (ctx.slice_idx) {
+                            if (needBoundaryCheck) {
                                 int curAddr = (yY / ctbSize) * sps.PicWidthInCtbsY + (xY / ctbSize);
                                 int si_cur = ctx.slice_idx[curAddr];
                                 for (int nk = 0; nk < 2 && !skipEdge; nk++) {
@@ -156,9 +185,9 @@ void apply_sao(DecodingContext& ctx) {
                             }
                             if (skipEdge) continue;
 
-                            int c_val = origPlane[cIdx][ySj * stride + xSi];
-                            int a = origPlane[cIdx][yN1 * stride + xN1];
-                            int b = origPlane[cIdx][yN2 * stride + xN2];
+                            int c_val = origData[ySj * stride + xSi];
+                            int a = origData[yN1 * stride + xN1];
+                            int b = origData[yN2 * stride + xN2];
 
                             // §8.7.3.2: edge index categorization
                             int edgeIdx;
@@ -170,7 +199,7 @@ void apply_sao(DecodingContext& ctx) {
 
                             int offset = sao.sao_offset_val[cIdx][edgeIdx];
                             if (offset != 0) {
-                                pic->planes[cIdx][ySj * stride + xSi] =
+                                destData[ySj * stride + xSi] =
                                     static_cast<uint16_t>(Clip3(0, maxVal, c_val + offset));
                             }
                         }
@@ -187,19 +216,21 @@ void apply_sao(DecodingContext& ctx) {
                             int xSi = xCtb + i;
                             if (xSi >= compW) break;
 
-                            int xY = (cIdx == 0) ? xSi : xSi * subW;
-                            int yY = (cIdx == 0) ? ySj : ySj * subH;
-                            auto& cu = ctx.cu_at(xY, yY);
-                            if ((pcmFilterDisabled && cu.is_pcm) || cu.cu_transquant_bypass)
-                                continue;
+                            if (ctbHasPcmOrBypass) {
+                                int xY = (cIdx == 0) ? xSi : xSi * subW;
+                                int yY = (cIdx == 0) ? ySj : ySj * subH;
+                                auto& cu = ctx.cu_at(xY, yY);
+                                if ((pcmFilterDisabled && cu.is_pcm) || cu.cu_transquant_bypass)
+                                    continue;
+                            }
 
-                            int sample = origPlane[cIdx][ySj * stride + xSi];
+                            int sample = origData[ySj * stride + xSi];
                             int band = sample >> bandShift;
                             int bandIdx = band - bandPos;
                             if (bandIdx >= 0 && bandIdx < 4) {
                                 int offset = sao.sao_offset_val[cIdx][bandIdx];
                                 if (offset != 0) {
-                                    pic->planes[cIdx][ySj * stride + xSi] =
+                                    destData[ySj * stride + xSi] =
                                         static_cast<uint16_t>(Clip3(0, maxVal, sample + offset));
                                 }
                             }
