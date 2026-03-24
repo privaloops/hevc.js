@@ -390,10 +390,12 @@ void apply_deblocking(DecodingContext& ctx) {
                     if (x >= picW || y >= picH) continue;
 
                     // Check if there's an edge here
-                    if (!has_edge(ctx, x, y, edgeType)) continue;
+                    bool hasE = has_edge(ctx, x, y, edgeType);
+                    if (!hasE) continue;
 
                     // Check boundary exclusions
-                    if (is_boundary_excluded(ctx, x, y, edgeType)) continue;
+                    bool excl = is_boundary_excluded(ctx, x, y, edgeType);
+                    if (excl) continue;
 
                     // Derive Bs
                     int xP, yP, xQ, yQ;

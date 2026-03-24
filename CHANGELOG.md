@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **AMVP prediction block availability (§6.4.2)**: `is_amvp_nb_available` used z-scan order (§6.4.1) for ALL neighbors, including those within the same coding block. Per §6.4.2, intra-CU neighbors are always available (no z-scan needed, except NxN partition exclusion). Additionally, `pred_mode` was only stored in the CU grid AFTER all PUs were processed, so the 2nd PU of a multi-PU CU saw the previous frame's `pred_mode` (INTRA) for same-CU neighbors, causing AMVP to fall back to zero-MV padding. Fixes BBB 1080p P/B frames (4517→0 Y diffs at frame 1).
 - **WPP substream seek (§7.3.8.1)**: BitstreamReader was never repositioned at WPP row boundaries, causing crash (`read past end`) at CTU 899 on BBB 1080p. Now computes absolute RBSP positions from `entry_point_offset_minus1` and seeks to correct substream start.
 - **EP byte accounting in entry_point_offsets (§7.4.7.1)**: entry_point_offsets count emulation prevention bytes, but substream positions were computed in RBSP space (EP bytes removed). Added `coded_to_rbsp_offset` conversion using tracked EP byte positions from `extract_rbsp`.
 - **QP derivation uses QG coordinates (§8.6.1)**: `derive_qp_y` was using CU coordinates `(xCb, yCb)` for neighbor QP prediction instead of quantization group coordinates `(xQg, yQg)`. Caused systematic QP errors (+4 to -4) on streams with `cu_qp_delta_enabled_flag`.
