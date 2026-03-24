@@ -1,5 +1,43 @@
 # Learnings
 
+## Session 2026-03-24 — Phase 9B Thread Pool WPP
+
+### condition_variable + atomic : store sous le mutex (CRITICAL)
+
+**Pattern fautif** :
+```cpp
+// Thread A (signaleur)
+completed_col[row].store(col, std::memory_order_release);  // sans lock
+row_cv[row].notify_all();
+
+// Thread B (waiter)
+std::unique_lock<std::mutex> lock(row_mutex[row]);
+row_cv[row].wait(lock, [&] {
+    return completed_col[row].load(std::memory_order_acquire) >= needed;
+});
+```
+
+**Le bug** : `condition_variable::wait(lock, pred)` fait `while(!pred()) { unlock; sleep; lock; }`. Entre `!pred()` (retourne true car l'atomic n'est pas encore mis à jour) et `sleep` (le thread relâche le mutex et s'endort), le signaleur peut faire `store` + `notify_all`. Le `notify_all` arrive quand le waiter n'est pas encore endormi → signal perdu. Le waiter s'endort → deadlock permanent.
+
+**Fix** : stocker la valeur **sous le lock** avant de notify :
+```cpp
+{
+    std::lock_guard<std::mutex> lock(row_mutex[row]);
+    completed_col[row].store(col, std::memory_order_release);
+}
+row_cv[row].notify_all();
+```
+
+Cela garantit que le `store` est visible au waiter quand il re-vérifie le predicate après le `notify`. Le `lock_guard` empêche le signaleur de passer entre le check du predicate et le sleep du waiter.
+
+**Symptôme** : deadlock intermittent, apparaît seulement sur des streams longs (120 frames 1080p = 34 rows × 120 frames = 4080 synchronisations, probabilité ~1% par sync). Les streams courts (50 frames) passaient systématiquement.
+
+### Thread pool vs thread-per-row : gain modeste (HIGH)
+
+Le passage de thread-per-row à thread pool persistant donne +29% sur 1080p WPP (99→128 fps). Le gain vient principalement de l'élimination de la création/destruction de 34 `std::thread` par frame (4080 créations pour 120 frames). Le remplacement du spin-wait par des `condition_variable` a un impact moindre mais libère du CPU pour les workers.
+
+L'écart avec libde265 (128 vs 477 fps WPP 1080p, ratio 0.27x) est principalement dû au single-thread (63 vs 84 fps, ratio 0.75x). libde265 utilise des SIMD intrinsics NEON/SSE manuels pour les hotpaths (interpolation 8-tap, transform butterfly, deblocking). L'auto-vectorisation Clang ne couvre pas ces patterns complexes. Le scaling WPP (2.03x pour nous vs 5.7x pour libde265) suggère aussi que libde265 a une synchronisation plus légère ou un meilleur overlapping entre rows.
+
 ## Session 2025-03-20 — Phase 4 Intra debugging
 
 ### sig_coeff_flag chroma context offset (CRITICAL)

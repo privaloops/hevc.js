@@ -29,6 +29,7 @@ add_library(hevc-decode-lib
     src/bitstream/bitstream_reader.cpp
     src/bitstream/nal_parser.cpp
     src/common/picture.cpp
+    src/common/thread_pool.cpp
     src/syntax/profile_tier_level.cpp
     src/syntax/vps.cpp
     src/syntax/sps.cpp

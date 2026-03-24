@@ -157,6 +157,11 @@ Sous-étapes :
 5. **Memory** : Réduire les allocations, pool allocators, zero-copy où possible
 6. **Benchmarks** : Suite de benchmarks reproductibles, tracking des régressions
 
+**Fait** :
+- 9.1 Quick wins : interior PU interp, stack buffers, SAO persistent, SIMD auto-vec (+44% WASM)
+- 9.2 WPP V1 (thread-per-row) → V2 (thread pool + condvar) : 1080p 128 fps, 4K 31 fps
+- Ecart vs libde265 : 0.27x WPP 1080p, 0.25x WPP 4K — le goulot est single-thread (SIMD intrinsics)
+
 **Critère de sortie** : Décoder du 1080p@30 en temps réel dans un navigateur. 4K@60 comme objectif stretch.
 
 ### Phase 10 — Multi-Slice (`docs/phases/phase-10-multi-slice.md`)
