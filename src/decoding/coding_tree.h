@@ -44,9 +44,12 @@ struct DecodingContext {
     int cu_info_stride = 0;       // = PicWidthInMinCbsY
 
     // QP tracking
-    int QpY_prev = 0;            // QP of previous CU in coding order
+    int QpY_prev = 0;            // QP of last CU in previous QG (§8.6.1)
+    int QpY_prev_qg = 0;         // Saved QpY_prev at QG boundary start
     bool IsCuQpDeltaCoded = false;
     int CuQpDeltaVal = 0;
+    int cu_x0 = 0;              // Current CU position for §8.6.1 QP derivation in TU
+    int cu_y0 = 0;
 
     // Intra mode storage per PU (for neighbour MPM derivation)
     // Indexed like cu_info but at PU granularity

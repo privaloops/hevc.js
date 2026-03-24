@@ -273,7 +273,78 @@ La spec §8.6.1 dit que les predicteurs QP (qPY_A, qPY_B) sont lus aux positions
 
 La spec §8.6.1 dit explicitement : "qPY_PREV is set equal to SliceQpY when the current quantization group is the first quantization group in a CTB row of a tile and entropy_coding_sync_enabled_flag is equal to 1". Facile a oublier car le texte est noye dans une liste de conditions. Meme reset requis pour les frontieres de tiles.
 
+## Session 2026-03-23 — QP derivation cu_qp_delta + SAO cross-slice
+
+### qPY_PREV scope (CRITICAL)
+
+La spec §8.6.1 definit `qPY_PREV` comme "the QpY of the last CU in the **previous quantization group**". Notre code mettait a jour `QpY_prev` apres chaque CU, ce qui double-comptait le `CuQpDeltaVal` quand les voisins A/B retombaient sur `QpY_prev` (hors du CTB courant). Introduit `QpY_prev_qg` sauvegarde au debut de chaque QG. Corrige le decode catastrophique BBB 4K (12M diffs → <2K).
+
+### derive_qp_y shortcut removal
+
+Le shortcut `if (!IsCuQpDeltaCoded) return QpY_prev` semblait correct mais ne l'est pas : la spec ne fait pas ce raccourci. Meme quand `CuQpDeltaVal=0`, le `qPY_PRED` doit etre calcule avec les voisins A/B (qui peuvent etre dans le meme CTB et avoir un QP different de `QpY_prev`). Visible uniquement avec `diff_cu_qp_delta_depth > 0` (QG < CTB).
+
+### SAO cross-slice boundary (§8.7.3.2)
+
+Le SAO edge offset doit verifier si les voisins sont dans un slice different quand `slice_loop_filter_across_slices_enabled_flag == 0`. La logique spec est asymetrique : si le voisin est dans un slice anterieur (Z-scan), on verifie le flag du slice courant ; si dans un slice posterieur, on verifie le flag du voisin. Invisible sur les streams single-slice.
+
 ### Bugs restants identifies
 
-- **Deblocking ±1** : 10 pixels a ±1 a la frontiere CTB y=32 sur BBB 1080p. Le filtre fort ne s'applique pas alors qu'il devrait. A investiguer.
-- **QP ±2 ARTE** : erreur QP residuelle sur le stream ARTE (CTB=64). Probablement lie a la meme famille de bugs QP derivation. A investiguer.
+- **~~Deblocking P/B cu_qp_delta~~** : RESOLU — le vrai bug etait AMVP §6.4.2, pas le deblocking (voir session 2026-03-24).
+
+## Session 2026-03-24 — Fix AMVP prediction block availability (§6.4.2)
+
+### §6.4.1 (z-scan) vs §6.4.2 (prediction block) — deux niveaux d'availability (CRITICAL)
+
+La spec definit DEUX processus d'availability :
+- **§6.4.1** : z-scan order block availability — verifie que le voisin a ete decode en z-scan order dans le CTB courant (ou dans un CTB precedent).
+- **§6.4.2** : prediction block availability — wraps §6.4.1 mais ajoute une exception **sameCb** : si le voisin est dans le meme coding block, il est toujours disponible (sauf NxN partIdx=1 exception). Pas de z-scan check.
+
+L'AMVP et le merge utilisent §6.4.2, pas §6.4.1 directement. Notre code utilisait §6.4.1 partout.
+
+**Consequence** : pour un CU 32x32 PART_Nx2N, le PU 1 (NE quadrant, z-scan ~16) cherche le voisin A1 dans le PU 0 (SW quadrant, z-scan ~47). Z-scan dit "non disponible" (47 > 16). §6.4.2 dit "disponible" (meme CU). Resultat : l'AMVP du PU 1 ne trouvait pas le candidat A → `isScaledFlagLX=0` → B copie vers A → A==B → pruning → padding zero-MV → MVP faux → MV faux.
+
+**Piege additionnel** : le `pred_mode` du CU n'etait pas ecrit dans la grille avant le traitement des PUs. Le voisin A1 (meme CU, PU 0) avait encore `MODE_INTRA` du frame I precedent → `is_amvp_nb_available` rejetait le voisin au check "must not be intra". Double erreur.
+
+**Comparaison libde265** : libde265 `available_pred_blk()` (image.cc:810) fait exactement ce que dit §6.4.2 :
+```cpp
+if (!sameCb) { availableN = available_zscan(xP,yP,xN,yN); }
+else { availableN = !(NxN && partIdx==1 && in_third_quadrant); }
+```
+
+**Attention merge** : appliquer le meme fix a `is_pu_available` (merge) sans stocker `part_mode` tot cause une regression massive (128K diffs). Cause : `derive_spatial_merge_candidates` lit `ctx.cu_at(xPb, yPb).part_mode` pour les exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1), mais `part_mode` n'est ecrit dans la grille qu'apres TOUS les PUs (ligne 794). Quand le fix rend les voisins sameCb disponibles, les exclusions utilisent un `part_mode` stale → mauvaises exclusions → regression. Le fix correct necessite les DEUX changements simultanes : `is_pu_available` + ecriture anticipee de `part_mode`. Voir session 2026-03-24b.
+
+### oracle_compare.py height mismatch (MEDIUM)
+
+La commande de repro dans le BACKLOG utilisait `h=1088` (pic_height_in_luma_samples) au lieu de `h=1080` (display height apres conformance window crop). Les deux decodeurs (notre + ffmpeg) outputtent `1920x1080`. Consequence : les positions des pixels faux etaient decalees (CTB row misaligned), et l'analyse pointait vers (311,243) au lieu de (311,255).
+
+**Regle** : toujours verifier la taille du fichier YUV output avant d'utiliser oracle_compare. `file_size / (w * h * 1.5)` doit etre un entier.
+
+### Bugs #20
+
+20. **AMVP §6.4.2 + early pred_mode** — `is_amvp_nb_available` utilisait z-scan (§6.4.1) au lieu de §6.4.2 pour les voisins intra-CU + `pred_mode` stocke trop tard dans le CU grid. Causait 4517 diffs Y frame 1 BBB 1080p (max_diff=88). Fix: check `sameCb` dans AMVP + ecriture pred_mode avant PUs.
+
+## Session 2026-03-24b — Fix merge candidate availability §6.4.2 (128/128 tests!)
+
+### Merge `is_pu_available` — deux bugs correles (CRITICAL)
+
+Le meme pattern que le bug AMVP (#20), mais avec une subtilite supplementaire qui causait la regression du fix naif.
+
+**Bug 1 — `is_pu_available` z-scan avant sameCb** : identique au bug AMVP. La fonction appliquait §6.4.1 (z-scan) avant de verifier sameCb. §6.4.2 dit explicitement : si sameCb, ne PAS invoquer §6.4.1. Restructure pour matcher `is_amvp_nb_available`.
+
+**Bug 2 — `part_mode` non stocke tot** : `derive_spatial_merge_candidates` lit `ctx.cu_at(xPb, yPb).part_mode` (ligne 265) pour les exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1, PART_2NxN partIdx=1 → skip B1). Mais `part_mode` n'etait ecrit dans la grille qu'a la ligne 794 de `coding_tree.cpp`, APRES tous les PUs. Pour partIdx=1, la grille contenait le `part_mode` du CU precedent → exclusions incorrectes.
+
+**Pourquoi le fix naif regressait** : sans l'ecriture anticipee de `part_mode`, le fix de `is_pu_available` rendait les voisins sameCb disponibles, mais les exclusions utilisaient un `part_mode` stale. Par exemple, si le CU precedent avait `PART_2Nx2N` et le CU courant a `PART_Nx2N`, l'exclusion A1 ne se declenchait pas → candidat merge faux → MV faux → 128K diffs.
+
+**Fix** : deux changements simultanes :
+1. `coding_tree.cpp` : ecriture anticipee de `part_mode` dans la grille CU, a cote de l'ecriture anticipee de `pred_mode` (avant le traitement des PUs)
+2. `inter_prediction.cpp` : restructuration de `is_pu_available` pour checker sameCb avant z-scan (identique a `is_amvp_nb_available`)
+
+**Lecon** : quand un fix "naif" cause une regression, la cause n'est souvent PAS le fix lui-meme mais un bug latent correle. Le z-scan check incorrect masquait le bug de `part_mode` stale — les deux bugs se compensaient. La regression du fix naif etait le signal qu'un deuxieme bug existait, pas que le fix etait faux.
+
+### Bugs #21
+
+21. **Merge §6.4.2 + early part_mode** — `is_pu_available` utilisait z-scan (§6.4.1) avant sameCb + `part_mode` stocke trop tard pour les exclusions merge. Causait 4677 diffs frames 18-23 BBB 1080p (max_diff=49). Fix: check sameCb dans merge + ecriture part_mode avant PUs.
+
+### Milestone atteint
+
+**128/128 tests pixel-perfect** — tous les bitstreams de test passent. Le decodeur est conforme Main profile + Main 10 sur l'integralite des tests (toy, conformance, oracle, real-world BBB 1080p/4K).

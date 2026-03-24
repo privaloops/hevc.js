@@ -11,11 +11,11 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | **Termine** | 11/14 tests phase6 pass. 3 echecs (bbb1080, bbb4k, xslice_256) = deblocking ±1 + QP residuel sur 1080p+. |
+| 6 — Loop Filters | **Termine** | 14/14 tests phase6 pass. BBB 1080p + BBB 4K pixel-perfect. 128/128 tests. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
-| 10 — Multi-Slice | **En cours** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking. I-frame pixel-perfect. 5 diffs chroma B-frame restants. |
+| 10 — Multi-Slice | **Termine** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking + SAO. conf_b_xslice_256 pixel-perfect. |
 
 ## Phase 1 — Terminee
 
@@ -152,19 +152,50 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
 - [x] EP byte accounting dans entry_point_offsets (§7.4.7.1)
 - [x] QP derivation avec coordonnees QG au lieu de CU (§8.6.1)
 - [x] WPP/tile QpY_prev reset a SliceQpY (§8.6.1)
-- [ ] Deblocking ±1 a la frontiere CTB y=32 BBB 1080p (filtre fort non applique)
-  - 10 pixels a ±1 dans le frame 0 I-frame, y=30-31 autour de x=178-195
-  - La frontiere horizontale deblocking a y=32 (CTB boundary) devrait appliquer le filtre fort (dE=2) mais ne filtre rien (dE=0 ou Bs=0)
-  - HM modifie p0-p2/q0-q2 (y=29-34), notre filtre ne touche aucun pixel
-  - L'erreur se propage via inter prediction dans tous les frames suivants
-  - Comparer avec HM : beta/tC/Bs/dSam pour cette edge specifique
-- [ ] QP ±2 residuel sur stream ARTE CTB=64
-  - Stream ARTE : Main profile 8-bit, CTB=64, WPP, cu_qp_delta_enabled_flag=1
-  - Premier pixel faux a (76,44) diff=-2 dans le frame 0 I-frame (CTU 1, CU a (64,32))
-  - 75% des pixels ont diff=+2 (offset DC systematique)
-  - CTU colonne 0 est entierement correct, l'erreur commence au CTU 1
-  - Probablement meme famille que le bug QP derivation fixe (§8.6.1) mais avec CTB=64 le QG sizing est different
-  - Tester en natif : `ffmpeg -i <arte_hls> -c:v copy -bsf:v hevc_mp4toannexb -an /tmp/arte.265` puis `./build/hevc-decode /tmp/arte.265 -o /tmp/arte.yuv`
+- [x] QP derivation : retrait du shortcut `!IsCuQpDeltaCoded → QpY_prev` (§8.6.1)
+- [x] QpY_prev_qg : qPY_PREV sauvegarde au debut de chaque QG, pas mis a jour dans le QG (§8.6.1)
+  - Fixe le decode catastrophique des streams cu_qp_delta_enabled (BBB 4K : 12M→<2K diffs)
+  - Fixe aussi le bug ARTE CTB=64 (meme famille)
+- [x] SAO cross-slice boundary check (§8.7.3.2) — verifie slice_loop_filter_across_slices_enabled_flag
+- [x] **part_mode binarisation inter CU a MinCbLog2SizeY==3** (§9.3.3.7 Table 9-45)
+  - Binarisation ne distinguait pas log2CbSize==3 (2 bins: 01=2NxN, 00=Nx2N) de log2CbSize>3 (3 bins: 01=2NxN, 001=Nx2N, 000=NxN)
+  - Lisait un bin CABAC excedentaire → desync pour tout le CTU
+  - **Fix** : `syntax_elements.cpp:40-46` — branche conditionnelle sur `log2CbSize > 3`
+  - **Resultat** : BBB 4K passe pixel-perfect (etait 1782 diffs)
+- [x] **AMVP prediction block availability §6.4.2 — BBB 1080p P/B frames** (§8.5.3.2.7 / §6.4.2)
+  - **Symptome initial** : I-frames pixel-perfect, P/B frame 1 = 4517 diffs Y (max_diff=88). Erreurs se propagent via inter prediction aux frames suivantes.
+  - **BBB 1080p** (CTB=32, QG=8x8, WPP, 60x34 CTUs) : frame 0 OK, frame 1 debut des erreurs.
+  - **Cause racine** : deux bugs lies dans la derivation AMVP (§8.5.3.2.7) :
+    1. **`is_amvp_nb_available` utilisait §6.4.1 (z-scan) au lieu de §6.4.2** pour les voisins intra-CU.
+       La spec §6.4.2 dit que les voisins dans le meme coding block sont toujours disponibles (sauf NxN partIdx=1 exception).
+       Notre code appliquait le z-scan check meme pour les voisins intra-CU. Consequence : pour un CU 32x32 PART_Nx2N,
+       le voisin A1 du PU 1 (dans la moitie SW du CTB, z-scan > NE) etait marque indisponible → le candidat AMVP
+       tombait sur la copie B→A (§8.5.3.2.7 step 4 quand isScaledFlagLX=0), produisant A==B → pruning → padding zero-MV
+       → MVP[1]=(0,0) au lieu de (2,2) → MV final (1,-1) au lieu de (3,1).
+    2. **`pred_mode` ecrit dans la grille CU trop tard**. Le `pred_mode` n'etait stocke dans `cu_info[]` qu'APRES
+       tous les PUs du CU. Consequence : quand le PU 1 cherchait le pred_mode du voisin A1 (meme CU, PU 0),
+       il trouvait `MODE_INTRA` du frame precedent (I-frame) → `is_amvp_nb_available` retournait false
+       (check "must not be intra" en fin de fonction).
+  - **Fix** (`inter_prediction.cpp`, `coding_tree.cpp`) :
+    1. `is_amvp_nb_available` : ajout du check `sameCb` (§6.4.2) avant le z-scan. Si le voisin est dans le meme CU, skip z-scan, seulement verifier l'exception NxN.
+    2. `decode_coding_unit` : ecriture anticipee de `pred_mode` dans `cu_info[]` des que `pred_mode_flag` est parse, AVANT le traitement des PUs.
+  - **Resultat** : BBB 1080p frame 1 passe de 4517 diffs Y (max_diff=88) a **0 diffs** (pixel-perfect vs HM).
+  - **Verification** : comparaison triple HM / ffmpeg / notre decodeur — HM et ffmpeg matchent a 0 diffs, notre decodeur matche HM a 0 diffs pour frame 0 et frame 1.
+  - **Diagnostic detaille (avant fix)** :
+    - Premier pixel faux reel : **(311, 255)** dans CTB(9,7) a (288,224) — la position (311,243) du backlog precedent etait fausse (oracle_compare utilisait h=1088 au lieu de h=1080).
+    - L'erreur etait pre-deblocking, pre-SAO. Le deblocking ne filtrait pas ces pixels (bS=0 correct).
+    - L'erreur se propageait via SAO : la mauvaise prediction a (319,256) dans le CTB voisin (MV=(1,-1) au lieu de (3,1)) causait une mauvaise classification SAO edge offset au pixel (319,255), appliquant +4 au lieu de 0.
+    - Confirme par calcul manuel d'interpolation : MV=(2,2) donne 84 (correct), MV=(3,1) donne 65 (match HM).
+  - **Note** : la meme fonction `is_pu_available` (merge candidates) a le meme pattern z-scan-before-sameCb, mais appliquer le meme fix regresse les tests (128K diffs). L'exclusion merge pour PART_Nx2N partIdx=1 est geree separement dans `derive_spatial_merge_candidates` ligne 279 et depend du z-scan rejectant les voisins SW. A investiguer.
+- [x] **BBB 1080p residuel frame 2+ — 29 diffs Y (max_diff=1)** (residuel post-fix AMVP)
+  - **Cause racine** : `perform_dequant` (transform.cpp) utilisait `cu_at(0,0)` au lieu de `cu_at(x0,y0)` pour determiner le pred_mode lors du choix de la matrice de scaling list. Pour un CU intra dans une frame inter, la mauvaise matrice (inter au lieu d'intra) etait selectionnee, causant un dequant scale legerement faux.
+  - **Fix** : `transform.cpp` — utiliser `cu_at(x0, y0).pred_mode` (spec §8.6.3 : `CuPredMode[xTbY][yTbY]`).
+  - **Resultat** : frames 0-17 pixel-perfect (18 frames corrigees). 125/126 tests passent.
+- [x] **BBB 1080p frame 18+ — merge candidate `is_pu_available` §6.4.2** (RESOLU)
+  - **Symptome** : frames 18-23 (GOP 2, poc 6+) : 4677 diffs, max_diff=49. Erreurs concentrees bord droit (X=1726-1919, Y=0-79).
+  - **Cause racine** : deux bugs correles — (1) `is_pu_available` appliquait z-scan (§6.4.1) avant sameCb, violant §6.4.2. (2) `part_mode` n'etait pas stocke tot dans la grille CU, causant des exclusions merge incorrectes pour partIdx=1.
+  - **Fix** : ecriture anticipee de `part_mode` dans `coding_tree.cpp` + restructuration de `is_pu_available` pour checker sameCb avant z-scan.
+  - **Resultat** : 128/128 tests pixel-perfect.
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
@@ -289,16 +320,17 @@ Voir `docs/phases/phase-10-multi-slice.md` pour le plan detaille.
 - [x] Remplacer check `addr < sh.slice_segment_address` par `slice_idx[p] != slice_idx[q]`
 - [x] Gerer `slice_loop_filter_across_slices_enabled_flag` per-slice (cote Q)
 - [x] Gerer `slice_beta_offset_div2` / `slice_tc_offset_div2` per-slice (via sh_at_ctb)
-- [ ] `conf_b_xslice_256` pixel-perfect — **5 chroma diffs restants (max_diff=1)**
+- [x] `conf_b_xslice_256` pixel-perfect — SAO cross-slice boundary fix (§8.7.3.2)
 
-### 10.5 -- Cross-Slice SAO (PARTIEL)
+### 10.5 -- Cross-Slice SAO (FAIT)
 - [x] Verifier parsing SAO merge (leftCtbInSliceSeg / upCtbInSliceSeg) avec boucle multi-slice
-- [ ] 5 diffs chroma Cb (max_diff=1) au bord de slice (y_chroma=32/63) — probablement deblocking chroma edge case
-- [ ] `oracle_bbb1080_50f` + `oracle_bbb4k_25f` — **bugs pre-existants** (crash 1080p, decode incorrect 4K), non lies au multi-slice
+- [x] SAO cross-slice boundary check (§8.7.3.2) — fixe les 5 diffs chroma
+- [x] `oracle_bbb1080_50f` / `oracle_bbb4k_25f` — I-frames pixel-perfect apres fix QP derivation. P/B frames : voir bug deblocking cu_qp_delta dans Phase 6.
 
 ### Bugs identifies (non multi-slice)
-- [ ] `oracle_bbb1080_50f` crash (BitstreamReader read past end) — bug pre-existant, present avant le multi-slice
-- [ ] `oracle_bbb4k_25f` decode incorrect (12M pixels diff, PSNR 5dB) — bug pre-existant
+- [x] QP derivation cu_qp_delta (§8.6.1) — shortcut `!IsCuQpDeltaCoded` et QpY_prev_qg
+- [x] AMVP prediction block availability §6.4.2 — voir description detaillee dans Phase 6 Bug fixes
+- [x] BBB 1080p residuel frame 2+ (29 diffs, max_diff=1) — fixe par scaling list pred_mode lookup §8.6.3
 
 ## Taches transverses
 

@@ -290,7 +290,7 @@ static void inverse_transform_2d(int log2TrafoSize, bool use_dst,
 // Dequantization (§8.6.3)
 // ============================================================
 
-void perform_dequant(DecodingContext& ctx, int /*x0*/, int /*y0*/,
+void perform_dequant(DecodingContext& ctx, int x0, int y0,
                      int log2TrafoSize, int cIdx, int qp,
                      const int16_t* coefficients, int16_t* scaled) {
     int trSize = 1 << log2TrafoSize;
@@ -329,10 +329,11 @@ void perform_dequant(DecodingContext& ctx, int /*x0*/, int /*y0*/,
                 int matrixId;
                 if (sizeId < 3) {
                     matrixId = (cIdx == 0) ? 0 : (cIdx == 1 ? 1 : 2);
-                    if (ctx.cu_at(0, 0).pred_mode != PredMode::MODE_INTRA)
+                    // §8.6.3: CuPredMode[xTbY][yTbY] — use current CU, not (0,0)
+                    if (ctx.cu_at(x0, y0).pred_mode != PredMode::MODE_INTRA)
                         matrixId += 3;
                 } else {
-                    matrixId = (ctx.cu_at(0, 0).pred_mode == PredMode::MODE_INTRA) ? 0 : 3;
+                    matrixId = (ctx.cu_at(x0, y0).pred_mode == PredMode::MODE_INTRA) ? 0 : 3;
                 }
 
                 const auto& sl = ctx.pps->pps_scaling_list_data_present_flag ?

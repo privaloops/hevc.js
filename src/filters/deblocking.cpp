@@ -390,10 +390,12 @@ void apply_deblocking(DecodingContext& ctx) {
                     if (x >= picW || y >= picH) continue;
 
                     // Check if there's an edge here
-                    if (!has_edge(ctx, x, y, edgeType)) continue;
+                    bool hasE = has_edge(ctx, x, y, edgeType);
+                    if (!hasE) continue;
 
                     // Check boundary exclusions
-                    if (is_boundary_excluded(ctx, x, y, edgeType)) continue;
+                    bool excl = is_boundary_excluded(ctx, x, y, edgeType);
+                    if (excl) continue;
 
                     // Derive Bs
                     int xP, yP, xQ, yQ;
@@ -418,6 +420,7 @@ void apply_deblocking(DecodingContext& ctx) {
                     int addrQ = (yQ / ctbSizeF) * sps.PicWidthInCtbsY + (xQ / ctbSizeF);
                     auto& sh_filt = ctx.sh_at_ctb(addrQ);
 
+
                     // ---- LUMA ----
                     {
                         int QpP = cuP.qp_y;
@@ -431,6 +434,7 @@ void apply_deblocking(DecodingContext& ctx) {
                         int Q_tc = Clip3(0, 53, qPL + 2*(bS - 1) + (sh_filt.slice_tc_offset_div2 << 1));
                         int tcPrime = tc_table[Q_tc];
                         int tC = tcPrime * (1 << (bitDepthY - 8)); // eq 8-351
+
 
                         // Decision process — §8.7.2.5.3
                         // Read p0..p3 and q0..q3 for lines k=0 and k=3
