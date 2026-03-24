@@ -289,4 +289,36 @@ Le SAO edge offset doit verifier si les voisins sont dans un slice different qua
 
 ### Bugs restants identifies
 
-- **Deblocking P/B cu_qp_delta** : erreurs residuelles dans P/B frames avec cu_qp_delta_enabled (~5K diffs frame 1 BBB 1080p, <2K BBB 4K). I-frames pixel-perfect. Propagation via inter prediction.
+- **~~Deblocking P/B cu_qp_delta~~** : RESOLU — le vrai bug etait AMVP §6.4.2, pas le deblocking (voir session 2026-03-24).
+
+## Session 2026-03-24 — Fix AMVP prediction block availability (§6.4.2)
+
+### §6.4.1 (z-scan) vs §6.4.2 (prediction block) — deux niveaux d'availability (CRITICAL)
+
+La spec definit DEUX processus d'availability :
+- **§6.4.1** : z-scan order block availability — verifie que le voisin a ete decode en z-scan order dans le CTB courant (ou dans un CTB precedent).
+- **§6.4.2** : prediction block availability — wraps §6.4.1 mais ajoute une exception **sameCb** : si le voisin est dans le meme coding block, il est toujours disponible (sauf NxN partIdx=1 exception). Pas de z-scan check.
+
+L'AMVP et le merge utilisent §6.4.2, pas §6.4.1 directement. Notre code utilisait §6.4.1 partout.
+
+**Consequence** : pour un CU 32x32 PART_Nx2N, le PU 1 (NE quadrant, z-scan ~16) cherche le voisin A1 dans le PU 0 (SW quadrant, z-scan ~47). Z-scan dit "non disponible" (47 > 16). §6.4.2 dit "disponible" (meme CU). Resultat : l'AMVP du PU 1 ne trouvait pas le candidat A → `isScaledFlagLX=0` → B copie vers A → A==B → pruning → padding zero-MV → MVP faux → MV faux.
+
+**Piege additionnel** : le `pred_mode` du CU n'etait pas ecrit dans la grille avant le traitement des PUs. Le voisin A1 (meme CU, PU 0) avait encore `MODE_INTRA` du frame I precedent → `is_amvp_nb_available` rejetait le voisin au check "must not be intra". Double erreur.
+
+**Comparaison libde265** : libde265 `available_pred_blk()` (image.cc:810) fait exactement ce que dit §6.4.2 :
+```cpp
+if (!sameCb) { availableN = available_zscan(xP,yP,xN,yN); }
+else { availableN = !(NxN && partIdx==1 && in_third_quadrant); }
+```
+
+**Attention merge** : appliquer le meme fix a `is_pu_available` (merge) cause une regression massive (128K diffs). La raison est que `derive_spatial_merge_candidates` a des exclusions partition-specifiques (PART_Nx2N partIdx=1 → skip A1) qui dependent du fait que `is_pu_available` rejette les voisins SW via z-scan. Ces deux logiques sont couplees. Ne pas toucher `is_pu_available` sans un audit complet du merge.
+
+### oracle_compare.py height mismatch (MEDIUM)
+
+La commande de repro dans le BACKLOG utilisait `h=1088` (pic_height_in_luma_samples) au lieu de `h=1080` (display height apres conformance window crop). Les deux decodeurs (notre + ffmpeg) outputtent `1920x1080`. Consequence : les positions des pixels faux etaient decalees (CTB row misaligned), et l'analyse pointait vers (311,243) au lieu de (311,255).
+
+**Regle** : toujours verifier la taille du fichier YUV output avant d'utiliser oracle_compare. `file_size / (w * h * 1.5)` doit etre un entier.
+
+### Bugs #20
+
+20. **AMVP §6.4.2 + early pred_mode** — `is_amvp_nb_available` utilisait z-scan (§6.4.1) au lieu de §6.4.2 pour les voisins intra-CU + `pred_mode` stocke trop tard dans le CU grid. Causait 4517 diffs Y frame 1 BBB 1080p (max_diff=88). Fix: check `sameCb` dans AMVP + ecriture pred_mode avant PUs.
