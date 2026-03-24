@@ -12,67 +12,68 @@ namespace hevc {
 // Scan order generation
 // ============================================================
 
-// Get scan order for sub-block positions within a TU
-// scanIdx: 0=diagonal, 1=horizontal, 2=vertical
-static void get_sub_block_scan(int log2TrafoSize, int scanIdx,
-                                int numSubBlocks, int sbScan[][2]) {
-    int sbSize = (1 << log2TrafoSize) >> 2; // number of 4x4 sub-blocks per side
+// Pre-computed horizontal/vertical sub-block scan tables
+// (diagonal scans are in cabac_tables.h: diag_scan_2x2, 4x4, 8x8)
+static const uint8_t horiz_sb_2x2[4][2] = {{0,0},{1,0},{0,1},{1,1}};
+static const uint8_t horiz_sb_4x4[16][2] = {
+    {0,0},{1,0},{2,0},{3,0},{0,1},{1,1},{2,1},{3,1},
+    {0,2},{1,2},{2,2},{3,2},{0,3},{1,3},{2,3},{3,3}
+};
+static const uint8_t horiz_sb_8x8[64][2] = {
+    {0,0},{1,0},{2,0},{3,0},{4,0},{5,0},{6,0},{7,0},
+    {0,1},{1,1},{2,1},{3,1},{4,1},{5,1},{6,1},{7,1},
+    {0,2},{1,2},{2,2},{3,2},{4,2},{5,2},{6,2},{7,2},
+    {0,3},{1,3},{2,3},{3,3},{4,3},{5,3},{6,3},{7,3},
+    {0,4},{1,4},{2,4},{3,4},{4,4},{5,4},{6,4},{7,4},
+    {0,5},{1,5},{2,5},{3,5},{4,5},{5,5},{6,5},{7,5},
+    {0,6},{1,6},{2,6},{3,6},{4,6},{5,6},{6,6},{7,6},
+    {0,7},{1,7},{2,7},{3,7},{4,7},{5,7},{6,7},{7,7}
+};
+static const uint8_t vert_sb_2x2[4][2] = {{0,0},{0,1},{1,0},{1,1}};
+static const uint8_t vert_sb_4x4[16][2] = {
+    {0,0},{0,1},{0,2},{0,3},{1,0},{1,1},{1,2},{1,3},
+    {2,0},{2,1},{2,2},{2,3},{3,0},{3,1},{3,2},{3,3}
+};
+static const uint8_t vert_sb_8x8[64][2] = {
+    {0,0},{0,1},{0,2},{0,3},{0,4},{0,5},{0,6},{0,7},
+    {1,0},{1,1},{1,2},{1,3},{1,4},{1,5},{1,6},{1,7},
+    {2,0},{2,1},{2,2},{2,3},{2,4},{2,5},{2,6},{2,7},
+    {3,0},{3,1},{3,2},{3,3},{3,4},{3,5},{3,6},{3,7},
+    {4,0},{4,1},{4,2},{4,3},{4,4},{4,5},{4,6},{4,7},
+    {5,0},{5,1},{5,2},{5,3},{5,4},{5,5},{5,6},{5,7},
+    {6,0},{6,1},{6,2},{6,3},{6,4},{6,5},{6,6},{6,7},
+    {7,0},{7,1},{7,2},{7,3},{7,4},{7,5},{7,6},{7,7}
+};
+static const uint8_t diag_scan_1x1[1][2] = {{0,0}};
+
+// Return pointer to sub-block scan table (no copy)
+static const uint8_t (*get_sub_block_scan(int log2TrafoSize, int scanIdx))[2] {
+    int sbSize = (1 << log2TrafoSize) >> 2;
     if (sbSize <= 0) sbSize = 1;
 
     if (scanIdx == 1) {
-        // Horizontal
-        for (int i = 0; i < numSubBlocks; i++) {
-            sbScan[i][0] = i % sbSize;
-            sbScan[i][1] = i / sbSize;
-        }
+        if (sbSize <= 1) return diag_scan_1x1;
+        if (sbSize == 2) return horiz_sb_2x2;
+        if (sbSize == 4) return horiz_sb_4x4;
+        return horiz_sb_8x8;
     } else if (scanIdx == 2) {
-        // Vertical
-        for (int i = 0; i < numSubBlocks; i++) {
-            sbScan[i][0] = i / sbSize;
-            sbScan[i][1] = i % sbSize;
-        }
+        if (sbSize <= 1) return diag_scan_1x1;
+        if (sbSize == 2) return vert_sb_2x2;
+        if (sbSize == 4) return vert_sb_4x4;
+        return vert_sb_8x8;
     } else {
-        // Diagonal
-        if (sbSize == 1) {
-            sbScan[0][0] = 0; sbScan[0][1] = 0;
-        } else if (sbSize == 2) {
-            for (int i = 0; i < 4; i++) {
-                sbScan[i][0] = diag_scan_2x2[i][0];
-                sbScan[i][1] = diag_scan_2x2[i][1];
-            }
-        } else if (sbSize == 4) {
-            for (int i = 0; i < 16; i++) {
-                sbScan[i][0] = diag_scan_4x4[i][0];
-                sbScan[i][1] = diag_scan_4x4[i][1];
-            }
-        } else {
-            // 8x8 sub-blocks (32x32 TU)
-            for (int i = 0; i < 64; i++) {
-                sbScan[i][0] = diag_scan_8x8[i][0];
-                sbScan[i][1] = diag_scan_8x8[i][1];
-            }
-        }
+        if (sbSize <= 1) return diag_scan_1x1;
+        if (sbSize == 2) return diag_scan_2x2;
+        if (sbSize == 4) return diag_scan_4x4;
+        return diag_scan_8x8;
     }
 }
 
-// Get coefficient scan within a 4x4 sub-block
-static void get_coeff_scan(int scanIdx, int coeffScan[][2]) {
-    if (scanIdx == 1) {
-        for (int i = 0; i < 16; i++) {
-            coeffScan[i][0] = horiz_scan_4x4[i][0];
-            coeffScan[i][1] = horiz_scan_4x4[i][1];
-        }
-    } else if (scanIdx == 2) {
-        for (int i = 0; i < 16; i++) {
-            coeffScan[i][0] = vert_scan_4x4[i][0];
-            coeffScan[i][1] = vert_scan_4x4[i][1];
-        }
-    } else {
-        for (int i = 0; i < 16; i++) {
-            coeffScan[i][0] = diag_scan_4x4[i][0];
-            coeffScan[i][1] = diag_scan_4x4[i][1];
-        }
-    }
+// Return pointer to coefficient scan table (no copy)
+static const uint8_t (*get_coeff_scan(int scanIdx))[2] {
+    if (scanIdx == 1) return horiz_scan_4x4;
+    if (scanIdx == 2) return vert_scan_4x4;
+    return diag_scan_4x4;
 }
 
 // Derive scan index from intra mode and TU size (§8.4.4.2.1)
@@ -230,10 +231,8 @@ void decode_residual_coding(DecodingContext& ctx, int x0, int y0,
     if (numSbPerSide < 1) numSbPerSide = 1;
     int numSubBlocks = numSbPerSide * numSbPerSide;
 
-    int sbScan[64][2];
-    int coeffScan[16][2];
-    get_sub_block_scan(log2TrafoSize, scanIdx, numSubBlocks, sbScan);
-    get_coeff_scan(scanIdx, coeffScan);
+    const uint8_t (*sbScan)[2] = get_sub_block_scan(log2TrafoSize, scanIdx);
+    const uint8_t (*coeffScan)[2] = get_coeff_scan(scanIdx);
 
     // Find last sub-block and last scan position
     int lastSubBlock = numSubBlocks - 1;

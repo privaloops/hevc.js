@@ -367,6 +367,14 @@ void apply_deblocking(DecodingContext& ctx) {
     int subW = sps.SubWidthC;
     int subH = sps.SubHeightC;
 
+    // Pre-compute plane pointers and strides for direct access
+    uint16_t* lumaPlane = pic->planes[0].data();
+    int lumaStride = pic->stride[0];
+    uint16_t* chromaPlane[3] = { nullptr,
+                                  pic->planes[1].data(),
+                                  pic->planes[2].data() };
+    int chromaStride[3] = { 0, pic->stride[1], pic->stride[2] };
+
     // §8.7.2.1: Process vertical edges first, then horizontal
     for (int pass = 0; pass < 2; pass++) {
         EdgeType edgeType = (pass == 0) ? EDGE_VER : EDGE_HOR;
@@ -442,20 +450,16 @@ void apply_deblocking(DecodingContext& ctx) {
 
                         for (int kk = 0; kk < 2; kk++) {
                             int k = kk * 3; // k = 0 and 3
-                            for (int i = 0; i < 4; i++) {
-                                int sx, sy;
-                                if (edgeType == EDGE_VER) {
-                                    // eq 8-343/8-344
-                                    sx = xQ + i; sy = yQ + k;
-                                    qSamp[i][kk] = pic->sample(0, sx, sy);
-                                    sx = xQ - i - 1;
-                                    pSamp[i][kk] = pic->sample(0, sx, sy);
-                                } else {
-                                    // eq 8-345/8-346
-                                    sx = xQ + k; sy = yQ + i;
-                                    qSamp[i][kk] = pic->sample(0, sx, sy);
-                                    sy = yQ - i - 1;
-                                    pSamp[i][kk] = pic->sample(0, sx, sy);
+                            if (edgeType == EDGE_VER) {
+                                uint16_t* rowQ = lumaPlane + (yQ + k) * lumaStride;
+                                for (int i = 0; i < 4; i++) {
+                                    qSamp[i][kk] = rowQ[xQ + i];
+                                    pSamp[i][kk] = rowQ[xQ - i - 1];
+                                }
+                            } else {
+                                for (int i = 0; i < 4; i++) {
+                                    qSamp[i][kk] = lumaPlane[(yQ + i) * lumaStride + xQ + k];
+                                    pSamp[i][kk] = lumaPlane[(yQ - i - 1) * lumaStride + xQ + k];
                                 }
                             }
                         }
@@ -492,13 +496,16 @@ void apply_deblocking(DecodingContext& ctx) {
                         if (dE > 0)
                         for (int k = 0; k < 4; k++) {
                             int pLine[4], qLine[4];
-                            for (int i = 0; i < 4; i++) {
-                                if (edgeType == EDGE_VER) {
-                                    qLine[i] = pic->sample(0, xQ + i, yQ + k);
-                                    pLine[i] = pic->sample(0, xQ - i - 1, yQ + k);
-                                } else {
-                                    qLine[i] = pic->sample(0, xQ + k, yQ + i);
-                                    pLine[i] = pic->sample(0, xQ + k, yQ - i - 1);
+                            if (edgeType == EDGE_VER) {
+                                uint16_t* row = lumaPlane + (yQ + k) * lumaStride;
+                                for (int i = 0; i < 4; i++) {
+                                    qLine[i] = row[xQ + i];
+                                    pLine[i] = row[xQ - i - 1];
+                                }
+                            } else {
+                                for (int i = 0; i < 4; i++) {
+                                    qLine[i] = lumaPlane[(yQ + i) * lumaStride + xQ + k];
+                                    pLine[i] = lumaPlane[(yQ - i - 1) * lumaStride + xQ + k];
                                 }
                             }
 
@@ -511,17 +518,17 @@ void apply_deblocking(DecodingContext& ctx) {
                                                &nDp, &nDq, pOut, qOut);
 
                             // Write back filtered samples
-                            for (int i = 0; i < nDp; i++) {
-                                if (edgeType == EDGE_VER)
-                                    pic->sample(0, xQ - i - 1, yQ + k) = static_cast<uint16_t>(pOut[i]);
-                                else
-                                    pic->sample(0, xQ + k, yQ - i - 1) = static_cast<uint16_t>(pOut[i]);
-                            }
-                            for (int j = 0; j < nDq; j++) {
-                                if (edgeType == EDGE_VER)
-                                    pic->sample(0, xQ + j, yQ + k) = static_cast<uint16_t>(qOut[j]);
-                                else
-                                    pic->sample(0, xQ + k, yQ + j) = static_cast<uint16_t>(qOut[j]);
+                            if (edgeType == EDGE_VER) {
+                                uint16_t* row = lumaPlane + (yQ + k) * lumaStride;
+                                for (int i = 0; i < nDp; i++)
+                                    row[xQ - i - 1] = static_cast<uint16_t>(pOut[i]);
+                                for (int j = 0; j < nDq; j++)
+                                    row[xQ + j] = static_cast<uint16_t>(qOut[j]);
+                            } else {
+                                for (int i = 0; i < nDp; i++)
+                                    lumaPlane[(yQ - i - 1) * lumaStride + xQ + k] = static_cast<uint16_t>(pOut[i]);
+                                for (int j = 0; j < nDq; j++)
+                                    lumaPlane[(yQ + j) * lumaStride + xQ + k] = static_cast<uint16_t>(qOut[j]);
                             }
                         }
                     }
@@ -561,41 +568,40 @@ void apply_deblocking(DecodingContext& ctx) {
 
                                 // Filter 4 chroma lines along the edge
                                 int chromaSegs = (edgeType == EDGE_VER) ? (4 / subH) : (4 / subW);
+                                uint16_t* cPlane = chromaPlane[cIdx];
+                                int cStride = chromaStride[cIdx];
                                 for (int k = 0; k < chromaSegs; k++) {
                                     int pC[2], qC[2];
                                     int cx, cy;
                                     if (edgeType == EDGE_VER) {
                                         cx = x / subW;
                                         cy = y / subH + k;
-                                        for (int i = 0; i < 2; i++) {
-                                            qC[i] = pic->sample(cIdx, cx + i, cy);
-                                            pC[i] = pic->sample(cIdx, cx - i - 1, cy);
-                                        }
+                                        uint16_t* crow = cPlane + cy * cStride;
+                                        qC[0] = crow[cx]; qC[1] = crow[cx + 1];
+                                        pC[0] = crow[cx - 1]; pC[1] = crow[cx - 2];
                                     } else {
                                         cx = x / subW + k;
                                         cy = y / subH;
-                                        for (int i = 0; i < 2; i++) {
-                                            qC[i] = pic->sample(cIdx, cx, cy + i);
-                                            pC[i] = pic->sample(cIdx, cx, cy - i - 1);
-                                        }
+                                        qC[0] = cPlane[cy * cStride + cx];
+                                        qC[1] = cPlane[(cy + 1) * cStride + cx];
+                                        pC[0] = cPlane[(cy - 1) * cStride + cx];
+                                        pC[1] = cPlane[(cy - 2) * cStride + cx];
                                     }
 
                                     int p0Out, q0Out;
-                                    // PCM check at luma coordinates
-                                    bool pcmPc = cuP.is_pcm;
-                                    bool pcmQc = cuQ.is_pcm;
                                     filter_chroma_sample(pC, qC, tC, bitDepthC,
-                                                         pcmPc, pcmQc,
+                                                         cuP.is_pcm, cuQ.is_pcm,
                                                          bypassP, bypassQ,
                                                          pcmFilterDisabled,
                                                          &p0Out, &q0Out);
 
                                     if (edgeType == EDGE_VER) {
-                                        pic->sample(cIdx, cx - 1, cy) = static_cast<uint16_t>(p0Out);
-                                        pic->sample(cIdx, cx, cy)     = static_cast<uint16_t>(q0Out);
+                                        uint16_t* crow = cPlane + cy * cStride;
+                                        crow[cx - 1] = static_cast<uint16_t>(p0Out);
+                                        crow[cx]     = static_cast<uint16_t>(q0Out);
                                     } else {
-                                        pic->sample(cIdx, cx, cy - 1) = static_cast<uint16_t>(p0Out);
-                                        pic->sample(cIdx, cx, cy)     = static_cast<uint16_t>(q0Out);
+                                        cPlane[(cy - 1) * cStride + cx] = static_cast<uint16_t>(p0Out);
+                                        cPlane[cy * cStride + cx]       = static_cast<uint16_t>(q0Out);
                                     }
                                 }
                             }

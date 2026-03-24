@@ -322,24 +322,23 @@ L'ecart principal est en **single-thread** (0.6-0.75x) et se propage au WPP. Cau
 2. **Hotpath optimise** : libde265 inline les chemins chauds (CABAC, interp 8-tap) avec des tables precalculees.
 3. **Allocation** : notre code alloue des buffers temporaires dans certains hotpaths (interp chroma, residual).
 
-Pistes pour rattraper :
-- [ ] Profiler single-thread (instruments/perf) pour identifier le hotspot dominant
-- [ ] SIMD intrinsics NEON pour le hotspot (probablement interpolation luma 8-tap)
-- [ ] Reduire les allocations dans les hotpaths (pre-allouer)
+Pistes pour rattraper (priorisees par le profiling) :
+- [x] Profiler single-thread — xctrace Time Profiler, 4K BBB 120f (voir LEARNINGS.md)
+- [x] **`derive_merge_mode` (10%)** — std::vector→tableau fixe + zscan branchless → **+6-8%**
+- [x] **`apply_deblocking` (13%)** — acces direct aux plans via pointeur → **~1%** (marginal)
+- [ ] **`interpolate_luma` (8%)** — SIMD NEON filtre 8-tap
+- [ ] **`apply_sao` (8%)** — SIMD NEON offset+clip
+- [ ] **`interpolate_chroma` (6%)** — SIMD NEON filtre 4-tap
+- [ ] **`decode_residual_coding` (14%)** — branchless CABAC, tables pre-calculees
+- [ ] Reduire les allocations dans les hotpaths restants
 - [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
 
-### 9.3 — SIMD intrinsics manuels (OPTIONNEL)
-- [ ] Interpolation luma 8-tap SIMD
-- [ ] Interpolation chroma 4-tap SIMD
-- [ ] Transform inverse SIMD
-- [ ] Deblocking SIMD
-
-### Resultats actuels (2026-03-24)
+### Resultats actuels (2026-03-24, post-optimisations algorithmiques)
 
 | Resolution | Natif 1T | Natif WPP | WASM 1T | libde265 1T | libde265 WPP |
 |-----------|---------|----------|---------|------------|-------------|
-| 1080p | 63 fps | 128 fps | ~60 fps | 84 fps | 477 fps |
-| 4K | 24 fps | 31 fps | ~21 fps | 40 fps | 124 fps |
+| 1080p | 74 fps | 158 fps | ~80 fps | 84 fps | 477 fps |
+| 4K | 28 fps | — | ~17 fps | 40 fps | 124 fps |
 
 ## Phase 10 -- Multi-Slice
 
