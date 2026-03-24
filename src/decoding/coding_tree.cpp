@@ -791,9 +791,16 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
             perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, 0,
                 mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
                 mi.pred_flag[0], mi.pred_flag[1], pred);
-            for (int y = 0; y < cbSize; y++)
-                for (int x = 0; x < cbSize; x++)
-                    ctx.pic->sample(0, x0+x, y0+y) = static_cast<uint16_t>(pred[y*cbSize+x]);
+            {
+                uint16_t* dst = ctx.pic->planes[0].data();
+                int dstStride = ctx.pic->stride[0];
+                for (int y = 0; y < cbSize; y++) {
+                    uint16_t* row = dst + (y0 + y) * dstStride + x0;
+                    const int16_t* src = pred + y * cbSize;
+                    for (int x = 0; x < cbSize; x++)
+                        row[x] = static_cast<uint16_t>(src[x]);
+                }
+            }
             if (sps.ChromaArrayType != 0) {
                 int cW = cbSize / sps.SubWidthC, cH = cbSize / sps.SubHeightC;
                 int xC = x0 / sps.SubWidthC, yC = y0 / sps.SubHeightC;
@@ -802,9 +809,14 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                     perform_inter_prediction(ctx, x0, y0, cbSize, cbSize, c,
                         mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
                         mi.pred_flag[0], mi.pred_flag[1], cpred);
-                    for (int y = 0; y < cH; y++)
+                    uint16_t* dst = ctx.pic->planes[c].data();
+                    int dstStride = ctx.pic->stride[c];
+                    for (int y = 0; y < cH; y++) {
+                        uint16_t* row = dst + (yC + y) * dstStride + xC;
+                        const int16_t* src = cpred + y * cW;
                         for (int x = 0; x < cW; x++)
-                            ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(cpred[y*cW+x]);
+                            row[x] = static_cast<uint16_t>(src[x]);
+                    }
                 }
             }
         }
@@ -877,9 +889,16 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                     perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, 0,
                         mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
                         mi.pred_flag[0], mi.pred_flag[1], pred);
-                    for (int y = 0; y < nPbH; y++)
-                        for (int x = 0; x < nPbW; x++)
-                            ctx.pic->sample(0, xPb+x, yPb+y) = static_cast<uint16_t>(pred[y*nPbW+x]);
+                    {
+                        uint16_t* dst = ctx.pic->planes[0].data();
+                        int dstStride = ctx.pic->stride[0];
+                        for (int y = 0; y < nPbH; y++) {
+                            uint16_t* row = dst + (yPb + y) * dstStride + xPb;
+                            const int16_t* src = pred + y * nPbW;
+                            for (int x = 0; x < nPbW; x++)
+                                row[x] = static_cast<uint16_t>(src[x]);
+                        }
+                    }
                 }
                 // Chroma (4:2:0)
                 if (sps.ChromaArrayType != 0) {
@@ -892,9 +911,14 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                         perform_inter_prediction(ctx, xPb, yPb, nPbW, nPbH, c,
                             mi.mv[0], mi.mv[1], mi.ref_idx[0], mi.ref_idx[1],
                             mi.pred_flag[0], mi.pred_flag[1], pred);
-                        for (int y = 0; y < cH; y++)
+                        uint16_t* dst = ctx.pic->planes[c].data();
+                        int dstStride = ctx.pic->stride[c];
+                        for (int y = 0; y < cH; y++) {
+                            uint16_t* row = dst + (yC + y) * dstStride + xC;
+                            const int16_t* src = pred + y * cW;
                             for (int x = 0; x < cW; x++)
-                                ctx.pic->sample(c, xC+x, yC+y) = static_cast<uint16_t>(pred[y*cW+x]);
+                                row[x] = static_cast<uint16_t>(src[x]);
+                        }
                     }
                 }
             };
