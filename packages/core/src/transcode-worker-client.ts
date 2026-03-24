@@ -71,13 +71,22 @@ export class TranscodeWorkerClient {
     });
   }
 
-  /** Abort current transcoding and clear the queue */
+  /** Abort current transcoding, reset state for seek */
   abort(): void {
     // Reject all pending
-    for (const [id, { reject }] of this._pendingResolves) {
+    for (const [, { reject }] of this._pendingResolves) {
       reject(new Error("Aborted"));
     }
     this._pendingResolves.clear();
+    this._segmentId = 0;
+
+    // Reset init state — next append will be a new init segment
+    this._initParsed = false;
+    this._initResult = null;
+    this._initParsedPromise = new Promise<void>((resolve) => {
+      this._initParsedResolve = resolve;
+    });
+
     this._worker.postMessage({ type: "abort" });
   }
 
