@@ -1,5 +1,77 @@
 # Learnings
 
+## Session 2026-03-24 — Profiling single-thread (xctrace Time Profiler)
+
+### Profil CPU — 4K BBB 120 frames (xctrace, Apple Silicon M3 Pro)
+
+Stream : `bbb4k.265` (4K WPP, 120 frames, -o /dev/null pour inclure l'ecriture).
+Outil : `xcrun xctrace record --template "Time Profiler" --time-limit 10s`.
+
+| Rang | Fonction | Samples | % | Categorie |
+|------|----------|---------|---|-----------|
+| 1 | `decode_residual_coding` | 154 | 14% | CABAC/Parsing |
+| 2 | `apply_deblocking` | 144 | 13% | Filtres |
+| 3 | `decode_coding_unit` | 112 | 10% | Parsing |
+| 4 | `derive_merge_mode` | 108 | 10% | Inter (algo) |
+| 5 | `interpolate_luma` | 93 | 8% | Inter (SIMD) |
+| 6 | `apply_sao` | 84 | 8% | Filtres |
+| 7 | `perform_inter_prediction` | 72 | 7% | Inter |
+| 8 | `interpolate_chroma` | 67 | 6% | Inter (SIMD) |
+| 9 | `decode_transform_unit` | 58 | 5% | Transform |
+| 10 | `perform_dequant` | 32 | 3% | Transform |
+| 11 | `CabacEngine::decode_decision` | 27 | 2% | CABAC |
+
+**Repartition par categorie** :
+- **Inter prediction** : 31% (`derive_merge_mode` 10%, `interpolate_luma` 8%, `interpolate_chroma` 6%, `perform_inter_prediction` 7%)
+- **Filtres** : 21% (`apply_deblocking` 13%, `apply_sao` 8%)
+- **Parsing/CABAC** : 26% (`decode_residual_coding` 14%, `decode_coding_unit` 10%, `CabacEngine` 2%)
+- **Transform** : 8% (`decode_transform_unit` 5%, `perform_dequant` 3%)
+
+**Observations** :
+1. Pas de hotspot unique dominant (>30%). Le travail est reparti uniformement.
+2. `derive_merge_mode` a 10% est etonnamment couteux pour de la derivation de candidats (pas de calcul lourd). Probablement des acces memoire disperses (grille CU, motion_info) → cache misses.
+3. Les cibles SIMD classiques (interpolation, deblocking, SAO) representent ~35% — le gain SIMD maximal est donc ~35% × gain_SIMD (~2-4x) = 17-35% global.
+4. `decode_residual_coding` a 14% est domine par les bins CABAC (decision + bypass) — peu SIMDisable mais optimisable via tables et branchless.
+5. L'ecart avec libde265 en single-thread (0.75x) correspond bien aux ~35% d'inter+filtres ou libde265 a des intrinsics manuels.
+
+### Optimisation 1 — derive_merge_mode : std::vector → tableau fixe (+6-8%)
+
+`derive_merge_mode` allouait un `std::vector<MergeCandidate>` a chaque appel pour construire la merge candidate list. Cette fonction est appelee pour chaque PU merge dans chaque frame inter — soit des milliers de fois par frame. MaxNumMergeCand <= 5 par la spec (§8.5.3.2.2), donc un tableau fixe `MergeCandidate[5]` + compteur `int numCands` suffit.
+
+**Aussi** : remplacement du z-scan (Morton code) par bit interleave branchless en 5 operations bitwise au lieu d'une boucle de 8 iterations. Utilise dans `is_pu_available` et `is_amvp_nb_available` (appelees 5+ fois par PU).
+
+**Gain mesure** : 1080p 1T 63→67 fps (+6%), 4K 1T 24→26 fps (+8%), 1080p WPP 128→136 fps (+6%).
+
+### Optimisation 2 — deblocking : acces direct aux plans via pointeur
+
+Remplacement de `pic->sample(0, x, y)` (qui recalcule `planes[c][y * stride[c] + x]` a chaque appel) par des pointeurs pre-calcules `lumaPlane + y * lumaStride + x`. Applique aux lectures decision (p0..p3, q0..q3 sur 2 lignes), lectures filtre (4 lignes), et ecritures filtre. Idem pour chroma.
+
+**Gain mesure** : marginal sur BBB (~1%), probablement plus visible sur des streams a fort Bs (beaucoup de filtrage strong). Le deblocking est a 13% du profil mais le goulot est plus dans `derive_bs` (comparaisons MV/POC) que dans les acces sample.
+
+### Optimisation 3 — SAO : skip cu_at per-pixel + pointeurs directs (+8-16%)
+
+Le SAO appelait `ctx.cu_at(xY, yY)` pour chaque pixel de chaque CTU pour verifier PCM et transquant_bypass. Or 99.9% des CTUs n'ont ni PCM ni bypass. En pre-verifiant au niveau CTU (`ctbHasPcmOrBypass`), on elimine des milliers d'acces a la grille CU par frame.
+
+Aussi : remplacement des acces `origPlane[cIdx][y * stride + x]` et `pic->planes[cIdx][y * stride + x]` par des pointeurs `origData`/`destData` pre-calcules. Et pre-calcul des offsets EO (`dx0/dy0/dx1/dy1`) hors de la boucle pixel.
+
+**Gain mesure** : 1080p 1T 67→74 fps (+10%), 4K 1T 26→28 fps (+8%), 1080p WPP 136→158 fps (+16%).
+Le gain WPP est amplifie car le SAO tourne en sequentiel apres le WPP parallele — chaque % de SAO economise impacte directement le temps total.
+
+### WASM Chrome benchmark — gains 1080p, pas 4K
+
+Nos optimisations algorithmiques (merge vector fixe, SAO skip cu_at, pointeurs directs) profitent directement au WASM car elles reduisent le travail CPU sans dependre de SIMD natif.
+
+**Resultats Chrome (dash.html, streams test mire HEVC)** :
+- **1080p** : ~60 fps → **~80 fps decode (+33%)**
+- **4K** : ~21 fps → **~17 fps decode (pas de gain)**
+
+Le 4K ne beneficie pas des optimisations — possible causes :
+1. **Cache pressure** : les frames 4K (3840x2160 x uint16 = 16MB/frame) depassent le L2 cache. Le pre-scan CTU pour PCM/bypass (optimisation SAO) ajoute un parcours supplementaire de la grille CU qui pollue le cache.
+2. **Memory bandwidth** : le goulot 4K est probablement la bande passante memoire (lecture reference inter, ecriture prediction), pas le CPU. Nos optims reduisent le CPU mais pas les acces memoire.
+3. **WASM overhead** : le JIT V8 optimise moins bien les acces memoire indirects en 4K (plus de cache misses WASM → traps plus frequents).
+
+**Conclusion** : pour le 4K WASM, les gains viendront de la reduction des acces memoire (tile-based decode, memory pooling) ou du WASM multi-thread (SharedArrayBuffer WPP).
+
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 
 ### condition_variable + atomic : store sous le mutex (CRITICAL)

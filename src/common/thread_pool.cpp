@@ -3,6 +3,11 @@
 namespace hevc {
 
 ThreadPool::ThreadPool(int num_threads) {
+#ifdef __EMSCRIPTEN__
+    // WASM without -pthread: threads are not available
+    (void)num_threads;
+    return;
+#else
     if (num_threads <= 0) {
         num_threads = static_cast<int>(std::thread::hardware_concurrency());
         if (num_threads <= 0) num_threads = 4;
@@ -11,6 +16,7 @@ ThreadPool::ThreadPool(int num_threads) {
     for (int i = 0; i < num_threads; i++) {
         workers_.emplace_back(&ThreadPool::worker_loop, this);
     }
+#endif
 }
 
 ThreadPool::~ThreadPool() {
