@@ -41,66 +41,65 @@ static bool is_pu_available(const DecodingContext& ctx,
                              int xCb, int yCb, int nCbS,
                              int xPb, int yPb, int nPbW, int nPbH,
                              int xNb, int yNb, int partIdx) {
-    auto& sps = *ctx.sps;
-    int picW = static_cast<int>(sps.pic_width_in_luma_samples);
-    int picH = static_cast<int>(sps.pic_height_in_luma_samples);
-
-    // Out of picture
+    int picW = static_cast<int>(ctx.sps->pic_width_in_luma_samples);
+    int picH = static_cast<int>(ctx.sps->pic_height_in_luma_samples);
     if (xNb < 0 || yNb < 0 || xNb >= picW || yNb >= picH)
         return false;
 
-    // §6.4.1 z-scan availability
-    int minTb = sps.MinTbSizeY;
-    int ctbSize = static_cast<int>(sps.CtbSizeY);
-    int curCtbX = xPb / ctbSize;
-    int curCtbY = yPb / ctbSize;
-    int nbCtbX = xNb / ctbSize;
-    int nbCtbY = yNb / ctbSize;
+    // §6.4.2: Check if neighbor is in the same coding block
+    bool sameCb = (xNb >= xCb && xNb < xCb + nCbS &&
+                   yNb >= yCb && yNb < yCb + nCbS);
 
-    if (nbCtbX != curCtbX || nbCtbY != curCtbY) {
-        // Different CTU — available if CTU was already decoded
-        int nbAddr = nbCtbY * sps.PicWidthInCtbsY + nbCtbX;
-        int curAddr = curCtbY * sps.PicWidthInCtbsY + curCtbX;
-        if (nbAddr > curAddr) return false;
-        // §6.4.1: SliceAddrRs must match
-        if (ctx.slice_idx && ctx.slice_idx[nbAddr] != ctx.slice_idx[curAddr])
-            return false;
-        // §6.4.1: TileId must match
-        auto& pps = *ctx.pps;
-        if (!pps.TileId.empty() &&
-            pps.TileId[pps.CtbAddrRsToTs[nbAddr]] != pps.TileId[pps.CtbAddrRsToTs[curAddr]])
-            return false;
+    bool availableN;
+    if (!sameCb) {
+        // §6.4.2: invoke §6.4.1 z-scan availability
+        int ctbSize = static_cast<int>(ctx.sps->CtbSizeY);
+        int curCtbX = xPb / ctbSize, curCtbY = yPb / ctbSize;
+        int nbCtbX = xNb / ctbSize, nbCtbY = yNb / ctbSize;
+        if (nbCtbX != curCtbX || nbCtbY != curCtbY) {
+            int nbAddr = nbCtbY * ctx.sps->PicWidthInCtbsY + nbCtbX;
+            int curAddr = curCtbY * ctx.sps->PicWidthInCtbsY + curCtbX;
+            if (nbAddr > curAddr) return false;
+            // §6.4.1: SliceAddrRs must match
+            if (ctx.slice_idx && ctx.slice_idx[nbAddr] != ctx.slice_idx[curAddr])
+                return false;
+            // §6.4.1: TileId must match
+            auto& pps = *ctx.pps;
+            if (!pps.TileId.empty() &&
+                pps.TileId[pps.CtbAddrRsToTs[nbAddr]] != pps.TileId[pps.CtbAddrRsToTs[curAddr]])
+                return false;
+            availableN = true;
+        } else {
+            // Same CTU — z-scan check
+            int minTb = ctx.sps->MinTbSizeY;
+            auto zscan = [](int bx, int by) -> uint32_t {
+                uint32_t z = 0;
+                for (int i = 0; i < 8; i++) {
+                    z |= ((bx >> i) & 1) << (2 * i);
+                    z |= ((by >> i) & 1) << (2 * i + 1);
+                }
+                return z;
+            };
+            int ctbOrgX = curCtbX * ctbSize, ctbOrgY = curCtbY * ctbSize;
+            uint32_t curZ = zscan((xPb - ctbOrgX) / minTb, (yPb - ctbOrgY) / minTb);
+            uint32_t nbZ = zscan((xNb - ctbOrgX) / minTb, (yNb - ctbOrgY) / minTb);
+            if (nbZ > curZ) return false;
+            availableN = true;
+        }
     } else {
-        // Same CTU — z-scan check
-        auto zscan = [](int bx, int by) -> uint32_t {
-            uint32_t z = 0;
-            for (int i = 0; i < 8; i++) {
-                z |= ((bx >> i) & 1) << (2 * i);
-                z |= ((by >> i) & 1) << (2 * i + 1);
-            }
-            return z;
-        };
-        int ctbOrgX = curCtbX * ctbSize;
-        int ctbOrgY = curCtbY * ctbSize;
-        uint32_t curZ = zscan((xPb - ctbOrgX) / minTb, (yPb - ctbOrgY) / minTb);
-        uint32_t nbZ = zscan((xNb - ctbOrgX) / minTb, (yNb - ctbOrgY) / minTb);
-        if (nbZ > curZ) return false;
+        // §6.4.2: Same coding block — available unless NxN partition special case
+        bool isNxN = (nPbW * 2 == nCbS && nPbH * 2 == nCbS);
+        if (isNxN && partIdx == 1 && yNb >= yCb + nPbH && xNb < xCb + nPbW) {
+            availableN = false;
+        } else {
+            availableN = true;
+        }
     }
 
-    // §6.4.2: check if same CU and prohibited partition
-    // (e.g., for Nx2N partIdx=1, left neighbor in same CU is prohibited)
-    bool sameCb = (xNb >= xCb && yNb >= yCb &&
-                   xNb < xCb + nCbS && yNb < yCb + nCbS);
-    if (sameCb) {
-        if (nPbW * 2 == nCbS && nPbH * 2 == nCbS && partIdx == 1 &&
-            yNb >= yCb + nPbH && xNb < xCb + nPbW)
-            return false;
-    }
+    if (!availableN) return false;
 
-    // Must be inter mode
-    if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA)
-        return false;
-
+    // §6.4.2: Must not be intra
+    if (ctx.cu_at(xNb, yNb).pred_mode == PredMode::MODE_INTRA) return false;
     return true;
 }
 
