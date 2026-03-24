@@ -11,7 +11,7 @@ Etat d'avancement par phase et prochaines taches.
 | 3 — Parameter Sets | **Terminee** | PTL, VPS, SPS, PPS, SliceHeader, ParameterSetManager, --dump-headers, 17 tests |
 | 4 — Intra Prediction | **Termine** | 4A-4F faits, oracle i_64x64_qp22 pixel-perfect |
 | 5 — Inter Prediction | **Termine** | 10/10 tests pass. P/B pixel-perfect, weighted pred, CRA, AMP, TMVP, hier-B, open GOP, CABAC init. |
-| 6 — Loop Filters | **Termine** | 13/14 tests phase6 pass. 1 echec (bbb1080 = 29 diffs frame 2, max_diff=1). BBB 4K pixel-perfect. |
+| 6 — Loop Filters | **Termine** | 13/14 tests phase6 pass. 1 echec (bbb1080 frames 18+, merge availability §6.4.2). BBB 4K pixel-perfect. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
@@ -187,26 +187,15 @@ Voir `docs/phases/phase-06-loop-filters.md` pour le plan detaille.
     - L'erreur se propageait via SAO : la mauvaise prediction a (319,256) dans le CTB voisin (MV=(1,-1) au lieu de (3,1)) causait une mauvaise classification SAO edge offset au pixel (319,255), appliquant +4 au lieu de 0.
     - Confirme par calcul manuel d'interpolation : MV=(2,2) donne 84 (correct), MV=(3,1) donne 65 (match HM).
   - **Note** : la meme fonction `is_pu_available` (merge candidates) a le meme pattern z-scan-before-sameCb, mais appliquer le meme fix regresse les tests (128K diffs). L'exclusion merge pour PART_Nx2N partIdx=1 est geree separement dans `derive_spatial_merge_candidates` ligne 279 et depend du z-scan rejectant les voisins SW. A investiguer.
-- [ ] **BBB 1080p residuel frame 2+ — 29 diffs Y (max_diff=1)** (residuel post-fix AMVP)
-  - **Symptome** : apres fix AMVP, frame 1 pixel-perfect, mais frame 2 = 29 diffs Y (max_diff=1, PSNR=98.43dB). Erreurs se propagent legerement aux frames suivantes.
-  - **Localisation** : 2 clusters — CTB(54,0) a (1728,0) et CTB(58,2) a (1856,64). Bord droit de l'image.
-  - **Analyse** : les diffs sont dans un CU **intra** (1744,8) 8x8 mode Planar avec residual.
-    - Les references intra (above/left) sont identiques a HM.
-    - La prediction Planar est identique a HM.
-    - Le residual differe de ±1 a chaque pixel affecte → probablement QP off-by-1 causant un dequant scale legerement faux, amplifie par l'inverse transform.
-    - QP trace : CU(1744,8) qpY=31 CuQpDelta=0 prev=31 → semble correct.
-    - Pas systematique : frame 14 (meme position relative dans GOP 2) a 0 diffs. Specifique au contenu.
-  - **Pistes** :
-    - QP derivation §8.6.1 neighbor lookup utilise CtbAddrRsToTs au lieu de MinTbAddrZS (spec utilise ce dernier). Pourrait causer un QP faux de 1 dans des cas limites.
-    - Possible interaction avec le z-scan availability dans `derive_qp_y` (meme famille de bug §6.4.1 vs §6.4.2).
-    - Egalement possible : `is_pu_available` (merge) affecte certains CUs dont les MV faux causent un QP voisin faux.
-  - **Commande de repro** :
-    ```bash
-    build/hevc-decode tests/conformance/fixtures/bbb1080_50f.265 -o /tmp/test.yuv
-    ffmpeg -y -i tests/conformance/fixtures/bbb1080_50f.265 -pix_fmt yuv420p /tmp/ref.yuv
-    python3 tools/oracle_compare.py /tmp/ref.yuv /tmp/test.yuv 1920 1080
-    # Frame 2 : 29 diffs, premier a (1747,8) CTB(54,0)
-    ```
+- [x] **BBB 1080p residuel frame 2+ — 29 diffs Y (max_diff=1)** (residuel post-fix AMVP)
+  - **Cause racine** : `perform_dequant` (transform.cpp) utilisait `cu_at(0,0)` au lieu de `cu_at(x0,y0)` pour determiner le pred_mode lors du choix de la matrice de scaling list. Pour un CU intra dans une frame inter, la mauvaise matrice (inter au lieu d'intra) etait selectionnee, causant un dequant scale legerement faux.
+  - **Fix** : `transform.cpp` — utiliser `cu_at(x0, y0).pred_mode` (spec §8.6.3 : `CuPredMode[xTbY][yTbY]`).
+  - **Resultat** : frames 0-17 pixel-perfect (18 frames corrigees). 125/126 tests passent.
+- [ ] **BBB 1080p frame 18+ — merge candidate `is_pu_available` §6.4.2** (nouveau bug identifie)
+  - **Symptome** : frames 18-23 (GOP 2, poc 6+) : 4677 diffs, max_diff=49. Erreurs concentrees bord droit (X=1726-1919, Y=0-79).
+  - **Localisation** : epicentre CTB(55,0) y=24-31. Erreurs Y + U + V → MV faux (pas residual).
+  - **Analyse** : `is_pu_available` applique le z-scan check (§6.4.1) **avant** le sameCb check, alors que §6.4.2 dit de ne pas invoquer §6.4.1 pour les voisins intra-CU. Le fix naif (sameCb d'abord) cause 128K→1.7M diffs regression — probablement car le motion info du PU voisin n'est pas encore ecrit dans la grille quand le second PU est traite.
+  - **Pistes** : verifier que `decode_prediction_unit_inter` ecrit le motion info AVANT que le PU suivant ne lise les merge candidates. Possible race condition entre ecriture motion (per-4x4) et lecture merge (per-PU).
 
 ## Phase 7 — High Profiles (subdivisee en 7 sous-phases)
 
