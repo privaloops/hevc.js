@@ -57,6 +57,21 @@ Aussi : remplacement des acces `origPlane[cIdx][y * stride + x]` et `pic->planes
 **Gain mesure** : 1080p 1T 67→74 fps (+10%), 4K 1T 26→28 fps (+8%), 1080p WPP 136→158 fps (+16%).
 Le gain WPP est amplifie car le SAO tourne en sequentiel apres le WPP parallele — chaque % de SAO economise impacte directement le temps total.
 
+### WASM Chrome benchmark — gains 1080p, pas 4K
+
+Nos optimisations algorithmiques (merge vector fixe, SAO skip cu_at, pointeurs directs) profitent directement au WASM car elles reduisent le travail CPU sans dependre de SIMD natif.
+
+**Resultats Chrome (dash.html, streams test mire HEVC)** :
+- **1080p** : ~60 fps → **~80 fps decode (+33%)**
+- **4K** : ~21 fps → **~17 fps decode (pas de gain)**
+
+Le 4K ne beneficie pas des optimisations — possible causes :
+1. **Cache pressure** : les frames 4K (3840x2160 x uint16 = 16MB/frame) depassent le L2 cache. Le pre-scan CTU pour PCM/bypass (optimisation SAO) ajoute un parcours supplementaire de la grille CU qui pollue le cache.
+2. **Memory bandwidth** : le goulot 4K est probablement la bande passante memoire (lecture reference inter, ecriture prediction), pas le CPU. Nos optims reduisent le CPU mais pas les acces memoire.
+3. **WASM overhead** : le JIT V8 optimise moins bien les acces memoire indirects en 4K (plus de cache misses WASM → traps plus frequents).
+
+**Conclusion** : pour le 4K WASM, les gains viendront de la reduction des acces memoire (tile-based decode, memory pooling) ou du WASM multi-thread (SharedArrayBuffer WPP).
+
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 
 ### condition_variable + atomic : store sous le mutex (CRITICAL)
