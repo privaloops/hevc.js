@@ -682,14 +682,17 @@ void decode_coding_unit(DecodingContext& ctx, int x0, int y0, int log2CbSize) {
                  x0, y0, cbSize, cbSize, static_cast<int>(pred_mode),
                  static_cast<int>(part_mode));
 
-        // §6.4.2: Store pred_mode early so PU-level AMVP/merge can see it
-        // for intra-CU neighbor availability (within same CU, sameCb path)
+        // §6.4.2: Store pred_mode and part_mode early so PU-level AMVP/merge
+        // can see them for intra-CU neighbor availability (sameCb path)
         {
             int n_early = cbSize / sps.MinCbSizeY;
             for (int j = 0; j < n_early; j++)
-                for (int i = 0; i < n_early; i++)
-                    ctx.cu_at(x0 + i * sps.MinCbSizeY,
-                              y0 + j * sps.MinCbSizeY).pred_mode = pred_mode;
+                for (int i = 0; i < n_early; i++) {
+                    auto& cu_early = ctx.cu_at(x0 + i * sps.MinCbSizeY,
+                                               y0 + j * sps.MinCbSizeY);
+                    cu_early.pred_mode = pred_mode;
+                    cu_early.part_mode = part_mode;
+                }
         }
 
         if (pred_mode == PredMode::MODE_INTRA) {
