@@ -10,8 +10,9 @@
 import { SegmentTranscoder } from "./segment-transcoder.js";
 import type { SegmentTranscoderConfig } from "./segment-transcoder.js";
 
-const HEVC_CODEC_RE = /hev1|hvc1/i;
-const H264_CODEC = "avc1.640033"; // High Profile Level 5.1 — supports up to 4K
+const HEVC_DETECT_RE = /hev1|hvc1/i;                // Detect HEVC in a string
+const HEVC_CODEC_RE = /hev1[^"']*|hvc1[^"']*/gi;   // Match full HEVC codec string (hev1.2.4.L123.B0)
+const H264_CODEC = "avc1.640033";                    // High Profile Level 5.1 — supports up to 4K
 
 interface InterceptState {
   active: boolean;
@@ -43,7 +44,7 @@ export function installMSEIntercept(config: SegmentTranscoderConfig = {}): void 
 
   // Patch isTypeSupported
   MediaSource.isTypeSupported = function (mimeType: string): boolean {
-    if (HEVC_CODEC_RE.test(mimeType)) {
+    if (HEVC_DETECT_RE.test(mimeType)) {
       const h264Mime = mimeType.replace(HEVC_CODEC_RE, H264_CODEC);
       const result = originalIsTypeSupported.call(MediaSource, h264Mime);
       console.log(`[hevc.js] isTypeSupported("${mimeType}") → "${h264Mime}" → ${result}`);
@@ -57,7 +58,7 @@ export function installMSEIntercept(config: SegmentTranscoderConfig = {}): void 
     originalDecodingInfo = navigator.mediaCapabilities.decodingInfo.bind(navigator.mediaCapabilities);
     interceptState.originalDecodingInfo = originalDecodingInfo;
     navigator.mediaCapabilities.decodingInfo = async function (cfg: MediaDecodingConfiguration) {
-      if (cfg.video?.contentType && HEVC_CODEC_RE.test(cfg.video.contentType)) {
+      if (cfg.video?.contentType && HEVC_DETECT_RE.test(cfg.video.contentType)) {
         const h264Type = cfg.video.contentType.replace(HEVC_CODEC_RE, H264_CODEC);
         const h264Config = { ...cfg, video: { ...cfg.video, contentType: h264Type } };
         return originalDecodingInfo!(h264Config);
@@ -68,7 +69,7 @@ export function installMSEIntercept(config: SegmentTranscoderConfig = {}): void 
 
   // Patch addSourceBuffer — return a proxy that handles transcoding
   MediaSource.prototype.addSourceBuffer = function (mimeType: string): SourceBuffer {
-    if (!HEVC_CODEC_RE.test(mimeType)) {
+    if (!HEVC_DETECT_RE.test(mimeType)) {
       return originalAddSourceBuffer.call(this, mimeType);
     }
 
@@ -146,6 +147,17 @@ function createTranscodingProxy(
       // Override updating to include our fake state
       if (prop === "updating") {
         return fakeUpdating || target.updating;
+      }
+
+      // Override abort — cancel pending transcoding queue
+      if (prop === "abort") {
+        return function (): void {
+          queue.length = 0;
+          processing = false;
+          fakeUpdating = false;
+          console.log("[hevc.js] abort() — queue cleared");
+          target.abort();
+        };
       }
 
       // Override appendBuffer
@@ -243,26 +255,28 @@ function createTranscodingProxy(
           console.log("[hevc.js] H.264 init segment appended");
         }
 
-        // Append transcoded media segment
+        // Append transcoded media segment.
+        // The real SB fires updatestart/update/updateend — hls.js listens on those
+        // via the proxy's forwarded addEventListener. No synthetic events needed.
         if (h264Segment) {
           if (target.updating) await waitForUpdateEnd(target);
+          fakeUpdating = false; // Let the real SB manage updating state from here
           realAppend(h264Segment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
 
           const buffered = target.buffered;
           const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
           console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
+        } else {
+          // No data to append — signal completion ourselves
+          fakeUpdating = false;
+          dispatchOnProxy("update");
+          dispatchOnProxy("updateend");
         }
 
-        // Signal completion
-        fakeUpdating = false;
-        dispatchOnProxy("update");
-        dispatchOnProxy("updateend");
-
-        // If more segments in queue, signal updating again
+        // If more segments in queue, set updating for next round
         if (queue.length > 0) {
           fakeUpdating = true;
-          dispatchOnProxy("updatestart");
         }
       }
     } catch (err) {
