@@ -348,3 +348,22 @@ Le meme pattern que le bug AMVP (#20), mais avec une subtilite supplementaire qu
 ### Milestone atteint
 
 **128/128 tests pixel-perfect** — tous les bitstreams de test passent. Le decodeur est conforme Main profile + Main 10 sur l'integralite des tests (toy, conformance, oracle, real-world BBB 1080p/4K).
+
+## Session 2026-03-24 — Player plugins (dashjs, hlsjs)
+
+### Architecture MSE intercept pour players tiers
+
+**Approche retenue** : patcher `MediaSource` au niveau global plutot que d'integrer avec l'API interne de chaque player. dash.js et hls.js utilisent `MediaSource`/`SourceBuffer` de facon identique → un seul intercept partage.
+
+Points cles :
+1. **Proxy SourceBuffer** — il faut reporter `updating = true` pendant le transcodage, sinon le player bombarde les segments sans attendre. dash.js check `sb.updating` avant chaque `appendBuffer`.
+2. **`Reflect.get(target, prop, target)`** — les getters natifs de SourceBuffer (`buffered`, `appendWindowStart`) lancent `Illegal invocation` si `this` est un Proxy. Il faut utiliser `target` comme receiver, pas `receiver`.
+3. **hvcC parameter sets** — les VPS/SPS/PPS sont dans le `hvcC` box de l'init segment fMP4, pas dans les media segments. Il faut les extraire et les feeder au decodeur WASM avant les NAL units des segments.
+4. **mp4box.js `sample.data`** — retourne un `Uint8Array` (pas `ArrayBuffer`). `new DataView(sample.data)` echoue → utiliser `data.buffer.slice(data.byteOffset, ...)`.
+5. **H.264 codec level** — `avc1.42001f` (Baseline L3.1) plafonne a 720p. Pour 1080p utiliser `avc1.64002a` (High L4.2), pour 4K `avc1.640033` (High L5.1). Selection dynamique basee sur la resolution.
+6. **`navigator.mediaCapabilities.decodingInfo()`** — dash.js 4.x l'utilise en priorite sur `MediaSource.isTypeSupported()`. Il faut patcher les deux.
+7. **Emscripten WASM glue** — n'est pas un ES module, `import()` echoue. Solution : charger via `<script>` tag + detecter le global `HEVCDecoderModule` dans `HEVCDecoder.create()`.
+
+### Architecture finale du monorepo
+
+Code partage dans `@hevcjs/core` (MSE intercept, SegmentTranscoder, demuxer mp4box.js, muxer fMP4, H264Encoder). Les plugins dashjs/hlsjs ne sont que des thin wrappers (~60 lignes chacun) qui appellent `installMSEIntercept()` + enregistrent les filtres specifiques au player.

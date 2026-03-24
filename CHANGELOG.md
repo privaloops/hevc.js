@@ -19,13 +19,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **SAO cross-slice boundary (§8.7.3.2)**: SAO edge offset did not check `slice_loop_filter_across_slices_enabled_flag` before accessing neighbor samples in adjacent slices. Also added cross-tile boundary check. Fixes `conf_b_xslice_256` (pixel-perfect).
 
 ### Added
+- **`@hevcjs/dashjs` — dash.js HEVC plugin**:
+  - `attachHevcSupport(player)` — one-line integration with dash.js
+  - Transparent MSE interception: patches `MediaSource.isTypeSupported`, `addSourceBuffer`, `navigator.mediaCapabilities.decodingInfo`
+  - Proxy SourceBuffer with proper `updating` state management — dash.js waits during transcoding, no segment flooding
+  - Pipeline: HEVC fMP4 segment → mp4box.js demux → WASM decode → WebCodecs H.264 encode → fMP4 mux → MSE
+  - VPS/SPS/PPS extraction from hvcC box in init segments
+  - Audio passthrough (non-HEVC tracks untouched)
+  - Demo page with dash.js playing HEVC DASH streams (1080p + 4K)
+
+- **`@hevcjs/hlsjs` — hls.js HEVC plugin**:
+  - `attachHevcSupport(hls)` — same API as dashjs
+  - Same MSE intercept pipeline (shared code in `@hevcjs/core`)
+
+- **Shared modules extracted to `@hevcjs/core`**:
+  - `FMP4Demuxer` (mp4box.js wrapper), `FMP4Muxer`, `H264Encoder`, `FrameRenderer`, `MSEController`
+  - `TranscodePipeline` (HEVC→H.264 orchestration)
+  - `installMSEIntercept` / `SegmentTranscoder` (shared by dashjs + hlsjs)
+  - Dynamic H.264 codec level selection (High 4.0/4.2/5.1 based on resolution)
+  - `HEVCDecoder.create()` supports global `HEVCDecoderModule` from script tag
+
 - **hevc.js monorepo restructure**:
-  - pnpm workspace with `packages/core/` (TypeScript WASM wrapper) and `packages/videojs/` (Video.js Tech + fMP4 demuxer + renderer)
-  - `@hevcjs/core`: typed `HEVCDecoder` class with `.create()` / `.decode()` / `.destroy()` API
-  - `@hevcjs/videojs`: `HevcWasmTech` Video.js Tech, `FMP4Demuxer` (moof/mdat → NAL units), `FrameRenderer` (WebGL + VideoFrame/MediaStreamTrackGenerator)
-  - npm subpath exports: `import { HEVCDecoder } from 'hevc.js'` and `import 'hevc.js/videojs'`
+  - pnpm workspace with `packages/core/`, `packages/videojs/`, `packages/dashjs/`, `packages/hlsjs/`
+  - npm subpath exports: `hevc.js`, `hevc.js/videojs`, `hevc.js/dashjs`, `hevc.js/hlsjs`
   - tsup build (ESM + .d.ts), TypeScript strict mode
-  - C++ source and tests unchanged (122/126 tests pass)
+  - esbuild demo bundling (`pnpm build:demo`)
+  - C++ source and tests unchanged (128/128 tests pass)
 
 - **Phase 7 — Main 10 Profile (10-bit 4:2:0)**:
   - 10-bit decoding pixel-perfect (I-frame + full pipeline I+P+B with deblock+SAO)

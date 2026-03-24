@@ -18,10 +18,8 @@
 type VideoJsStatic = any;
 
 import videojs from "video.js";
-import { HEVCDecoder } from "@hevcjs/core";
+import { HEVCDecoder, FMP4Demuxer, FrameRenderer } from "@hevcjs/core";
 import type { HEVCFrame } from "@hevcjs/core";
-import { FMP4Demuxer } from "./fmp4-demuxer.js";
-import { FrameRenderer } from "./renderer.js";
 
 interface HevcWasmOptions {
   wasmUrl?: string;
@@ -46,7 +44,6 @@ class HevcWasmTech extends BaseTech {
   private _currentTime: number = 0;
   private _playTimer: ReturnType<typeof setInterval> | null = null;
   private _fps: number = 25;
-  private _initParsed: boolean = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _videoEl: HTMLVideoElement | null = null;
   private _canvasEl: HTMLCanvasElement | null = null;
@@ -100,7 +97,6 @@ class HevcWasmTech extends BaseTech {
     this._frames = [];
     this._currentFrame = 0;
     this._currentTime = 0;
-    this._initParsed = false;
 
     try {
       const response = await fetch(src);
@@ -130,9 +126,7 @@ class HevcWasmTech extends BaseTech {
   private async _decodeFMP4(data: Uint8Array): Promise<void> {
     if (!this._decoder) return;
 
-    this._demuxer.parseInit(data);
-    this._initParsed = true;
-
+    await this._demuxer.parseInit(data);
     const samples = this._demuxer.parseSegment(data);
     if (samples.length === 0) return;
 

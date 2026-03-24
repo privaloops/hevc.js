@@ -7,5 +7,5 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   outDir: "dist",
-  external: ["./wasm/hevc-decode.js", "mp4box"],
+  external: ["hls.js"],
 });

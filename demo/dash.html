@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hevc.js — dash.js HEVC Playback</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a2e; color: #e0e0e0;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px;
+  }
+  h1 { font-size: 1.4em; margin-bottom: 8px; color: #fff; }
+  .subtitle { font-size: 0.85em; color: #888; margin-bottom: 16px; }
+  .container { max-width: 960px; width: 100%; }
+  video { width: 100%; background: #000; border-radius: 4px; margin-bottom: 16px; aspect-ratio: 16/9; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  button {
+    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
+    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em;
+  }
+  button:hover { background: #0f3460; }
+  input[type="text"] {
+    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
+    padding: 8px 12px; border-radius: 4px; font-size: 0.9em; flex: 1;
+  }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .presets button { font-size: 0.8em; padding: 4px 10px; }
+  #status { margin-top: 8px; font-size: 0.85em; color: #e94560; min-height: 1.2em; }
+  #log {
+    width: 100%; height: 220px; margin-top: 12px;
+    background: #0d1117; color: #8b949e; border: 1px solid #0f3460;
+    border-radius: 4px; font-family: monospace; font-size: 0.78em;
+    padding: 8px; resize: vertical;
+  }
+  .usage {
+    margin-top: 24px; padding: 16px; background: #0d1117; border-radius: 4px;
+    font-family: monospace; font-size: 0.82em; color: #8b949e; white-space: pre; overflow-x: auto;
+  }
+  .usage .kw { color: #ff7b72; }
+  .usage .str { color: #a5d6ff; }
+  .usage .fn { color: #d2a8ff; }
+  .usage .cm { color: #484f58; }
+</style>
+</head>
+<body>
+
+<h1>hevc.js — dash.js HEVC Playback</h1>
+<p class="subtitle">HEVC DASH streams played via dash.js + WASM transcoding (HEVC&#8594;H.264)</p>
+
+<div class="container">
+  <div class="controls">
+    <input type="text" id="mpd-url" placeholder="Enter HEVC MPD URL...">
+    <button onclick="loadMPD()">Load</button>
+  </div>
+  <div class="presets">
+    <button onclick="loadMPD('streams/dash_1080p/manifest.mpd')">BBB 1080p (5s)</button>
+    <button onclick="loadMPD('streams/dash_4k/manifest.mpd')">BBB 4K (5s)</button>
+  </div>
+
+  <video id="player" controls></video>
+  <div id="status">Loading...</div>
+  <textarea id="log" readonly></textarea>
+
+  <div class="usage"><span class="cm">// npm install hevc.js dashjs</span>
+<span class="kw">import</span> dashjs <span class="kw">from</span> <span class="str">'dashjs'</span>;
+<span class="kw">import</span> { <span class="fn">attachHevcSupport</span> } <span class="kw">from</span> <span class="str">'hevc.js/dash'</span>;
+
+<span class="kw">const</span> player = dashjs.<span class="fn">MediaPlayer</span>().<span class="fn">create</span>();
+<span class="fn">attachHevcSupport</span>(player);
+player.<span class="fn">initialize</span>(videoElement, mpdUrl, <span class="kw">true</span>);</div>
+</div>
+
+<!-- WASM decoder (sets window.HEVCDecoderModule) -->
+<script src="hevc-decode.js"></script>
+
+<!-- dash.js -->
+<script src="https://cdn.dashjs.org/v4.7.4/dash.all.min.js"></script>
+
+<!-- hevc.js/dash bundle (in a real project, your bundler handles this) -->
+<script src="dash-bundle.js"></script>
+
+<script>
+// --- Logging to textarea ---
+const logEl = document.getElementById('log');
+function log(...args) {
+  const line = args.map(a => {
+    if (a instanceof Error) return `${a.name}: ${a.message}`;
+    if (typeof a === 'object') return JSON.stringify(a);
+    return String(a);
+  }).join(' ');
+  logEl.value += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const _log = console.log, _warn = console.warn, _err = console.error;
+console.log = (...a) => { _log(...a); log('[log]', ...a); };
+console.warn = (...a) => { _warn(...a); log('[warn]', ...a); };
+console.error = (...a) => { _err(...a); log('[ERROR]', ...a); };
+
+// --- dash.js + hevc.js ---
+let player = null;
+let cleanup = null;
+
+function loadMPD(presetUrl) {
+  const url = presetUrl || document.getElementById('mpd-url').value.trim();
+  if (!url) return;
+  document.getElementById('mpd-url').value = url;
+
+  // Cleanup previous session
+  if (cleanup) { cleanup(); cleanup = null; }
+  if (player) { player.reset(); player = null; }
+
+  const video = document.getElementById('player');
+
+  // Create dash.js player
+  player = dashjs.MediaPlayer().create();
+
+  // Attach HEVC support — that's it, one line
+  cleanup = HevcDash.attachHevcSupport(player);
+
+  // dash.js events
+  player.on(dashjs.MediaPlayer.events.PLAYBACK_STARTED, () => {
+    document.getElementById('status').textContent = 'Playing via dash.js + hevc.js';
+  });
+  player.on(dashjs.MediaPlayer.events.ERROR, (e) => {
+    document.getElementById('status').textContent = 'Error: ' + (e.error?.message || JSON.stringify(e.error));
+  });
+
+  // Start
+  player.initialize(video, url, true);
+  document.getElementById('status').textContent = 'Loading ' + url + '...';
+}
+
+document.getElementById('status').textContent = 'Ready — choose a preset or enter an MPD URL';
+</script>
+</body>
+</html>

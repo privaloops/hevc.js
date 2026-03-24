@@ -15,6 +15,7 @@ Etat d'avancement par phase et prochaines taches.
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
 | 9 — Performance | **En cours** | 1080p@61fps WASM, 4K@21fps. SIMD auto-vec fait. WPP multi-thread a faire. |
+| 11 — Player Plugins | **Termine** | @hevcjs/dashjs (dash.js), @hevcjs/hlsjs (hls.js), MSE intercept, SegmentTranscoder, mp4box.js demux, demo DASH 1080p+4K. |
 | 10 — Multi-Slice | **Termine** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking + SAO. conf_b_xslice_256 pixel-perfect. |
 
 ## Phase 1 — Terminee
