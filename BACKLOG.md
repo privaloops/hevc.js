@@ -322,17 +322,16 @@ L'ecart principal est en **single-thread** (0.6-0.75x) et se propage au WPP. Cau
 2. **Hotpath optimise** : libde265 inline les chemins chauds (CABAC, interp 8-tap) avec des tables precalculees.
 3. **Allocation** : notre code alloue des buffers temporaires dans certains hotpaths (interp chroma, residual).
 
-Pistes pour rattraper :
-- [ ] Profiler single-thread (instruments/perf) pour identifier le hotspot dominant
-- [ ] SIMD intrinsics NEON pour le hotspot (probablement interpolation luma 8-tap)
+Pistes pour rattraper (priorisees par le profiling) :
+- [x] Profiler single-thread — xctrace Time Profiler, 4K BBB 120f (voir LEARNINGS.md)
+- [ ] **`derive_merge_mode` (10%)** — cache misses probable, optimiser acces grille CU/motion
+- [ ] **`apply_deblocking` (13%)** — SIMD NEON pour le filtrage strong/weak
+- [ ] **`interpolate_luma` (8%)** — SIMD NEON filtre 8-tap
+- [ ] **`apply_sao` (8%)** — SIMD NEON offset+clip
+- [ ] **`interpolate_chroma` (6%)** — SIMD NEON filtre 4-tap
+- [ ] **`decode_residual_coding` (14%)** — branchless CABAC, tables pre-calculees
 - [ ] Reduire les allocations dans les hotpaths (pre-allouer)
 - [ ] WASM : Web Workers + SharedArrayBuffer (headers COOP/COEP)
-
-### 9.3 — SIMD intrinsics manuels (OPTIONNEL)
-- [ ] Interpolation luma 8-tap SIMD
-- [ ] Interpolation chroma 4-tap SIMD
-- [ ] Transform inverse SIMD
-- [ ] Deblocking SIMD
 
 ### Resultats actuels (2026-03-24)
 

@@ -1,5 +1,39 @@
 # Learnings
 
+## Session 2026-03-24 — Profiling single-thread (xctrace Time Profiler)
+
+### Profil CPU — 4K BBB 120 frames (xctrace, Apple Silicon M3 Pro)
+
+Stream : `bbb4k.265` (4K WPP, 120 frames, -o /dev/null pour inclure l'ecriture).
+Outil : `xcrun xctrace record --template "Time Profiler" --time-limit 10s`.
+
+| Rang | Fonction | Samples | % | Categorie |
+|------|----------|---------|---|-----------|
+| 1 | `decode_residual_coding` | 154 | 14% | CABAC/Parsing |
+| 2 | `apply_deblocking` | 144 | 13% | Filtres |
+| 3 | `decode_coding_unit` | 112 | 10% | Parsing |
+| 4 | `derive_merge_mode` | 108 | 10% | Inter (algo) |
+| 5 | `interpolate_luma` | 93 | 8% | Inter (SIMD) |
+| 6 | `apply_sao` | 84 | 8% | Filtres |
+| 7 | `perform_inter_prediction` | 72 | 7% | Inter |
+| 8 | `interpolate_chroma` | 67 | 6% | Inter (SIMD) |
+| 9 | `decode_transform_unit` | 58 | 5% | Transform |
+| 10 | `perform_dequant` | 32 | 3% | Transform |
+| 11 | `CabacEngine::decode_decision` | 27 | 2% | CABAC |
+
+**Repartition par categorie** :
+- **Inter prediction** : 31% (`derive_merge_mode` 10%, `interpolate_luma` 8%, `interpolate_chroma` 6%, `perform_inter_prediction` 7%)
+- **Filtres** : 21% (`apply_deblocking` 13%, `apply_sao` 8%)
+- **Parsing/CABAC** : 26% (`decode_residual_coding` 14%, `decode_coding_unit` 10%, `CabacEngine` 2%)
+- **Transform** : 8% (`decode_transform_unit` 5%, `perform_dequant` 3%)
+
+**Observations** :
+1. Pas de hotspot unique dominant (>30%). Le travail est reparti uniformement.
+2. `derive_merge_mode` a 10% est etonnamment couteux pour de la derivation de candidats (pas de calcul lourd). Probablement des acces memoire disperses (grille CU, motion_info) → cache misses.
+3. Les cibles SIMD classiques (interpolation, deblocking, SAO) representent ~35% — le gain SIMD maximal est donc ~35% × gain_SIMD (~2-4x) = 17-35% global.
+4. `decode_residual_coding` a 14% est domine par les bins CABAC (decision + bypass) — peu SIMDisable mais optimisable via tables et branchless.
+5. L'ecart avec libde265 en single-thread (0.75x) correspond bien aux ~35% d'inter+filtres ou libde265 a des intrinsics manuels.
+
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 
 ### condition_variable + atomic : store sous le mutex (CRITICAL)
