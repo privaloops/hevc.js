@@ -18,5 +18,8 @@ export { MSEController } from "./mse-controller.js";
 export { TranscodePipeline } from "./transcode-pipeline.js";
 export type { TranscodePipelineConfig } from "./transcode-pipeline.js";
 export { installMSEIntercept, uninstallMSEIntercept } from "./mse-intercept.js";
+export type { MSEInterceptConfig } from "./mse-intercept.js";
 export { SegmentTranscoder } from "./segment-transcoder.js";
 export type { SegmentTranscoderConfig, TranscodedInit } from "./segment-transcoder.js";
+export { TranscodeWorkerClient } from "./transcode-worker-client.js";
+export type { TranscodeWorkerClientConfig } from "./transcode-worker-client.js";

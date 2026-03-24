@@ -118,7 +118,9 @@ function loadMPD(presetUrl) {
   player = dashjs.MediaPlayer().create();
 
   // Attach HEVC support — that's it, one line
-  cleanup = HevcDash.attachHevcSupport(player);
+  cleanup = HevcDash.attachHevcSupport(player, {
+    workerUrl: './transcode-worker.js',
+  });
 
   // dash.js events
   player.on(dashjs.MediaPlayer.events.PLAYBACK_STARTED, () => {

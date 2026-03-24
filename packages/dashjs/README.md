@@ -46,9 +46,10 @@ Audio and subtitle tracks pass through untouched.
 import { attachHevcSupport } from 'hevc.js/dashjs';
 
 const cleanup = attachHevcSupport(player, {
-  wasmUrl: '/path/to/hevc-decode.js', // WASM glue location (optional)
-  fps: 25,                             // Target framerate (optional, default: 25)
-  bitrate: 4_000_000,                  // H.264 encode bitrate (optional)
+  workerUrl: '/transcode-worker.js',   // Web Worker for off-main-thread transcoding
+  wasmUrl: '/path/to/hevc-decode.js',  // WASM glue location (optional)
+  fps: 25,                              // Target framerate (optional, default: 25)
+  bitrate: 4_000_000,                   // H.264 encode bitrate (optional)
 });
 
 // Remove patches when done

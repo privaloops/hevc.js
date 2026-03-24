@@ -17,8 +17,10 @@ import { attachHevcSupport } from 'hevc.js/hlsjs';
 const video = document.querySelector('video');
 const hls = new Hls();
 
-// One line — patches MSE to transcode HEVC to H.264
-const cleanup = attachHevcSupport(hls);
+// Patches MSE to transcode HEVC to H.264 (in a Web Worker)
+const cleanup = attachHevcSupport(hls, {
+  workerUrl: '/transcode-worker.js',
+});
 
 hls.attachMedia(video);
 hls.loadSource('https://example.com/hevc-stream/playlist.m3u8');
