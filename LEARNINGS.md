@@ -48,6 +48,15 @@ Remplacement de `pic->sample(0, x, y)` (qui recalcule `planes[c][y * stride[c] +
 
 **Gain mesure** : marginal sur BBB (~1%), probablement plus visible sur des streams a fort Bs (beaucoup de filtrage strong). Le deblocking est a 13% du profil mais le goulot est plus dans `derive_bs` (comparaisons MV/POC) que dans les acces sample.
 
+### Optimisation 3 — SAO : skip cu_at per-pixel + pointeurs directs (+8-16%)
+
+Le SAO appelait `ctx.cu_at(xY, yY)` pour chaque pixel de chaque CTU pour verifier PCM et transquant_bypass. Or 99.9% des CTUs n'ont ni PCM ni bypass. En pre-verifiant au niveau CTU (`ctbHasPcmOrBypass`), on elimine des milliers d'acces a la grille CU par frame.
+
+Aussi : remplacement des acces `origPlane[cIdx][y * stride + x]` et `pic->planes[cIdx][y * stride + x]` par des pointeurs `origData`/`destData` pre-calcules. Et pre-calcul des offsets EO (`dx0/dy0/dx1/dy1`) hors de la boucle pixel.
+
+**Gain mesure** : 1080p 1T 67→74 fps (+10%), 4K 1T 26→28 fps (+8%), 1080p WPP 136→158 fps (+16%).
+Le gain WPP est amplifie car le SAO tourne en sequentiel apres le WPP parallele — chaque % de SAO economise impacte directement le temps total.
+
 ## Session 2026-03-24 — Phase 9B Thread Pool WPP
 
 ### condition_variable + atomic : store sous le mutex (CRITICAL)
