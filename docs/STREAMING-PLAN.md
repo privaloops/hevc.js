@@ -27,10 +27,14 @@ HLS/DASH segments (fMP4 HEVC)
 
 | API requise | Chrome | Firefox | Safari |
 |------------|--------|---------|--------|
-| VideoEncoder | 94+ | 114+ | 16.4+ |
-| VideoFrame(I420) | 94+ | 114+ | 16.4+ |
+| VideoEncoder H.264 | 94+ | **Non fonctionnel** (bug Mozilla) | 16.4+ |
+| VideoFrame(I420) | 94+ | 130+ | 16.4+ |
 | MSE + H.264 | Oui | Oui | Oui |
-| HEVC natif MSE | 107+ (hw) | Non | Oui |
+| HEVC natif MSE | 107+ (hw) | 139+ (partiel) | Oui |
+
+**Firefox** : expose `VideoEncoder` depuis v130, mais l'encodage H.264 échoue systématiquement
+([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)). `isConfigSupported()` peut même
+retourner `true` à tort. hevc.js détecte ce cas et se désactive proprement (fallback vers les levels AVC natifs).
 
 Safari supporte déjà HEVC nativement → notre pipeline n'est utile que quand le navigateur NE supporte PAS HEVC natif.
 

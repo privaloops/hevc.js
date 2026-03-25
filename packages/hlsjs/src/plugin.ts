@@ -60,6 +60,21 @@ export function attachHevcSupport(
     return () => {};
   }
 
+  // Async capability probe — detects browsers that expose VideoEncoder
+  // but can't actually encode H.264 (e.g. Firefox 133 on Windows 10).
+  const canEncodePromise = H264Encoder.checkSupport();
+  let canEncode: boolean | null = null;
+  canEncodePromise.then((ok) => {
+    canEncode = ok;
+    if (!ok) {
+      console.warn(
+        "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. " +
+        "Falling back to native AVC playback.",
+      );
+      uninstallMSEIntercept();
+    }
+  });
+
   // 1. Install MSE intercept (patches MediaSource globally)
   installMSEIntercept({
     wasmUrl: config.wasmUrl,
@@ -72,7 +87,15 @@ export function attachHevcSupport(
   const preferHevc = config.preferHevc !== false;
 
   if (hls && preferHevc) {
-    hls.on("hlsManifestParsed", (_event: string, data: { levels: Array<{ codecs?: string; codecSet?: string }> }) => {
+    hls.on("hlsManifestParsed", async (_event: string, data: { levels: Array<{ codecs?: string; codecSet?: string }> }) => {
+      // Wait for the capability probe if it hasn't resolved yet
+      if (canEncode === null) canEncode = await canEncodePromise;
+
+      if (!canEncode) {
+        console.log("[hevc.js/hlsjs] H.264 encoding not supported — keeping all AVC levels");
+        return;
+      }
+
       const levels = data.levels;
       const hasHevc = levels.some((l: { codecs?: string }) => HEVC_RE.test(l.codecs ?? ""));
       const hasAvc = levels.some((l: { codecs?: string }) => !HEVC_RE.test(l.codecs ?? ""));

@@ -135,6 +135,28 @@ export class H264Encoder {
     return typeof VideoEncoder !== "undefined";
   }
 
+  /**
+   * Async capability probe — checks that VideoEncoder can actually encode H.264.
+   * Firefox exposes VideoEncoder but may not support H.264 encoding.
+   * Returns false if the API is missing or the config is not supported.
+   */
+  static async checkSupport(): Promise<boolean> {
+    if (typeof VideoEncoder === "undefined") return false;
+    if (typeof VideoEncoder.isConfigSupported !== "function") return false;
+    try {
+      const result = await VideoEncoder.isConfigSupported({
+        codec: "avc1.640028",
+        width: 640,
+        height: 480,
+        bitrate: 1_000_000,
+        framerate: 25,
+      });
+      return result.supported === true;
+    } catch {
+      return false;
+    }
+  }
+
   private _handleOutput(chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata): void {
     // Capture codec description (avcC) from first chunk with decoderConfig
     if (metadata?.decoderConfig?.description && !this._codecDescription) {
