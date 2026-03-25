@@ -125,6 +125,14 @@ export class SegmentTranscoder {
     if (samples.length === 0) return null;
     const tDemuxEnd = performance.now();
 
+    // Extract the absolute base decode time directly from the tfdt box
+    // in the raw fMP4 data. mp4box.js returns sequential DTS which breaks
+    // after seek (fragments arrive out of order).
+    // Extract the absolute base decode time directly from the tfdt box
+    // in the raw fMP4 data. mp4box.js returns sequential DTS which breaks
+    // after seek (fragments arrive out of order).
+    const segmentBaseTime = extractTfdt(data) ?? samples[0]!.dts;
+
     // 2. Feed VPS/SPS/PPS on first segment (from hvcC in init segment)
     if (!this._paramSetsFed && this._paramSetsBuffer) {
       this._decoder.feed(this._paramSetsBuffer);
@@ -171,7 +179,7 @@ export class SegmentTranscoder {
     this._encoder.onChunk = (chunk) => chunks.push(chunk);
 
     for (let i = 0; i < frames.length; i++) {
-      const timestampUs = Math.round((this._baseDecodeTime / this._timescale) * 1_000_000)
+      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000)
         + Math.round((i / this._fps) * 1_000_000);
       // First frame of each segment should be a keyframe (ABR switch support)
       this._encoder.encode(frames[i]!, timestampUs, i === 0);
@@ -206,8 +214,7 @@ export class SegmentTranscoder {
       compositionTimeOffset: 0,
     }));
 
-    const mediaSegment = this._muxer.muxSegment(muxerSamples, this._baseDecodeTime);
-    this._baseDecodeTime += muxerSamples.reduce((sum, s) => sum + s.duration, 0);
+    const mediaSegment = this._muxer.muxSegment(muxerSamples, segmentBaseTime);
 
     const tEncodeEnd = performance.now();
     this.lastPerfStats = {
@@ -308,4 +315,32 @@ function extractParameterSetsFromInit(data: Uint8Array): Uint8Array[] {
   }
 
   return sets;
+}
+
+/**
+ * Extract baseMediaDecodeTime from the tfdt box in an fMP4 media segment.
+ * Parses: moof → traf → tfdt → baseMediaDecodeTime.
+ * Returns the absolute decode time in timescale units, or null if not found.
+ */
+function extractTfdt(data: Uint8Array): number | null {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const len = data.byteLength;
+
+  // Scan for 'tfdt' box type (0x74666474)
+  for (let i = 0; i + 8 <= len; i++) {
+    if (view.getUint32(i + 4) !== 0x74666474) continue;
+    // Found tfdt — it's a FullBox: version(1) + flags(3) + payload
+    const version = data[i + 8];
+    if (version === 1 && i + 20 <= len) {
+      // 64-bit baseMediaDecodeTime
+      const hi = view.getUint32(i + 12);
+      const lo = view.getUint32(i + 16);
+      return hi * 0x100000000 + lo;
+    }
+    if (i + 16 <= len) {
+      // 32-bit baseMediaDecodeTime
+      return view.getUint32(i + 12);
+    }
+  }
+  return null;
 }
