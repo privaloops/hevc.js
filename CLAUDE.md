@@ -24,7 +24,11 @@ Décodeur HEVC conforme à la spec ITU-T H.265 (v8, 2021), compilé en WebAssemb
 cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 
 # Build WASM
-emcmake cmake -B build-wasm && cmake --build build-wasm
+emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_WASM=ON && cmake --build build-wasm
+
+# Build demo (DASH player) — build tout : dash-bundle + transcode-worker + copie WASM
+# Prérequis : build-wasm doit exister (voir ci-dessus)
+pnpm build:demo
 
 # Tests unitaires (doivent TOUJOURS passer)
 cd build && ctest --output-on-failure
