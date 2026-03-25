@@ -1,10 +1,10 @@
-# hevc-decode
+# hevc.js
 
 **Play HEVC/H.265 video in any browser. No codec license. No plugin. No install.**
 
 A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop-in plugins for hls.js and dash.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
 
-1080p @ 60fps. 236KB WASM. Zero dependencies.
+1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
 ## The problem
 
@@ -22,7 +22,7 @@ Content providers either avoid HEVC, maintain dual AVC/HEVC pipelines, or accept
 
 ## The solution
 
-hevc-decode intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 before they reach the browser's decoder:
+hevc.js intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 before they reach the browser's decoder:
 
 ```
 HEVC stream ──► demux (mp4box.js) ──► decode (WASM) ──► encode (WebCodecs) ──► H.264 to MSE
@@ -78,7 +78,7 @@ hevc_decoder_destroy(dec);
 ## Architecture
 
 ```
-hevc-decode/
+hevc.js/
 ├── src/                    C++17 HEVC decoder (ITU-T H.265 spec-compliant)
 │   ├── bitstream/          Annex B parsing, NAL units, RBSP, Exp-Golomb
 │   ├── syntax/             VPS, SPS, PPS, slice header parsing
@@ -90,8 +90,7 @@ hevc-decode/
 ├── packages/
 │   ├── core/               @hevcjs/core — WASM decoder + transcoding pipeline
 │   ├── hlsjs/              @hevcjs/hlsjs — hls.js plugin
-│   ├── dashjs/             @hevcjs/dashjs — dash.js plugin
-│   └── videojs/            @hevcjs/videojs — video.js plugin
+│   └── dashjs/             @hevcjs/dashjs — dash.js plugin
 │
 ├── demo/                   Browser demos (DASH + HLS)
 └── tests/                  Unit tests + 128 oracle tests (pixel-perfect vs ffmpeg)
@@ -215,7 +214,9 @@ The transcoding pipeline requires:
 - **WebAssembly** — All modern browsers
 - **Web Workers** — All modern browsers
 
-Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc-decode will work there too.
+Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc.js will work there too.
+
+No `Cross-Origin-Embedder-Policy` or `Cross-Origin-Opener-Policy` headers needed — the WASM decoder is single-threaded and doesn't use `SharedArrayBuffer`. Works on any static file server.
 
 ## License
 
