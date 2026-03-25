@@ -119,6 +119,13 @@ function loadHLS(presetUrl) {
   hls = new Hls({
     debug: false,
     enableWorker: true,
+    // Buffer must be large enough to keep loading video ahead while
+    // transcoding is in progress (~2-3s per 6s segment).
+    maxBufferLength: 30,          // keep loading until 30s buffered
+    maxMaxBufferLength: 60,       // hard cap
+    maxBufferSize: 60 * 1000000,  // 60MB
+    backBufferLength: 30,         // prune 30s behind playhead
+    maxBufferHole: 0.5,           // tolerate 0.5s gaps
   });
 
   // Attach HEVC support — patches MSE + filters levels to prefer HEVC
