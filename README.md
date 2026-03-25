@@ -1,4 +1,4 @@
-# hevc-decode
+# hevc.js
 
 **Play HEVC/H.265 video in any browser. No codec license. No plugin. No install.**
 
@@ -22,7 +22,7 @@ Content providers either avoid HEVC, maintain dual AVC/HEVC pipelines, or accept
 
 ## The solution
 
-hevc-decode intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 before they reach the browser's decoder:
+hevc.js intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 before they reach the browser's decoder:
 
 ```
 HEVC stream ──► demux (mp4box.js) ──► decode (WASM) ──► encode (WebCodecs) ──► H.264 to MSE
@@ -78,7 +78,7 @@ hevc_decoder_destroy(dec);
 ## Architecture
 
 ```
-hevc-decode/
+hevc.js/
 ├── src/                    C++17 HEVC decoder (ITU-T H.265 spec-compliant)
 │   ├── bitstream/          Annex B parsing, NAL units, RBSP, Exp-Golomb
 │   ├── syntax/             VPS, SPS, PPS, slice header parsing
@@ -214,7 +214,7 @@ The transcoding pipeline requires:
 - **WebAssembly** — All modern browsers
 - **Web Workers** — All modern browsers
 
-Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc-decode will work there too.
+Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc.js will work there too.
 
 ## License
 
