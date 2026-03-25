@@ -22,11 +22,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `apply_deblocking`: direct plane pointer access instead of `pic->sample()` per pixel
   - `decode_residual_coding`: scan tables returned by const pointer instead of copied to stack
   - Inter pred sample copy: row-based direct pointer writes instead of `pic->sample()` per pixel
-  - **Results**: natif 1080p 63→74 fps (+17%), 4K 24→28 fps (+17%), WPP 128→158 fps (+23%)
-  - **WASM Chrome**: 1080p ~60→~80 fps decode (+33%), 4K unchanged (~17 fps)
+  - **Results**: natif 1080p 63→77 fps (+22%), 4K 24→29 fps (+21%), WPP 99→164 fps (+66%)
+  - **WASM Chrome**: 1080p ~60→~85 fps decode (+42%), 4K ~18 fps (CABAC-bound)
+
+- **CABAC hot path optimizations (Phase 9D)**:
+  - `trace_file()` calls guarded with `#ifdef HEVC_TRACE_CABAC` — eliminates dead code WASM JIT couldn't optimize
+  - `BitstreamReader::read_bit_fast()` inline method replaces `read_bits_safe(1)` in renormalize/bypass
+  - Batched renormalize: `__builtin_clz` + `read_bits_safe(shift)` replaces bit-by-bit loop
+  - **WASM Chrome**: 1080p ~80→~85 fps (+6%)
+
+- **Perf logging in transcode pipeline**: timing split demux/decode/encode per segment, logged from worker via postMessage. `SegmentTranscoder.lastPerfStats` exposes `{demuxMs, decodeMs, encodeMs, frames}`.
+
+- **`copyPlane` optimization**: `HEAPU16.slice()` bulk copy when `stride === width` (always true) instead of row-by-row loop.
 
 - **WASM ThreadPool guard**: skip thread creation under `__EMSCRIPTEN__` (no pthreads in WASM)
 - **WASM benchmark script**: `tools/bench_wasm.mjs` for Node.js performance testing
+
+### Fixed
+- **SAO pre-scan `|| true` leftover**: `if (pcmFilterDisabled || true)` forced CTU grid scan for every CTU even when no PCM exists. Fixed to `if (pcmFilterDisabled || pps.transquant_bypass_enabled_flag)`. Natif +4% (77fps 1080p, 29fps 4K).
 
 ### Fixed
 - **Merge candidate availability §6.4.2 + early part_mode**: `is_pu_available` applied z-scan (§6.4.1) before sameCb, violating §6.4.2. Additionally, `part_mode` was only written to CU grid after all PUs, so partition-specific merge exclusions (lines 279-288) used stale values. These correlated bugs masked each other — the z-scan rejection hid the stale `part_mode`. Fix: early `part_mode` write + sameCb-first check in `is_pu_available`. Fixes BBB 1080p frames 18+ (4677→0 diffs). **128/128 tests pixel-perfect.**

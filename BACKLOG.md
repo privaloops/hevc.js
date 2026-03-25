@@ -14,8 +14,8 @@ Etat d'avancement par phase et prochaines taches.
 | 6 — Loop Filters | **Termine** | 14/14 tests phase6 pass. BBB 1080p + BBB 4K pixel-perfect. 128/128 tests. |
 | 7 — High Profiles | **En cours** | Main 10 pixel-perfect (7.1 fait). Tiles parse+decode OK. WPP complet (seek + QP). |
 | 8 — WASM Integration | **Termine** | API C, build Emscripten, bindings JS, Web Worker, demo HTML WebGL |
-| 9 — Performance | **En cours** | 1080p@128fps natif WPP, 4K@31fps. Thread pool V2 fait. SIMD intrinsics a faire. |
-| 11 — Player Plugins | **En cours** | @hevcjs/dashjs, @hevcjs/hlsjs, MSE intercept, Web Worker. Seek hls.js à faire. Perf WASM à optimiser. |
+| 9 — Performance | **En cours** | Natif: 1080p@77fps 1T, 164fps WPP, 4K@29fps. WASM Chrome: 1080p@85fps, 4K@18fps. Thread pool V2 + optims algo faits. CABAC 33% du profil WASM = goulot. |
+| 11 — Player Plugins | **En cours** | @hevcjs/dashjs, @hevcjs/hlsjs, MSE intercept, Web Worker, perf logging pipeline. Seek hls.js à faire. |
 
 ## Phase 11 — Player Plugins (en cours)
 
