@@ -87,11 +87,11 @@ export function attachHevcSupport(
   const preferHevc = config.preferHevc !== false;
 
   if (hls && preferHevc) {
-    hls.on("hlsManifestParsed", async (_event: string, data: { levels: Array<{ codecs?: string; codecSet?: string }> }) => {
-      // Wait for the capability probe if it hasn't resolved yet
-      if (canEncode === null) canEncode = await canEncodePromise;
-
-      if (!canEncode) {
+    hls.on("hlsManifestParsed", (_event: string, data: { levels: Array<{ codecs?: string; codecSet?: string }> }) => {
+      // Only skip filtering when we confirmed encoding is NOT supported.
+      // If canEncode is still null (probe pending), filter optimistically —
+      // the .then() callback above will uninstallMSEIntercept() if it fails.
+      if (canEncode === false) {
         console.log("[hevc.js/hlsjs] H.264 encoding not supported — keeping all AVC levels");
         return;
       }
