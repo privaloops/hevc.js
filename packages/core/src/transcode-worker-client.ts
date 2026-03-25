@@ -111,6 +111,11 @@ export class TranscodeWorkerClient {
 
       case "transcoded": {
         const id = msg.id as number;
+        const perf = msg.perf as { demuxMs: number; decodeMs: number; encodeMs: number; frames: number } | null;
+        if (perf) {
+          const totalMs = perf.demuxMs + perf.decodeMs + perf.encodeMs;
+          console.log(`[hevc.js/perf] Segment #${id} transcoded in ${totalMs.toFixed(0)}ms (${perf.frames}f — demux:${perf.demuxMs.toFixed(0)}ms decode:${perf.decodeMs.toFixed(0)}ms encode:${perf.encodeMs.toFixed(0)}ms)`);
+        }
         const pending = this._pendingResolves.get(id);
         if (!pending) break;
         this._pendingResolves.delete(id);
