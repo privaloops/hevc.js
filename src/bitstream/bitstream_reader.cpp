@@ -1,5 +1,6 @@
 #include "bitstream/bitstream_reader.h"
 #include <cassert>
+#include <cstring>
 #include <stdexcept>
 
 namespace hevc {
