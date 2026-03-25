@@ -90,8 +90,7 @@ hevc-decode/
 ├── packages/
 │   ├── core/               @hevcjs/core — WASM decoder + transcoding pipeline
 │   ├── hlsjs/              @hevcjs/hlsjs — hls.js plugin
-│   ├── dashjs/             @hevcjs/dashjs — dash.js plugin
-│   └── videojs/            @hevcjs/videojs — video.js plugin
+│   └── dashjs/             @hevcjs/dashjs — dash.js plugin
 │
 ├── demo/                   Browser demos (DASH + HLS)
 └── tests/                  Unit tests + 128 oracle tests (pixel-perfect vs ffmpeg)
