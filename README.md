@@ -4,7 +4,7 @@
 
 A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop-in plugins for hls.js and dash.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
 
-1080p @ 60fps. 236KB WASM. Zero dependencies.
+1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
 ## The problem
 
@@ -215,6 +215,8 @@ The transcoding pipeline requires:
 - **Web Workers** — All modern browsers
 
 Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc.js will work there too.
+
+No `Cross-Origin-Embedder-Policy` or `Cross-Origin-Opener-Policy` headers needed — the WASM decoder is single-threaded and doesn't use `SharedArrayBuffer`. Works on any static file server.
 
 ## License
 
