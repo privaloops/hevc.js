@@ -12190,9 +12190,8 @@ var HevcHls = (() => {
     });
     const preferHevc = config.preferHevc !== false;
     if (hls && preferHevc) {
-      hls.on("hlsManifestParsed", async (_event, data) => {
-        if (canEncode === null) canEncode = await canEncodePromise;
-        if (!canEncode) {
+      hls.on("hlsManifestParsed", (_event, data) => {
+        if (canEncode === false) {
           console.log("[hevc.js/hlsjs] H.264 encoding not supported \u2014 keeping all AVC levels");
           return;
         }
