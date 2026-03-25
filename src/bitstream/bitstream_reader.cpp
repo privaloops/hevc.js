@@ -13,8 +13,33 @@ BitstreamReader::BitstreamReader(const uint8_t* data, size_t size)
 }
 
 // Refill the 64-bit cache from the byte stream (MSB-aligned).
-// Loads as many full bytes as fit into the empty upper bits of the cache.
+// Fast path: load 8 bytes at once when available (bulk load + byte swap).
+// Fallback: byte-by-byte for the last few bytes.
 void BitstreamReader::refill() {
+    // Fast path: if cache is nearly empty and enough bytes remain, do a bulk load
+    if (cache_bits_ <= 0 && byte_pos_ + 8 <= size_) {
+        uint64_t raw;
+        std::memcpy(&raw, data_ + byte_pos_, 8);
+        // Convert from big-endian (network byte order) to host
+#if defined(__GNUC__) || defined(__clang__)
+        cache_ = __builtin_bswap64(raw);
+#else
+        // Portable fallback
+        cache_ = ((raw & 0x00000000000000FFULL) << 56) |
+                 ((raw & 0x000000000000FF00ULL) << 40) |
+                 ((raw & 0x0000000000FF0000ULL) << 24) |
+                 ((raw & 0x00000000FF000000ULL) <<  8) |
+                 ((raw & 0x000000FF00000000ULL) >>  8) |
+                 ((raw & 0x0000FF0000000000ULL) >> 24) |
+                 ((raw & 0x00FF000000000000ULL) >> 40) |
+                 ((raw & 0xFF00000000000000ULL) >> 56);
+#endif
+        cache_bits_ = 64;
+        byte_pos_ += 8;
+        return;
+    }
+
+    // Slow path: byte-by-byte for remaining bytes
     while (cache_bits_ <= 56 && byte_pos_ < size_) {
         cache_ |= static_cast<uint64_t>(data_[byte_pos_]) << (56 - cache_bits_);
         cache_bits_ += 8;
@@ -43,34 +68,7 @@ uint32_t BitstreamReader::read_bits(int n) {
     return result;
 }
 
-// Same as read_bits but returns 0 past end instead of throwing.
-// Used by CABAC renormalization which may read past the last byte.
-uint32_t BitstreamReader::read_bits_safe(int n) {
-    assert(n >= 0 && n <= 32);
-    if (n == 0) return 0;
-
-    if (cache_bits_ < n) {
-        refill();
-    }
-
-    if (cache_bits_ < n) {
-        // Past end — return zero-padded
-        uint32_t result = 0;
-        if (cache_bits_ > 0) {
-            result = static_cast<uint32_t>(cache_ >> (64 - n));
-        }
-        cache_ = 0;
-        bit_pos_ += n;
-        cache_bits_ = 0;
-        return result;
-    }
-
-    uint32_t result = static_cast<uint32_t>(cache_ >> (64 - n));
-    cache_ <<= n;
-    cache_bits_ -= n;
-    bit_pos_ += n;
-    return result;
-}
+// read_bits_safe is now inline in the header (CABAC hot path).
 
 int32_t BitstreamReader::read_i(int n) {
     uint32_t val = read_bits(n);

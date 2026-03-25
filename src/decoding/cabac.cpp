@@ -30,7 +30,7 @@ void CabacEngine::init_decoder(BitstreamReader& bs) {
 #ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "=== INIT_DECODER R=%d O=%d binCount=%d ===\n",
-                     ivlCurrRange_, ivlOffset_, bin_count_);
+                     ivlCurrRange_, ivlOffset_, bin_count());
 #endif
 }
 
@@ -74,74 +74,18 @@ void CabacEngine::init_contexts(int sliceType, int SliceQpY, bool cabac_init_fla
              sliceType, SliceQpY, cabac_init_flag, initType);
 }
 
-// §9.3.4.3.2 — Arithmetic decoding of a bin with context
-int CabacEngine::decode_decision(int ctxIdx) {
-    auto& ctx = contexts_[ctxIdx];
-    uint8_t pStateIdx = ctx.pStateIdx;
-    uint8_t valMps    = ctx.valMps;
-
-    uint16_t ivlLpsRange = rangeTabLps[pStateIdx][(ivlCurrRange_ >> 6) & 3];
-    ivlCurrRange_ -= ivlLpsRange;
-
-    int binVal;
-    if (ivlOffset_ >= ivlCurrRange_) {
-        // LPS path
-        binVal = 1 - valMps;
-        ivlOffset_ -= ivlCurrRange_;
-        ivlCurrRange_ = ivlLpsRange;
-        if (pStateIdx == 0)
-            ctx.valMps = 1 - valMps;
-        ctx.pStateIdx = transIdxLps[pStateIdx];
-    } else {
-        // MPS path
-        binVal = valMps;
-        ctx.pStateIdx = transIdxMps[pStateIdx];
-    }
-
-    renormalize();
-    bin_count_++;
-
-#ifdef HEVC_TRACE_CABAC
-    if (FILE* f = trace_file())
-        std::fprintf(f, "D %d ctx=%d st=%d mps=%d R=%d O=%d val=%d\n",
-                     bin_count_, ctxIdx, pStateIdx, valMps,
-                     ivlCurrRange_, ivlOffset_, binVal);
-#endif
-
-    return binVal;
-}
-
-// §9.3.4.3.4 — Bypass decoding
-int CabacEngine::decode_bypass() {
-    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << 1) | bs_->read_bit_fast());
-
-    int val = 0;
-    if (ivlOffset_ >= ivlCurrRange_) {
-        ivlOffset_ -= ivlCurrRange_;
-        val = 1;
-    }
-
-    bin_count_++;
-
-#ifdef HEVC_TRACE_CABAC
-    if (FILE* f = trace_file())
-        std::fprintf(f, "B %d R=%d O=%d val=%d\n",
-                     bin_count_, ivlCurrRange_, ivlOffset_, val);
-#endif
-
-    return val;
-}
-
-// §9.3.4.3.5 — Terminate decoding
+// §9.3.4.3.5 — Terminate decoding (cold path)
 int CabacEngine::decode_terminate() {
     ivlCurrRange_ -= 2;
+#ifdef HEVC_DEBUG
     bin_count_++;
+#endif
 
     if (ivlOffset_ >= ivlCurrRange_) {
 #ifdef HEVC_TRACE_CABAC
         if (FILE* f = trace_file())
             std::fprintf(f, "T %d R=%d O=%d val=1\n",
-                         bin_count_, ivlCurrRange_, ivlOffset_);
+                         bin_count(), ivlCurrRange_, ivlOffset_);
 #endif
         return 1;
     }
@@ -150,29 +94,10 @@ int CabacEngine::decode_terminate() {
 #ifdef HEVC_TRACE_CABAC
     if (FILE* f = trace_file())
         std::fprintf(f, "T %d R=%d O=%d val=0\n",
-                     bin_count_, ivlCurrRange_, ivlOffset_);
+                     bin_count(), ivlCurrRange_, ivlOffset_);
 #endif
 
     return 0;
-}
-
-// Decode multiple bypass bins, MSB first
-int CabacEngine::decode_bypass_bins(int numBins) {
-    int value = 0;
-    for (int i = 0; i < numBins; i++) {
-        value = (value << 1) | decode_bypass();
-    }
-    return value;
-}
-
-// §9.3.4.3.3 — Renormalization (batched: count shifts then read all bits at once)
-void CabacEngine::renormalize() {
-    if (ivlCurrRange_ >= 256) return;
-    // Count how many left-shifts needed to bring range into [256, 510]
-    int shift = __builtin_clz(static_cast<unsigned>(ivlCurrRange_)) - 23; // 32 - 9 = 23
-    ivlCurrRange_ <<= shift;
-    uint32_t bits = bs_->read_bits_safe(shift);
-    ivlOffset_ = static_cast<uint16_t>((ivlOffset_ << shift) | bits);
 }
 
 } // namespace hevc
