@@ -211,12 +211,18 @@ int hevc_decoder_get_frame(HEVCDecoder* dec, int index, HEVCFrame* frame);
 
 ## Browser compatibility
 
-The transcoding pipeline requires:
-- **WebCodecs VideoEncoder** — Chrome 94+, Edge 94+, Safari 16.4+
-- **WebAssembly** — All modern browsers
-- **Web Workers** — All modern browsers
+The transcoding pipeline requires **WebCodecs VideoEncoder** with H.264 encoding support:
 
-Firefox does not yet support WebCodecs VideoEncoder. When it does, hevc.js will work there too.
+| Browser | VideoEncoder H.264 | hevc.js works | Notes |
+|---|---|---|---|
+| **Chrome/Edge** 94+ | Yes | Yes | Full support on all platforms |
+| **Safari** 16.4+ | Yes | Not needed | Native HEVC playback — transcoding unnecessary |
+| **Firefox** (all versions) | **No** | **No** — graceful fallback to AVC | Firefox exposes `VideoEncoder` since v130, but H.264 encoding fails at runtime ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)). `isConfigSupported()` may even return `true` incorrectly. hevc.js detects this and falls back to native AVC levels when available. |
+
+Other requirements (supported by all modern browsers):
+- **WebAssembly**
+- **Web Workers**
+- **Secure Context** (HTTPS or localhost)
 
 No `Cross-Origin-Embedder-Policy` or `Cross-Origin-Opener-Policy` headers needed — the WASM decoder is single-threaded and doesn't use `SharedArrayBuffer`. Works on any static file server.
 
