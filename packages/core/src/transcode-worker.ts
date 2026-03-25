@@ -72,6 +72,7 @@ self.onmessage = async (e: MessageEvent) => {
           type: "transcoded",
           id: msg.id,
           h264: h264 ? h264.buffer : null,
+          perf: transcoder.lastPerfStats ? { ...transcoder.lastPerfStats } : null,
         };
 
         // Include H.264 init segment on first transcode

@@ -111,14 +111,19 @@ export class SegmentTranscoder {
    * Returns the H.264 fMP4 segment (moof + mdat).
    * On the first call, also generates the H.264 init segment.
    */
+  /** Perf stats from last processMediaSegment call */
+  lastPerfStats: { demuxMs: number; decodeMs: number; encodeMs: number; frames: number } | null = null;
+
   async processMediaSegment(data: Uint8Array): Promise<Uint8Array | null> {
     if (!this._decoder || !this._demuxer) {
       throw new Error("Transcoder not initialized. Call init() and processInitSegment() first.");
     }
 
     // 1. Demux → samples with NAL units
+    const tDemux0 = performance.now();
     const samples = this._demuxer.parseSegment(data);
     if (samples.length === 0) return null;
+    const tDemuxEnd = performance.now();
 
     // 2. Feed VPS/SPS/PPS on first segment (from hvcC in init segment)
     if (!this._paramSetsFed && this._paramSetsBuffer) {
@@ -144,7 +149,11 @@ export class SegmentTranscoder {
 
     // 3. Drain decoded YUV frames
     const frames = this._decoder.drain();
-    if (frames.length === 0) return null;
+    const tDecodeEnd = performance.now();
+    if (frames.length === 0) {
+      this.lastPerfStats = null;
+      return null;
+    }
 
     // 4. Encode to H.264
     if (!this._encoder) {
@@ -199,6 +208,14 @@ export class SegmentTranscoder {
 
     const mediaSegment = this._muxer.muxSegment(muxerSamples, this._baseDecodeTime);
     this._baseDecodeTime += muxerSamples.reduce((sum, s) => sum + s.duration, 0);
+
+    const tEncodeEnd = performance.now();
+    this.lastPerfStats = {
+      demuxMs: tDemuxEnd - tDemux0,
+      decodeMs: tDecodeEnd - tDemuxEnd,
+      encodeMs: tEncodeEnd - tDecodeEnd,
+      frames: frames.length,
+    };
 
     return mediaSegment;
   }
