@@ -53,6 +53,18 @@ export function attachHevcSupport(
     return () => {};
   }
 
+  // Async capability probe — detects browsers that expose VideoEncoder
+  // but can't actually encode H.264 (e.g. Firefox 133 on Windows 10).
+  H264Encoder.checkSupport().then((ok) => {
+    if (!ok) {
+      console.warn(
+        "[hevc.js/dash] VideoEncoder exists but H.264 encoding is not supported. " +
+        "Falling back to native playback.",
+      );
+      uninstallMSEIntercept();
+    }
+  });
+
   // 1. Install MSE intercept ALWAYS — patches isTypeSupported + addSourceBuffer.
   // Even on browsers with native HEVC, the MPD may have incomplete codec strings
   // like "hev1" (without profile/level) which MediaSource.isTypeSupported rejects.
