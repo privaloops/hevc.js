@@ -23,11 +23,30 @@ public:
     bool     read_flag() { return read_bits(1) != 0; }
     uint8_t  read_byte();
 
-    // Read bits with zero-padding past end (for CABAC renormalization)
-    uint32_t read_bits_safe(int n);
+    // Read bits with zero-padding past end (for CABAC renormalization).
+    // Inline: called from CABAC hot path (renormalize, decode_bypass_bins).
+    inline uint32_t read_bits_safe(int n) {
+        if (n == 0) return 0;
+        if (cache_bits_ < n) refill();
+        if (cache_bits_ < n) {
+            // Past end — return zero-padded
+            uint32_t result = 0;
+            if (cache_bits_ > 0)
+                result = static_cast<uint32_t>(cache_ >> (64 - n));
+            cache_ = 0;
+            bit_pos_ += n;
+            cache_bits_ = 0;
+            return result;
+        }
+        uint32_t result = static_cast<uint32_t>(cache_ >> (64 - n));
+        cache_ <<= n;
+        cache_bits_ -= n;
+        bit_pos_ += n;
+        return result;
+    }
 
     // Fast single-bit read for CABAC hot path (inline, no n==0 check)
-    uint32_t read_bit_fast() {
+    inline uint32_t read_bit_fast() {
         if (cache_bits_ < 1) refill();
         uint32_t bit = static_cast<uint32_t>(cache_ >> 63);
         cache_ <<= 1;
