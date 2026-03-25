@@ -74,8 +74,10 @@ const h264Segment = await transcoder.processMediaSegment(mediaSegmentBytes);
 
 ## Requirements
 
-- Chrome 94+ (WebCodecs VideoEncoder)
+- Chrome 94+ or Edge 94+ (WebCodecs VideoEncoder with H.264 encoding)
 - Secure Context (HTTPS or localhost)
+
+**Firefox**: not supported — `VideoEncoder` H.264 encoding is broken in all current versions ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)). The plugin detects this and falls back to native playback.
 
 ## License
 
