@@ -1,0 +1,127 @@
+name: Deploy Demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.51
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build WASM
+        run: |
+          emcmake cmake -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
+          cmake --build build-wasm --parallel
+
+      - name: Build JS packages
+        run: pnpm build:js
+
+      - name: Build demo bundles
+        run: pnpm build:demo
+
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p _site
+          cp -r demo/* _site/
+          # Add a simple index page that links to both demos
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>hevc.js — Live Demos</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              background: #1a1a2e; color: #e0e0e0;
+              min-height: 100vh; display: flex; flex-direction: column;
+              align-items: center; justify-content: center; padding: 40px;
+            }
+            h1 { font-size: 2em; margin-bottom: 8px; color: #fff; }
+            .tagline { color: #888; margin-bottom: 40px; font-size: 1.1em; }
+            .demos { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+            a {
+              display: block; padding: 32px 48px; background: #16213e;
+              border: 1px solid #0f3460; border-radius: 8px;
+              color: #e0e0e0; text-decoration: none; font-size: 1.2em;
+              transition: background 0.2s;
+            }
+            a:hover { background: #0f3460; }
+            a small { display: block; color: #888; font-size: 0.7em; margin-top: 8px; }
+            .github {
+              margin-top: 40px; color: #888; font-size: 0.9em;
+            }
+            .github a { display: inline; padding: 0; background: none; border: none;
+              color: #5b9bd5; font-size: 0.9em; }
+            .github a:hover { text-decoration: underline; background: none; }
+          </style>
+          </head>
+          <body>
+            <h1>hevc.js</h1>
+            <p class="tagline">HEVC/H.265 playback in any browser — no codec, no plugin, no install</p>
+            <div class="demos">
+              <a href="hls.html">
+                HLS Demo
+                <small>hls.js + HEVC transcoding</small>
+              </a>
+              <a href="dash.html">
+                DASH Demo
+                <small>dash.js + HEVC transcoding</small>
+              </a>
+            </div>
+            <p class="github">
+              <a href="https://github.com/privaloops/hevc.js">GitHub</a>
+              — 236KB WASM, 1080p@60fps, pixel-perfect spec conformance
+            </p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -6,6 +6,8 @@ A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop
 
 1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
+**[Live Demo — HLS](https://privaloops.github.io/hevc.js/hls.html)** | **[Live Demo — DASH](https://privaloops.github.io/hevc.js/dash.html)**
+
 ## The problem
 
 HEVC (H.265) delivers 50% better compression than H.264 at the same quality. But you can't ship HEVC and assume it plays everywhere:
