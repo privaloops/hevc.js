@@ -23,13 +23,14 @@ export class TranscodeWorkerClient {
   private _readyResolve!: () => void;
   private _initParsedPromise!: Promise<void>;
   private _initParsedResolve!: () => void;
+  private _initParsedReject!: (err: Error) => void;
 
   constructor(config: TranscodeWorkerClientConfig) {
     // Classic worker (not module) — needed for importScripts() to load WASM glue
     this._worker = new Worker(config.workerUrl);
 
     this._readyPromise = new Promise<void>((resolve) => { this._readyResolve = resolve; });
-    this._initParsedPromise = new Promise<void>((resolve) => { this._initParsedResolve = resolve; });
+    this._initParsedPromise = new Promise<void>((resolve, reject) => { this._initParsedResolve = resolve; this._initParsedReject = reject; });
 
     this._worker.onmessage = (e: MessageEvent) => this._onMessage(e.data);
     this._worker.onerror = (e: ErrorEvent) => {
@@ -80,11 +81,17 @@ export class TranscodeWorkerClient {
     this._pendingResolves.clear();
     this._segmentId = 0;
 
+    // Reset ready state — worker will destroy + re-create transcoder (async init)
+    // waitReady() must block until the worker sends "aborted" (= re-init done)
+    this._ready = false;
+    this._readyPromise = new Promise<void>((resolve) => { this._readyResolve = resolve; });
+
     // Reset init state — next append will be a new init segment
     this._initParsed = false;
     this._initResult = null;
-    this._initParsedPromise = new Promise<void>((resolve) => {
+    this._initParsedPromise = new Promise<void>((resolve, reject) => {
       this._initParsedResolve = resolve;
+      this._initParsedReject = reject;
     });
 
     this._worker.postMessage({ type: "abort" });
@@ -139,6 +146,10 @@ export class TranscodeWorkerClient {
         if (pending) {
           this._pendingResolves.delete(id);
           pending.reject(new Error(msg.message as string));
+        } else if (id === -1 && !this._initParsed) {
+          // Error during processInitSegment in worker — reject the awaited promise
+          // to unblock processNext (otherwise it awaits forever)
+          this._initParsedReject(new Error(msg.message as string));
         } else {
           console.error("[hevc.js/worker]", msg.message);
         }
@@ -146,7 +157,9 @@ export class TranscodeWorkerClient {
       }
 
       case "aborted":
-        // Worker cleared its state — re-init if needed
+        // Worker re-created transcoder and finished init — unblock waitReady()
+        this._ready = true;
+        this._readyResolve();
         break;
     }
   }

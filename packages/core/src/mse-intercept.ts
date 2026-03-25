@@ -18,6 +18,10 @@ const H264_CODEC = "avc1.640033";                    // High Profile Level 5.1 �
 export interface MSEInterceptConfig extends SegmentTranscoderConfig {
   /** URL to the transcode worker script. When provided, transcoding runs off main thread. */
   workerUrl?: string;
+  /** Called when video transcoding starts — use to pause player buffering. */
+  onTranscodeStart?: () => void;
+  /** Called when video transcoding ends — use to resume player buffering. */
+  onTranscodeEnd?: () => void;
 }
 
 interface InterceptState {
@@ -34,7 +38,11 @@ let interceptState: InterceptState | null = null;
  * Install the MSE intercept. Call before dash.js initializes.
  */
 export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
-  if (interceptState?.active) return;
+  if (interceptState?.active) {
+    // Already installed — update config (allows late-binding of callbacks)
+    Object.assign(interceptState.config, config);
+    return;
+  }
 
   const originalAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
   const originalIsTypeSupported = MediaSource.isTypeSupported;
@@ -126,6 +134,13 @@ function createTranscodingProxy(
   let fakeUpdating = false;
   const queue: Uint8Array[] = [];
   let processing = false;
+  let abortGeneration = 0; // incremented on abort — lets processNext detect stale runs
+  let cachedInitData: Uint8Array | null = null; // cached for re-send after no-abort seek
+
+  // Pipeline overlap: max segments queued before backpressure blocks dash.js.
+  // At 2, dash.js can prefetch the next segment while we transcode the current one.
+  // Beyond 2, we block to avoid unbounded memory growth (especially 4K).
+  const MAX_QUEUE_BEFORE_BACKPRESSURE = 2;
 
   if (useWorker) {
     workerClient = new TranscodeWorkerClient({
@@ -176,13 +191,14 @@ function createTranscodingProxy(
       // Override abort — cancel pending transcoding + reset state for seek
       if (prop === "abort") {
         return function (): void {
+          abortGeneration++;  // signal stale processNext to exit
           queue.length = 0;
           processing = false;
           fakeUpdating = false;
           initParsed = false;   // Next append will be a new init segment
           initAppended = false;
           if (workerClient) workerClient.abort();
-          console.log("[hevc.js] abort() — queue + transcoder reset");
+          console.log("[hevc.js] abort() — queue + transcoder reset (gen=" + abortGeneration + ")");
           target.abort();
         };
       }
@@ -193,7 +209,8 @@ function createTranscodingProxy(
           const bytes = toUint8Array(data);
           queue.push(bytes);
 
-          // Signal updating=true immediately so dash.js waits
+          // Block the player until transcoding completes — this prevents
+          // audio flood (hls.js) and keeps A/V buffer levels in sync.
           fakeUpdating = true;
           dispatchOnProxy("updatestart");
 
@@ -201,21 +218,31 @@ function createTranscodingProxy(
         };
       }
 
-      // Override addEventListener to capture dash.js listeners
+      // Override addEventListener — register ONLY on proxy map, NOT on real SB.
+      // This prevents hls.js from receiving real SB events directly (which
+      // would double-fire updateend and crash hls.js's buffer controller).
       if (prop === "addEventListener") {
         return function (type: string, fn: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {
-          // Register on proxy for our synthetic events
           if (!listeners.has(type)) listeners.set(type, new Set());
           listeners.get(type)!.add(fn);
-          // Also register on real SB for real events (needed for non-intercepted operations)
-          target.addEventListener(type, fn, options);
         };
       }
 
       if (prop === "removeEventListener") {
         return function (type: string, fn: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void {
           listeners.get(type)?.delete(fn);
-          target.removeEventListener(type, fn, options);
+        };
+      }
+
+      // Override remove — forward to real SB and relay events to proxy listeners
+      if (prop === "remove") {
+        return function (start: number, end: number): void {
+          dispatchOnProxy("updatestart");
+          target.remove(start, end);
+          target.addEventListener("updateend", () => {
+            dispatchOnProxy("update");
+            dispatchOnProxy("updateend");
+          }, { once: true });
         };
       }
 
@@ -258,79 +285,125 @@ function createTranscodingProxy(
   async function processNext(target: SourceBuffer): Promise<void> {
     if (processing) return;
     processing = true;
+    const myGeneration = abortGeneration;
 
     try {
       while (queue.length > 0) {
+        if (abortGeneration !== myGeneration) return; // aborted — exit silently
+
         const segment = queue.shift()!;
 
         // Wait for real SB to be ready
         if (target.updating) {
           await waitForUpdateEnd(target);
+          if (abortGeneration !== myGeneration) return;
         }
 
-        if (!initParsed) {
-          // Init segment: parse hvcC, extract params
-          await transcodeInit(segment);
+        // Detect init segment by ftyp/moov box signature.
+        // Handles both first-time init AND re-sent init after seek (no-abort case).
+        const isInit = isInitSegment(segment);
+
+        if (isInit || !initParsed) {
+          const initData = isInit ? segment : cachedInitData;
+          if (!initData) {
+            console.error("[hevc.js] No init segment available — cannot process media");
+            continue;
+          }
+
+          // Cache init data before transcodeInit (which transfers/detaches the buffer)
+          cachedInitData = new Uint8Array(initData);
+
+          // (Re-)parse init segment in worker/transcoder
+          await transcodeInit(initData);
+          if (abortGeneration !== myGeneration) return;
           initParsed = true;
+          // Reset initAppended — after a new init, we need a fresh H.264 init
+          initAppended = false;
           console.log("[hevc.js] Init segment parsed");
 
-          // Signal completion for this "append"
-          fakeUpdating = false;
-          dispatchOnProxy("update");
-          dispatchOnProxy("updateend");
-
-          if (queue.length > 0) {
-            fakeUpdating = true;
-            dispatchOnProxy("updatestart");
+          if (isInit) {
+            // Release backpressure — init-only append, no media to transcode
+            if (fakeUpdating) {
+              fakeUpdating = false;
+              dispatchOnProxy("update");
+              dispatchOnProxy("updateend");
+            }
+            continue;
           }
-          continue;
+          // Fall through: initParsed is now true, process this segment as media below
         }
 
         // Media segment: transcode (in Worker or main thread)
         console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B)...`);
+        config.onTranscodeStart?.();
         const h264Segment = await transcodeMedia(segment);
+        config.onTranscodeEnd?.();
+        if (abortGeneration !== myGeneration) return; // aborted during transcode
 
         // Append H.264 init segment on first successful transcode
         const initResult = getInitResult();
         if (!initAppended && initResult) {
           initAppended = true;
           if (target.updating) await waitForUpdateEnd(target);
+          if (abortGeneration !== myGeneration) return;
           realAppend(initResult.initSegment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
+          if (abortGeneration !== myGeneration) return;
           console.log("[hevc.js] H.264 init segment appended");
         }
 
         // Append transcoded media segment
         if (h264Segment) {
           if (target.updating) await waitForUpdateEnd(target);
-          fakeUpdating = false;
+          if (abortGeneration !== myGeneration) return;
           realAppend(h264Segment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
+          if (abortGeneration !== myGeneration) return;
 
           const buffered = target.buffered;
           const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
           console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
-        } else {
+        }
+
+        // Release backpressure if queue dropped below threshold
+        if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
           fakeUpdating = false;
           dispatchOnProxy("update");
           dispatchOnProxy("updateend");
         }
-
-        if (queue.length > 0) {
-          fakeUpdating = true;
-        }
       }
     } catch (err) {
+      if (abortGeneration !== myGeneration) return; // aborted — swallow error
       console.error("[hevc.js/dash] Transcoding error:",
         (err as Error)?.message ?? err, (err as Error)?.stack);
       fakeUpdating = false;
       dispatchOnProxy("error");
     } finally {
-      processing = false;
+      if (abortGeneration === myGeneration) {
+        processing = false;
+        // Ensure player is unblocked when queue drains
+        if (fakeUpdating) {
+          fakeUpdating = false;
+          dispatchOnProxy("update");
+          dispatchOnProxy("updateend");
+        }
+      }
     }
   }
 
   return proxy as unknown as SourceBuffer;
+}
+
+/**
+ * Detect fMP4 init segment by scanning for 'ftyp' or 'moov' box type
+ * in the first 8 bytes (box header: 4-byte size + 4-byte type).
+ */
+function isInitSegment(data: Uint8Array): boolean {
+  if (data.byteLength < 8) return false;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const boxType = view.getUint32(4);
+  // 'ftyp' = 0x66747970, 'moov' = 0x6D6F6F76
+  return boxType === 0x66747970 || boxType === 0x6D6F6F76;
 }
 
 function waitForUpdateEnd(sb: SourceBuffer): Promise<void> {
