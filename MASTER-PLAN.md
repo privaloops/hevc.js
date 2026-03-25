@@ -159,10 +159,14 @@ Sous-étapes :
 
 **Fait** :
 - 9.1 Quick wins : interior PU interp, stack buffers, SAO persistent, SIMD auto-vec (+44% WASM)
-- 9.2 WPP V1 (thread-per-row) → V2 (thread pool + condvar) : 1080p 128 fps, 4K 31 fps
-- Ecart vs libde265 : 0.27x WPP 1080p, 0.25x WPP 4K — le goulot est single-thread (SIMD intrinsics)
+- 9.2 WPP V2 (thread pool + condvar) : 1080p 164 fps WPP, 4K 29 fps 1T
+- 9.3 Optims algorithmiques : merge vector fixe, SAO skip cu_at, pointeurs directs, zscan branchless
+- 9.4 CABAC : trace compile-guarded, read_bit_fast inline, renormalize batché
+- Profiling natif (xctrace) + WASM (Chrome DevTools) : CABAC = 33% du profil WASM (goulot)
+- **WASM Chrome 1080p@85fps** — critère temps réel 1080p@25fps atteint (3.4x marge)
+- WASM Chrome 4K@18fps — sous le temps réel 4K@25fps
 
-**Critère de sortie** : Décoder du 1080p@30 en temps réel dans un navigateur. 4K@60 comme objectif stretch.
+**Critère de sortie** : ~~Décoder du 1080p@30 en temps réel dans un navigateur.~~ **ATTEINT** (85fps). 4K@60 comme objectif stretch (18fps actuellement).
 
 ### Phase 10 — Multi-Slice (`docs/phases/phase-10-multi-slice.md`)
 
