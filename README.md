@@ -8,7 +8,7 @@ A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop
 
 ## The problem
 
-HEVC (H.265) delivers 50% better compression than H.264 at the same quality. But browser support is fragmented: Safari supports it natively, Chrome/Edge require a paid OS-level codec on Windows, and Firefox doesn't support it at all. Content providers either avoid HEVC entirely or maintain dual AVC/HEVC pipelines.
+HEVC (H.265) delivers 50% better compression than H.264 at the same quality. But browser support is inconsistent: Safari and Chrome/Edge support it on macOS (hardware VideoToolbox), Chrome/Edge on Windows depend on the OS-level codec (sometimes pre-installed, sometimes not), Linux has no browser HEVC support, and Firefox doesn't support it at all. You can't ship HEVC and assume it plays everywhere.
 
 ## The solution
 
