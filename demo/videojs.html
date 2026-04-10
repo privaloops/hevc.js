@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hevc.js — Video.js + VHS + HEVC</title>
+<link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a2e; color: #e0e0e0;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px;
+  }
+  h1 { font-size: 1.4em; margin-bottom: 8px; color: #fff; }
+  .subtitle { font-size: 0.85em; color: #888; margin-bottom: 16px; }
+  .container { max-width: 960px; width: 100%; }
+  .video-js { width: 100% !important; aspect-ratio: 16/9; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  button {
+    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
+    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em;
+  }
+  button:hover { background: #0f3460; }
+  input[type="text"] {
+    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
+    padding: 8px 12px; border-radius: 4px; font-size: 0.9em; flex: 1;
+  }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .presets button { font-size: 0.8em; padding: 4px 10px; }
+  #status { margin-top: 8px; font-size: 0.85em; color: #e94560; min-height: 1.2em; }
+  #log {
+    width: 100%; height: 220px; margin-top: 12px;
+    background: #0d1117; color: #8b949e; border: 1px solid #0f3460;
+    border-radius: 4px; font-family: monospace; font-size: 0.78em;
+    padding: 8px; resize: vertical;
+  }
+</style>
+</head>
+<body>
+
+<h1>hevc.js — Video.js + VHS + HEVC</h1>
+<p class="subtitle">HEVC HLS via Video.js + videojs-http-streaming + MSE intercept (HEVC&#8594;H.264)</p>
+
+<div class="container">
+  <div class="controls">
+    <input type="text" id="hls-url" placeholder="Enter HEVC HLS URL (.m3u8)...">
+    <button onclick="loadStream()">Load</button>
+  </div>
+  <div class="presets">
+    <button onclick="loadStream('streams/hls_abr/master.m3u8')">BBB ABR (30s)</button>
+    <button onclick="loadStream('https://manifest-arte.akamaized.net/api/manifest/v1/Generate/bbc30788-8f2b-4407-a231-5ccf6485d1a5/fr/XQ+KS+CHEV1/125603-000-A.m3u8')">ARTE HEVC</button>
+  </div>
+
+  <video-js id="player" class="vjs-big-play-centered vjs-fluid" controls>
+  </video-js>
+  <div id="status">Loading...</div>
+  <textarea id="log" readonly></textarea>
+</div>
+
+<!-- WASM decoder -->
+<script src="hevc-decode.js"></script>
+
+<!-- Video.js (includes VHS / videojs-http-streaming) -->
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+
+<!-- contrib-quality-levels (data layer) -->
+<script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@4.1.0/dist/videojs-contrib-quality-levels.min.js"></script>
+
+<!-- hls-quality-selector (UI menu) -->
+<script src="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2.0.0/dist/videojs-hls-quality-selector.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2.0.0/dist/videojs-hls-quality-selector.css">
+
+<!-- hevc.js core bundle (MSE intercept) -->
+<script src="videojs-bundle.js"></script>
+
+<script>
+// --- Logging ---
+const logEl = document.getElementById('log');
+function log(...args) {
+  const line = args.map(a => {
+    if (a instanceof Error) return `${a.name}: ${a.message}`;
+    if (typeof a === 'object') return JSON.stringify(a);
+    return String(a);
+  }).join(' ');
+  logEl.value += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const _log = console.log, _warn = console.warn, _err = console.error;
+console.log = (...a) => { _log(...a); log('[log]', ...a); };
+console.warn = (...a) => { _warn(...a); log('[warn]', ...a); };
+console.error = (...a) => { _err(...a); log('[ERROR]', ...a); };
+
+// --- Init: install MSE intercept BEFORE Video.js creates any SourceBuffer ---
+let hevcReady = false;
+
+(async () => {
+  const cleanup = await HevcVideojs.attachHevcSupport({
+    workerUrl: './transcode-worker.js',
+  });
+  hevcReady = cleanup !== null && typeof cleanup === 'function';
+
+  if (!hevcReady) {
+    document.getElementById('status').textContent =
+      'HEVC transcoding not available — native HEVC or no VideoEncoder';
+    return;
+  }
+
+  document.getElementById('status').textContent = 'Ready — choose a preset or enter an HLS URL';
+})();
+
+// --- Video.js player ---
+let player = null;
+
+function loadStream(presetUrl) {
+  const url = presetUrl || document.getElementById('hls-url').value.trim();
+  if (!url) return;
+  document.getElementById('hls-url').value = url;
+
+  if (player) {
+    player.dispose();
+    // Recreate the video-js element (dispose removes it)
+    const wrap = document.querySelector('.container');
+    const statusEl = document.getElementById('status');
+    const vjsEl = document.createElement('video-js');
+    vjsEl.id = 'player';
+    vjsEl.className = 'vjs-big-play-centered vjs-fluid';
+    vjsEl.setAttribute('controls', '');
+    wrap.insertBefore(vjsEl, statusEl);
+  }
+
+  player = videojs('player', {
+    html5: {
+      vhs: {
+        overrideNative: true,
+      },
+    },
+    controls: true,
+    autoplay: true,
+    muted: false,
+  });
+
+  // Enable quality levels (contrib-quality-levels) + UI selector
+  if (player.qualityLevels) {
+    const ql = player.qualityLevels();
+    ql.on('addqualitylevel', (e) => {
+      const level = e.qualityLevel;
+      log(`[quality] Level added: ${level.width}x${level.height} ${level.label || ''}`);
+    });
+    ql.on('change', () => {
+      const active = ql[ql.selectedIndex];
+      if (active) {
+        log(`[quality] Switched to: ${active.width}x${active.height}`);
+        document.getElementById('status').textContent =
+          `Playing ${active.width}x${active.height} via Video.js + hevc.js`;
+      }
+    });
+  }
+  // Activate quality selector UI menu in control bar
+  if (player.hlsQualitySelector) {
+    player.hlsQualitySelector({ displayCurrentQuality: true });
+  }
+
+  player.on('playing', () => {
+    document.getElementById('status').textContent = 'Playing via Video.js + hevc.js';
+  });
+  player.on('error', (e) => {
+    const err = player.error();
+    log(`[videojs] Error: ${err?.code} ${err?.message}`);
+    document.getElementById('status').textContent = `Error: ${err?.message}`;
+  });
+
+  player.src({ type: 'application/x-mpegURL', src: url });
+  document.getElementById('status').textContent = 'Loading ' + url.split('/').pop() + '...';
+}
+</script>
+</body>
+</html>
