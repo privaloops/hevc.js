@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **E2E cross-browser tests** (Playwright + BrowserStack): 8 tests DASH + HLS (page load, 720p/1080p/4K transcode pipeline) sur 6 browsers (Chrome/Edge/Firefox Windows, Chrome/Safari macOS, Firefox Linux). `pnpm test:e2e` (local) et `pnpm test:e2e:bs` (BrowserStack)
+- **Native HEVC detection**: les plugins dashjs/hlsjs détectent si le browser supporte HEVC nativement via `MediaSource.isTypeSupported` et skip le transcoding (Safari, Firefox). Option `forceTranscode: true` pour forcer
+
+### Fixed
+- **Race condition async VideoEncoder**: `attachHevcSupport` est maintenant async — vérifie le support H.264 encoding AVANT d'installer l'intercept MSE (évite crash `bufferAppendError` sur Firefox)
+- **Capabilities filter dashjs**: dead code simplifié (retournait `true` dans les deux branches)
+
+### Changed
 - **Thread pool WPP parallel decode (Phase 9B)**: Persistent `ThreadPool` class with N worker threads (N = `hardware_concurrency`), job queue with mutex + condition variable. Replaces the V1 thread-per-row approach (which created/destroyed 34 `std::thread` per frame + spin-wait). Workers survive across frames, eliminating thread creation overhead. Per-row `std::condition_variable` replaces spin-wait with `__builtin_ia32_pause()`/`yield`, freeing CPU for actual decode work.
   - `src/common/thread_pool.h/.cpp` — generic thread pool (submit + wait_all)
   - `decode_wpp_parallel()` reintroduced in `coding_tree.cpp` with pool + condvar sync
