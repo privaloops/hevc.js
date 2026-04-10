@@ -10,7 +10,7 @@
  * import { attachHevcSupport } from 'hevc.js/hlsjs';
  *
  * const hls = new Hls();
- * attachHevcSupport(hls);
+ * const cleanup = await attachHevcSupport(hls);
  * hls.attachMedia(videoElement);
  * hls.loadSource('https://example.com/stream.m3u8');
  * ```
@@ -39,19 +39,36 @@ type HlsInstance = any;
 
 const HEVC_RE = /hev1|hvc1/i;
 
+/** Check if the browser can play HEVC natively via MSE */
+function hasNativeHevcSupport(): boolean {
+  try {
+    return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Attach HEVC transcoding support to an hls.js instance.
  *
  * Must be called BEFORE hls.loadSource().
+ * Skips if the browser has native HEVC support (unless forceTranscode is set).
+ * Checks H.264 encoding support before installing the MSE intercept.
  *
  * @param hls hls.js instance (new Hls())
  * @param config Optional configuration
  * @returns A cleanup function to remove the plugin
  */
-export function attachHevcSupport(
+export async function attachHevcSupport(
   hls: HlsInstance,
   config: HevcHlsPluginConfig = {},
-): () => void {
+): Promise<() => void> {
+  // Skip transcoding if browser has native HEVC support
+  if (!config.forceTranscode && hasNativeHevcSupport()) {
+    console.log("[hevc.js/hlsjs] Native HEVC support detected — transcoding not needed");
+    return () => {};
+  }
+
   if (!H264Encoder.isSupported()) {
     console.warn(
       "[hevc.js/hlsjs] WebCodecs VideoEncoder not available. " +
@@ -60,22 +77,19 @@ export function attachHevcSupport(
     return () => {};
   }
 
-  // Async capability probe — detects browsers that expose VideoEncoder
-  // but can't actually encode H.264 (e.g. Firefox 133 on Windows 10).
-  const canEncodePromise = H264Encoder.checkSupport();
-  let canEncode: boolean | null = null;
-  canEncodePromise.then((ok) => {
-    canEncode = ok;
-    if (!ok) {
-      console.warn(
-        "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. " +
-        "Falling back to native AVC playback.",
-      );
-      uninstallMSEIntercept();
-    }
-  });
+  // Check H.264 encoding support BEFORE installing MSE intercept
+  const canEncode = await H264Encoder.checkSupport();
+  if (!canEncode) {
+    console.warn(
+      "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. " +
+      "HEVC transcoding is not available in this browser.",
+    );
+    return () => {};
+  }
 
-  // 1. Install MSE intercept (patches MediaSource globally)
+  console.log("[hevc.js/hlsjs] No native HEVC support — installing WASM transcoder");
+
+  // Install MSE intercept (patches MediaSource globally)
   installMSEIntercept({
     wasmUrl: config.wasmUrl,
     fps: config.fps,
@@ -83,25 +97,16 @@ export function attachHevcSupport(
     workerUrl: config.workerUrl,
   });
 
-  // 2. Filter levels to prefer HEVC when manifest has both AVC and HEVC
+  // Filter levels to prefer HEVC when manifest has both AVC and HEVC
   const preferHevc = config.preferHevc !== false;
 
   if (hls && preferHevc) {
     hls.on("hlsManifestParsed", (_event: string, data: { levels: Array<{ codecs?: string; codecSet?: string }> }) => {
-      // Only skip filtering when we confirmed encoding is NOT supported.
-      // If canEncode is still null (probe pending), filter optimistically —
-      // the .then() callback above will uninstallMSEIntercept() if it fails.
-      if (canEncode === false) {
-        console.log("[hevc.js/hlsjs] H.264 encoding not supported — keeping all AVC levels");
-        return;
-      }
-
       const levels = data.levels;
       const hasHevc = levels.some((l: { codecs?: string }) => HEVC_RE.test(l.codecs ?? ""));
       const hasAvc = levels.some((l: { codecs?: string }) => !HEVC_RE.test(l.codecs ?? ""));
 
       if (hasHevc && hasAvc) {
-        // Remove AVC levels — force HEVC
         const hevcOnly = levels
           .map((l: { codecs?: string }, i: number) => ({ level: l, index: i }))
           .filter((item: { level: { codecs?: string } }) => HEVC_RE.test(item.level.codecs ?? ""));
@@ -113,15 +118,10 @@ export function attachHevcSupport(
           ),
         );
 
-        // hls.js doesn't support removing levels from MANIFEST_PARSED data directly.
-        // Instead, we restrict the level range after parsing.
         const hevcIndices = hevcOnly.map((h: { index: number }) => h.index);
-        // Set start level to first HEVC level
         if (hevcIndices.length > 0) {
           hls.startLevel = hevcIndices[0];
           hls.autoLevelCapping = hevcIndices[hevcIndices.length - 1];
-          // Remove non-HEVC levels by setting their bitrate to 0 won't work,
-          // but we can restrict to only HEVC via currentLevel
           hls.currentLevel = hevcIndices[0];
         }
       }

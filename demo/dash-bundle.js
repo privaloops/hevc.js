@@ -12162,7 +12162,19 @@ var HevcDash = (() => {
   }
 
   // packages/dashjs/src/plugin.ts
-  function attachHevcSupport(player, config = {}) {
+  function hasNativeHevcSupport() {
+    try {
+      return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
+    } catch {
+      return false;
+    }
+  }
+  async function attachHevcSupport(player, config = {}) {
+    if (!config.forceTranscode && hasNativeHevcSupport()) {
+      console.log("[hevc.js/dash] Native HEVC support detected \u2014 transcoding not needed");
+      return () => {
+      };
+    }
     if (!H264Encoder.isSupported()) {
       console.warn(
         "[hevc.js/dash] WebCodecs VideoEncoder not available. HEVC transcoding requires Chrome 94+ or equivalent."
@@ -12170,14 +12182,15 @@ var HevcDash = (() => {
       return () => {
       };
     }
-    H264Encoder.checkSupport().then((ok) => {
-      if (!ok) {
-        console.warn(
-          "[hevc.js/dash] VideoEncoder exists but H.264 encoding is not supported. Falling back to native playback."
-        );
-        uninstallMSEIntercept();
-      }
-    });
+    const canEncode = await H264Encoder.checkSupport();
+    if (!canEncode) {
+      console.warn(
+        "[hevc.js/dash] VideoEncoder exists but H.264 encoding is not supported. HEVC transcoding is not available in this browser."
+      );
+      return () => {
+      };
+    }
+    console.log("[hevc.js/dash] No native HEVC support \u2014 installing WASM transcoder");
     installMSEIntercept({
       wasmUrl: config.wasmUrl,
       fps: config.fps,
@@ -12185,16 +12198,7 @@ var HevcDash = (() => {
       workerUrl: config.workerUrl
     });
     if (player.registerCustomCapabilitiesFilter) {
-      player.registerCustomCapabilitiesFilter(
-        (representation) => {
-          const codecs = (representation.codecs ?? "").toLowerCase();
-          const mime = (representation.mimeType ?? "").toLowerCase();
-          if (/hev1|hvc1/.test(codecs) || /hev1|hvc1/.test(mime)) {
-            return true;
-          }
-          return true;
-        }
-      );
+      player.registerCustomCapabilitiesFilter(() => true);
     }
     return () => {
       uninstallMSEIntercept();
