@@ -38,6 +38,10 @@ demo/hevc-decode.js
 demo/hevc-decode.wasm
 demo/worker.js
 
+# Playwright
+test-results/
+playwright-report/
+
 # Node.js / pnpm
 node_modules/
 packages/*/dist/
