@@ -131,6 +131,7 @@ function createTranscodingProxy(
 
   let initParsed = false;
   let initAppended = false;
+  let lastInitSegment: Uint8Array | null = null; // tracks current H.264 init to detect changes
   let fakeUpdating = false;
   const queue: Uint8Array[] = [];
   let processing = false;
@@ -209,10 +210,17 @@ function createTranscodingProxy(
           const bytes = toUint8Array(data);
           queue.push(bytes);
 
-          // Block the player until transcoding completes — this prevents
-          // audio flood (hls.js) and keeps A/V buffer levels in sync.
           fakeUpdating = true;
           dispatchOnProxy("updatestart");
+
+          // Release backpressure immediately if queue is shallow enough.
+          // This lets the player create audio SourceBuffers and continue
+          // buffering while video transcoding runs in the background.
+          if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+            fakeUpdating = false;
+            dispatchOnProxy("update");
+            dispatchOnProxy("updateend");
+          }
 
           processNext(target);
         };
@@ -340,16 +348,18 @@ function createTranscodingProxy(
         config.onTranscodeEnd?.();
         if (abortGeneration !== myGeneration) return; // aborted during transcode
 
-        // Append H.264 init segment on first successful transcode
+        // Append H.264 init segment (on first transcode or after resolution change)
         const initResult = getInitResult();
-        if (!initAppended && initResult) {
+        const initChanged = initResult && initResult.initSegment !== lastInitSegment;
+        if (initResult && (!initAppended || initChanged)) {
           initAppended = true;
+          lastInitSegment = initResult.initSegment;
           if (target.updating) await waitForUpdateEnd(target);
           if (abortGeneration !== myGeneration) return;
           realAppend(initResult.initSegment.buffer as ArrayBuffer);
           await waitForUpdateEnd(target);
           if (abortGeneration !== myGeneration) return;
-          console.log("[hevc.js] H.264 init segment appended");
+          console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
         }
 
         // Append transcoded media segment
@@ -365,7 +375,8 @@ function createTranscodingProxy(
           console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
         }
 
-        // Release backpressure if queue dropped below threshold
+        // Release backpressure if queue dropped below threshold.
+        // Guard: fakeUpdating may already be false (released in appendBuffer).
         if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
           fakeUpdating = false;
           dispatchOnProxy("update");

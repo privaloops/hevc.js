@@ -41,6 +41,7 @@ export class SegmentTranscoder {
   private _timescale = 90000;
   private _baseDecodeTime = 0;
   private _fps: number;
+  private _fpsAutoDetected = false;
   private _width = 0;
   private _height = 0;
   private _paramSetsFed = false;
@@ -125,13 +126,21 @@ export class SegmentTranscoder {
     if (samples.length === 0) return null;
     const tDemuxEnd = performance.now();
 
-    // Extract the absolute base decode time directly from the tfdt box
-    // in the raw fMP4 data. mp4box.js returns sequential DTS which breaks
-    // after seek (fragments arrive out of order).
-    // Extract the absolute base decode time directly from the tfdt box
-    // in the raw fMP4 data. mp4box.js returns sequential DTS which breaks
-    // after seek (fragments arrive out of order).
+    // Extract absolute base decode time from tfdt box (mp4box.js DTS breaks after seek)
     const segmentBaseTime = extractTfdt(data) ?? samples[0]!.dts;
+
+    // Auto-detect fps from first sample duration (DASH/HLS are CFR, so representative)
+    if (!this._fpsAutoDetected && !this._config.fps && samples[0]!.duration > 0) {
+      this._fps = this._timescale / samples[0]!.duration;
+      this._fpsAutoDetected = true;
+      console.log(`[hevc.js] Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0]!.duration})`);
+    }
+
+    // Build cumulative timestamps from actual sample durations (timescale units)
+    const sampleOffsets: number[] = [0];
+    for (let i = 0; i < samples.length - 1; i++) {
+      sampleOffsets.push(sampleOffsets[i]! + samples[i]!.duration);
+    }
 
     // 2. Feed VPS/SPS/PPS on first segment (from hvcC in init segment)
     if (!this._paramSetsFed && this._paramSetsBuffer) {
@@ -155,7 +164,7 @@ export class SegmentTranscoder {
       this._decoder.feed(nalBuffer);
     }
 
-    // 3. Drain decoded YUV frames
+    // 4. Drain decoded YUV frames
     const frames = this._decoder.drain();
     const tDecodeEnd = performance.now();
     if (frames.length === 0) {
@@ -163,32 +172,43 @@ export class SegmentTranscoder {
       return null;
     }
 
-    // 4. Encode to H.264
+    // 5. Encode to H.264 (recreate encoder on resolution change for ABR)
+    const frameW = frames[0]!.width;
+    const frameH = frames[0]!.height;
+    if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+      console.log(`[hevc.js] Resolution changed ${this._width}x${this._height} → ${frameW}x${frameH}, recreating encoder`);
+      this._encoder.close();
+      this._encoder = null;
+      this._initResult = null; // force new H.264 init segment
+    }
     if (!this._encoder) {
       this._encoder = new H264Encoder({
-        width: frames[0]!.width,
-        height: frames[0]!.height,
+        width: frameW,
+        height: frameH,
         fps: this._fps,
         bitrate: this._config.bitrate,
       });
-      this._width = frames[0]!.width;
-      this._height = frames[0]!.height;
+      this._width = frameW;
+      this._height = frameH;
     }
 
     const chunks: EncodedChunk[] = [];
     this._encoder.onChunk = (chunk) => chunks.push(chunk);
 
     for (let i = 0; i < frames.length; i++) {
-      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000)
-        + Math.round((i / this._fps) * 1_000_000);
-      // First frame of each segment should be a keyframe (ABR switch support)
+      // Use actual sample durations for timestamps when available,
+      // fall back to uniform spacing for extra decoded frames
+      const offsetUs = i < sampleOffsets.length
+        ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
+        : Math.round((i / this._fps) * 1_000_000);
+      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
       this._encoder.encode(frames[i]!, timestampUs, i === 0);
     }
 
     await this._encoder.flush();
     if (chunks.length === 0) return null;
 
-    // 5. Generate H.264 init segment on first successful encode
+    // 6. Generate H.264 init segment on first successful encode
     if (!this._initResult) {
       const avcC = this._encoder.codecDescription;
       if (!avcC) throw new Error("No avcC description from encoder");
@@ -206,10 +226,14 @@ export class SegmentTranscoder {
       };
     }
 
-    // 6. Mux H.264 chunks into fMP4 media segment
-    const muxerSamples = chunks.map((c) => ({
+    // 7. Mux H.264 chunks into fMP4 media segment
+    // Use original sample durations (timescale units) to avoid rounding drift.
+    // frames[i]↔samples[i] mapping is safe for CFR content (uniform durations).
+    const muxerSamples = chunks.map((c, i) => ({
       data: c.data,
-      duration: Math.round(c.duration * this._timescale / 1_000_000),
+      duration: i < samples.length
+        ? samples[i]!.duration
+        : Math.round(c.duration * this._timescale / 1_000_000),
       isKeyframe: c.isKeyframe,
       compositionTimeOffset: 0,
     }));
