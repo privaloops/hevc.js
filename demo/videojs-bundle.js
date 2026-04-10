@@ -1,5 +1,5 @@
 "use strict";
-var HevcHls = (() => {
+var HevcVideojs = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -26,9 +26,9 @@ var HevcHls = (() => {
   var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
   var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
 
-  // demo/hls-entry.ts
-  var hls_entry_exports = {};
-  __export(hls_entry_exports, {
+  // demo/videojs-entry.ts
+  var videojs_entry_exports = {};
+  __export(videojs_entry_exports, {
     attachHevcSupport: () => attachHevcSupport
   });
 
@@ -12209,8 +12209,7 @@ var HevcHls = (() => {
     return new Uint8Array(data);
   }
 
-  // packages/hlsjs/src/plugin.ts
-  var HEVC_RE = /hev1|hvc1/i;
+  // demo/videojs-entry.ts
   function hasNativeHevcSupport() {
     try {
       return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
@@ -12218,61 +12217,31 @@ var HevcHls = (() => {
       return false;
     }
   }
-  async function attachHevcSupport(hls, config = {}) {
+  async function attachHevcSupport(config = {}) {
     if (!config.forceTranscode && hasNativeHevcSupport()) {
-      console.log("[hevc.js/hlsjs] Native HEVC support detected \u2014 transcoding not needed");
-      return () => {
-      };
+      console.log("[hevc.js/videojs] Native HEVC support detected \u2014 transcoding not needed");
+      return null;
     }
     if (!H264Encoder.isSupported()) {
-      console.warn(
-        "[hevc.js/hlsjs] WebCodecs VideoEncoder not available. HEVC transcoding requires Chrome 94+ or equivalent."
-      );
-      return () => {
-      };
+      console.warn("[hevc.js/videojs] WebCodecs VideoEncoder not available.");
+      return null;
     }
     const canEncode = await H264Encoder.checkSupport();
     if (!canEncode) {
-      console.warn(
-        "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. HEVC transcoding is not available in this browser."
-      );
-      return () => {
-      };
+      console.warn("[hevc.js/videojs] H.264 encoding is not supported in this browser.");
+      return null;
     }
-    console.log("[hevc.js/hlsjs] No native HEVC support \u2014 installing WASM transcoder");
+    console.log("[hevc.js/videojs] No native HEVC support \u2014 installing WASM transcoder");
     installMSEIntercept({
       wasmUrl: config.wasmUrl,
       fps: config.fps,
       bitrate: config.bitrate,
       workerUrl: config.workerUrl
     });
-    const preferHevc = config.preferHevc !== false;
-    if (hls && preferHevc) {
-      hls.on("hlsManifestParsed", (_event, data) => {
-        const levels = data.levels;
-        const hasHevc = levels.some((l) => HEVC_RE.test(l.codecs ?? ""));
-        const hasAvc = levels.some((l) => !HEVC_RE.test(l.codecs ?? ""));
-        if (hasHevc && hasAvc) {
-          const hevcOnly = levels.map((l, i) => ({ level: l, index: i })).filter((item) => HEVC_RE.test(item.level.codecs ?? ""));
-          console.log(
-            `[hevc.js/hlsjs] Filtering ${levels.length} levels \u2192 ${hevcOnly.length} HEVC-only`,
-            hevcOnly.map(
-              (h) => `L${h.index}: ${h.level.width}x${h.level.height} ${h.level.codecs}`
-            )
-          );
-          const hevcIndices = hevcOnly.map((h) => h.index);
-          if (hevcIndices.length > 0) {
-            hls.startLevel = hevcIndices[0];
-            hls.autoLevelCapping = hevcIndices[hevcIndices.length - 1];
-            hls.currentLevel = hevcIndices[0];
-          }
-        }
-      });
-    }
     return () => {
       uninstallMSEIntercept();
     };
   }
-  return __toCommonJS(hls_entry_exports);
+  return __toCommonJS(videojs_entry_exports);
 })();
-//# sourceMappingURL=hls-bundle.js.map
+//# sourceMappingURL=videojs-bundle.js.map

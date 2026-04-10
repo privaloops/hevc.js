@@ -11527,6 +11527,7 @@
       this._initResult = null;
       this._timescale = 9e4;
       this._baseDecodeTime = 0;
+      this._fpsAutoDetected = false;
       this._width = 0;
       this._height = 0;
       this._paramSetsFed = false;
@@ -11597,6 +11598,15 @@
       if (samples.length === 0) return null;
       const tDemuxEnd = performance.now();
       const segmentBaseTime = extractTfdt(data) ?? samples[0].dts;
+      if (!this._fpsAutoDetected && !this._config.fps && samples[0].duration > 0) {
+        this._fps = this._timescale / samples[0].duration;
+        this._fpsAutoDetected = true;
+        console.log(`[hevc.js] Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0].duration})`);
+      }
+      const sampleOffsets = [0];
+      for (let i = 0; i < samples.length - 1; i++) {
+        sampleOffsets.push(sampleOffsets[i] + samples[i].duration);
+      }
       if (!this._paramSetsFed && this._paramSetsBuffer) {
         this._decoder.feed(this._paramSetsBuffer);
         this._paramSetsFed = true;
@@ -11621,20 +11631,29 @@
         this.lastPerfStats = null;
         return null;
       }
+      const frameW = frames[0].width;
+      const frameH = frames[0].height;
+      if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+        console.log(`[hevc.js] Resolution changed ${this._width}x${this._height} \u2192 ${frameW}x${frameH}, recreating encoder`);
+        this._encoder.close();
+        this._encoder = null;
+        this._initResult = null;
+      }
       if (!this._encoder) {
         this._encoder = new H264Encoder({
-          width: frames[0].width,
-          height: frames[0].height,
+          width: frameW,
+          height: frameH,
           fps: this._fps,
           bitrate: this._config.bitrate
         });
-        this._width = frames[0].width;
-        this._height = frames[0].height;
+        this._width = frameW;
+        this._height = frameH;
       }
       const chunks = [];
       this._encoder.onChunk = (chunk) => chunks.push(chunk);
       for (let i = 0; i < frames.length; i++) {
-        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + Math.round(i / this._fps * 1e6);
+        const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
         this._encoder.encode(frames[i], timestampUs, i === 0);
       }
       await this._encoder.flush();
@@ -11653,9 +11672,9 @@
           codec: "avc1.42001f"
         };
       }
-      const muxerSamples = chunks.map((c) => ({
+      const muxerSamples = chunks.map((c, i) => ({
         data: c.data,
-        duration: Math.round(c.duration * this._timescale / 1e6),
+        duration: i < samples.length ? samples[i].duration : Math.round(c.duration * this._timescale / 1e6),
         isKeyframe: c.isKeyframe,
         compositionTimeOffset: 0
       }));
