@@ -1,0 +1,62 @@
+import { defineConfig } from '@playwright/test';
+
+const BASE_URL = 'https://privaloops.github.io/hevc.js';
+
+const BS_USER = process.env.BROWSERSTACK_USERNAME || '';
+const BS_KEY = process.env.BROWSERSTACK_ACCESS_KEY || '';
+const PW_VERSION = '1.57.0';
+
+// BrowserStack browser matrix
+const bsBrowsers = [
+  { name: 'Chrome Windows', browser: 'chrome', os: 'Windows', os_version: '11' },
+  { name: 'Edge Windows', browser: 'edge', os: 'Windows', os_version: '11' },
+  { name: 'Firefox Windows', browser: 'playwright-firefox', os: 'Windows', os_version: '11' },
+  { name: 'Chrome macOS', browser: 'chrome', os: 'osx', os_version: 'Sonoma' },
+  { name: 'Safari macOS', browser: 'playwright-webkit', os: 'osx', os_version: 'Sonoma' },
+];
+
+function bsEndpoint(b: typeof bsBrowsers[0]) {
+  const caps = {
+    'browserstack.username': BS_USER,
+    'browserstack.accessKey': BS_KEY,
+    browser: b.browser,
+    browser_version: 'latest',
+    os: b.os,
+    os_version: b.os_version,
+    'client.playwrightVersion': PW_VERSION,
+    name: `hevc.js — ${b.name}`,
+    project: 'hevc.js',
+    build: 'E2E Cross-Browser',
+  };
+  return `wss://cdp.browserstack.com/playwright?caps=${encodeURIComponent(JSON.stringify(caps))}`;
+}
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  timeout: 90_000,
+  expect: { timeout: 30_000 },
+  fullyParallel: false,
+  retries: 1,
+  // 1 worker per project to avoid BrowserStack session limits
+  workers: 1,
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    baseURL: BASE_URL,
+    trace: 'on-first-retry',
+  },
+  projects: [
+    {
+      name: 'local-chromium',
+      use: { browserName: 'chromium' },
+    },
+    ...bsBrowsers.map((b) => ({
+      name: `bs-${b.name.toLowerCase().replace(/\s+/g, '-')}`,
+      use: {
+        connectOptions: {
+          wsEndpoint: bsEndpoint(b),
+          timeout: 60_000,
+        },
+      },
+    })),
+  ],
+});
