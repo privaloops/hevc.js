@@ -7,10 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **E2E bug fix validation tests** (Playwright + BrowserStack): 6 tests couvrant gaps buffer, audio, HLS ABR, seek DASH/HLS, détection HEVC natif. Validé sur Chrome/Edge Windows, Chrome/Safari macOS, Firefox (skip)
+- **BrowserStack Local tunnel support**: `LOCAL_DEMO=1` pour tester contre localhost via tunnel. Script `tools/run-e2e-bs-local.sh`
 - **E2E cross-browser tests** (Playwright + BrowserStack): 8 tests DASH + HLS (page load, 720p/1080p/4K transcode pipeline) sur 6 browsers (Chrome/Edge/Firefox Windows, Chrome/Safari macOS, Firefox Linux). `pnpm test:e2e` (local) et `pnpm test:e2e:bs` (BrowserStack)
 - **Native HEVC detection**: les plugins dashjs/hlsjs détectent si le browser supporte HEVC nativement via `MediaSource.isTypeSupported` et skip le transcoding (Safari, Firefox). Option `forceTranscode: true` pour forcer
 
 ### Fixed
+- **Buffer gaps 78ms** (`segment-transcoder.ts`): auto-détection du fps depuis les durées des samples demuxés (24fps BBB au lieu du default 25fps). Timestamps calculés depuis les durées cumulées des samples source. Durées muxer prises directement des samples originaux (plus de double arrondi)
+- **Audio SourceBuffer jamais créé** (`mse-intercept.ts`): backpressure `fakeUpdating` relâchée immédiatement quand la queue est peu remplie. dash.js peut créer le SB audio pendant que le transcoding vidéo tourne en arrière-plan
+- **Artefacts ABR switch** (`segment-transcoder.ts`): l'encoder H.264 est recréé quand la résolution des frames change (ABR 480p→720p→1080p). Nouveau init segment H.264 généré et appendé au SourceBuffer
 - **Race condition async VideoEncoder**: `attachHevcSupport` est maintenant async — vérifie le support H.264 encoding AVANT d'installer l'intercept MSE (évite crash `bufferAppendError` sur Firefox)
 - **Capabilities filter dashjs**: dead code simplifié (retournait `true` dans les deux branches)
 

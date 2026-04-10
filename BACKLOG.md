@@ -28,11 +28,15 @@ Etat d'avancement par phase et prochaines taches.
 - [x] Demos dash.html + hls.html
 - [x] READMEs packages dashjs + hlsjs
 - [x] Renommage `@hevcjs/dash` → `@hevcjs/dashjs`, `@hevcjs/hls` → `@hevcjs/hlsjs`
+- [x] **Fix buffer gaps 78ms** : auto-détection fps + timestamps depuis sample durations + durées muxer originales
+- [x] **Fix audio SourceBuffer** : backpressure `fakeUpdating` relâchée immédiatement quand queue peu remplie
+- [x] **Fix artefacts ABR switch** : encoder H.264 recréé sur changement de résolution
+- [x] **E2E BrowserStack validation** : 6 tests (gaps, audio, HLS ABR, seek DASH/HLS, détection native) sur 5 browsers
 
 ### A faire
-- [ ] **Seek hls.js** : hls.js n'appelle pas `abort()` sur le SourceBuffer lors d'un seek. Le proxy continue de transcoder les anciens segments. Nécessite soit un hook sur l'événement `seeking` du `<video>`, soit une intégration plus profonde avec le BufferController de hls.js.
-- [ ] **Seek dash.js (long stream)** : fonctionne sur les streams courts (buffer complet), à valider sur les streams longs.
-- [ ] **Performance décodeur WASM** : bottleneck principal (~50fps 720p, ~20fps 4K). Pistes : WASM pthreads (WPP multi-thread), SIMD intrinsics manuels, optimisation mémoire.
+- [ ] **Cohabitation plugins videojs** : tester avec videojs-http-streaming + quality selector
+- [ ] **Seek hls.js (long stream)** : validé sur streams courts (30s), à tester sur streams > 5min
+- [ ] **Performance décodeur WASM** : bottleneck principal (~50fps 720p, ~20fps 4K). Pistes : SIMD intrinsics manuels, optimisation mémoire.
 - [ ] **Tests unitaires** : Vitest + happy-dom pour les packages JS, Playwright pour les demos.
 - [ ] **npm publish** : finaliser `package.json` racine, vérifier exports, publier `hevc.js`.
 | 10 — Multi-Slice | **Termine** | Boucle, dependent slices, §6.4.1 availability, cross-slice deblocking + SAO. conf_b_xslice_256 pixel-perfect. |
