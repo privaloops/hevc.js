@@ -60,7 +60,7 @@ export class H264Encoder {
       height: this._height,
       bitrate: config.bitrate ?? this._width * this._height * this._fps * 0.1, // ~0.1 bpp
       framerate: this._fps,
-      hardwareAcceleration: "prefer-hardware",
+      hardwareAcceleration: "no-preference",
       avc: { format: "avc" },
     });
   }
