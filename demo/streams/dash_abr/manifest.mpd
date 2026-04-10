@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" minBufferTime="PT1.500S" type="static" mediaPresentationDuration="PT0H0M30.000S" maxSegmentDuration="PT0H0M2.011S" profiles="urn:mpeg:dash:profile:isoff-live:2011,http://dashif.org/guidelines/dash264">
+ <ProgramInformation moreInformationURL="https://gpac.io">
+  <Title>Big Buck Bunny — HEVC ABR (480p/720p/1080p) + AAC</Title>
+ </ProgramInformation>
+
+ <Period duration="PT0H0M30.000S">
+  <AdaptationSet segmentAlignment="true" maxWidth="1920" maxHeight="1080" maxFrameRate="24" par="16:9" lang="en" startWithSAP="1">
+   <Representation id="1" mimeType="video/mp4" codecs="hev1.1.6.L90.90" width="848" height="480" frameRate="24" sar="1:1" bandwidth="793495">
+    <SegmentTemplate media="bbb_480p_dash$Number$.m4s" initialization="bbb_480p_dashinit.mp4" timescale="12288" startNumber="1" duration="24576"/>
+   </Representation>
+   <Representation id="2" mimeType="video/mp4" codecs="hev1.1.6.L93.90" width="1280" height="720" frameRate="24" sar="1:1" bandwidth="1986455">
+    <SegmentTemplate media="bbb_720p_dash$Number$.m4s" initialization="bbb_720p_dashinit.mp4" timescale="12288" startNumber="1" duration="24576"/>
+   </Representation>
+   <Representation id="3" mimeType="video/mp4" codecs="hev1.1.6.L120.90" width="1920" height="1080" frameRate="24" sar="1:1" bandwidth="3988533">
+    <SegmentTemplate media="bbb_1080p_dash$Number$.m4s" initialization="bbb_1080p_dashinit.mp4" timescale="12288" startNumber="1" duration="24576"/>
+   </Representation>
+  </AdaptationSet>
+  <AdaptationSet segmentAlignment="true" lang="en" startWithSAP="1">
+   <SegmentTemplate media="bbb_audio_dash$Number$.m4s" initialization="bbb_audio_dashinit.mp4" timescale="48000" startNumber="1" duration="96000"/>
+   <Representation id="4" mimeType="audio/mp4" codecs="mp4a.40.2" audioSamplingRate="48000" bandwidth="128642">
+    <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
+   </Representation>
+  </AdaptationSet>
+ </Period>
+</MPD>
