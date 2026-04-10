@@ -11062,7 +11062,7 @@ var HevcHls = (() => {
         bitrate: config.bitrate ?? this._width * this._height * this._fps * 0.1,
         // ~0.1 bpp
         framerate: this._fps,
-        hardwareAcceleration: "prefer-hardware",
+        hardwareAcceleration: "no-preference",
         avc: { format: "avc" }
       });
     }
@@ -11121,6 +11121,27 @@ var HevcHls = (() => {
     /** Check if VideoEncoder is supported in the current environment */
     static isSupported() {
       return typeof VideoEncoder !== "undefined";
+    }
+    /**
+     * Async capability probe — checks that VideoEncoder can actually encode H.264.
+     * Firefox exposes VideoEncoder but may not support H.264 encoding.
+     * Returns false if the API is missing or the config is not supported.
+     */
+    static async checkSupport() {
+      if (typeof VideoEncoder === "undefined") return false;
+      if (typeof VideoEncoder.isConfigSupported !== "function") return false;
+      try {
+        const result = await VideoEncoder.isConfigSupported({
+          codec: "avc1.640028",
+          width: 640,
+          height: 480,
+          bitrate: 1e6,
+          framerate: 25
+        });
+        return result.supported === true;
+      } catch {
+        return false;
+      }
     }
     _handleOutput(chunk, metadata) {
       if (metadata?.decoderConfig?.description && !this._codecDescription) {
@@ -11519,6 +11540,7 @@ var HevcHls = (() => {
       this._initResult = null;
       this._timescale = 9e4;
       this._baseDecodeTime = 0;
+      this._fpsAutoDetected = false;
       this._width = 0;
       this._height = 0;
       this._paramSetsFed = false;
@@ -11583,6 +11605,15 @@ var HevcHls = (() => {
       if (samples.length === 0) return null;
       const tDemuxEnd = performance.now();
       const segmentBaseTime = extractTfdt(data) ?? samples[0].dts;
+      if (!this._fpsAutoDetected && !this._config.fps && samples[0].duration > 0) {
+        this._fps = this._timescale / samples[0].duration;
+        this._fpsAutoDetected = true;
+        console.log(`[hevc.js] Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0].duration})`);
+      }
+      const sampleOffsets = [0];
+      for (let i = 0; i < samples.length - 1; i++) {
+        sampleOffsets.push(sampleOffsets[i] + samples[i].duration);
+      }
       if (!this._paramSetsFed && this._paramSetsBuffer) {
         this._decoder.feed(this._paramSetsBuffer);
         this._paramSetsFed = true;
@@ -11607,20 +11638,29 @@ var HevcHls = (() => {
         this.lastPerfStats = null;
         return null;
       }
+      const frameW = frames[0].width;
+      const frameH = frames[0].height;
+      if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+        console.log(`[hevc.js] Resolution changed ${this._width}x${this._height} \u2192 ${frameW}x${frameH}, recreating encoder`);
+        this._encoder.close();
+        this._encoder = null;
+        this._initResult = null;
+      }
       if (!this._encoder) {
         this._encoder = new H264Encoder({
-          width: frames[0].width,
-          height: frames[0].height,
+          width: frameW,
+          height: frameH,
           fps: this._fps,
           bitrate: this._config.bitrate
         });
-        this._width = frames[0].width;
-        this._height = frames[0].height;
+        this._width = frameW;
+        this._height = frameH;
       }
       const chunks = [];
       this._encoder.onChunk = (chunk) => chunks.push(chunk);
       for (let i = 0; i < frames.length; i++) {
-        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + Math.round(i / this._fps * 1e6);
+        const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
         this._encoder.encode(frames[i], timestampUs, i === 0);
       }
       await this._encoder.flush();
@@ -11639,9 +11679,9 @@ var HevcHls = (() => {
           codec: "avc1.42001f"
         };
       }
-      const muxerSamples = chunks.map((c) => ({
+      const muxerSamples = chunks.map((c, i) => ({
         data: c.data,
-        duration: Math.round(c.duration * this._timescale / 1e6),
+        duration: i < samples.length ? samples[i].duration : Math.round(c.duration * this._timescale / 1e6),
         isKeyframe: c.isKeyframe,
         compositionTimeOffset: 0
       }));
@@ -11933,6 +11973,7 @@ var HevcHls = (() => {
     let transcoder = null;
     let initParsed = false;
     let initAppended = false;
+    let lastInitSegment = null;
     let fakeUpdating = false;
     const queue = [];
     let processing = false;
@@ -11999,6 +12040,11 @@ var HevcHls = (() => {
             queue.push(bytes);
             fakeUpdating = true;
             dispatchOnProxy("updatestart");
+            if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+              fakeUpdating = false;
+              dispatchOnProxy("update");
+              dispatchOnProxy("updateend");
+            }
             processNext(target);
           };
         }
@@ -12090,14 +12136,16 @@ var HevcHls = (() => {
           config.onTranscodeEnd?.();
           if (abortGeneration !== myGeneration) return;
           const initResult = getInitResult();
-          if (!initAppended && initResult) {
+          const initChanged = initResult && initResult.initSegment !== lastInitSegment;
+          if (initResult && (!initAppended || initChanged)) {
             initAppended = true;
+            lastInitSegment = initResult.initSegment;
             if (target.updating) await waitForUpdateEnd(target);
             if (abortGeneration !== myGeneration) return;
             realAppend(initResult.initSegment.buffer);
             await waitForUpdateEnd(target);
             if (abortGeneration !== myGeneration) return;
-            console.log("[hevc.js] H.264 init segment appended");
+            console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
           }
           if (h264Segment) {
             if (target.updating) await waitForUpdateEnd(target);
