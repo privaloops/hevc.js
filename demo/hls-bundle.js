@@ -12163,7 +12163,19 @@ var HevcHls = (() => {
 
   // packages/hlsjs/src/plugin.ts
   var HEVC_RE = /hev1|hvc1/i;
-  function attachHevcSupport(hls, config = {}) {
+  function hasNativeHevcSupport() {
+    try {
+      return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
+    } catch {
+      return false;
+    }
+  }
+  async function attachHevcSupport(hls, config = {}) {
+    if (!config.forceTranscode && hasNativeHevcSupport()) {
+      console.log("[hevc.js/hlsjs] Native HEVC support detected \u2014 transcoding not needed");
+      return () => {
+      };
+    }
     if (!H264Encoder.isSupported()) {
       console.warn(
         "[hevc.js/hlsjs] WebCodecs VideoEncoder not available. HEVC transcoding requires Chrome 94+ or equivalent."
@@ -12171,17 +12183,15 @@ var HevcHls = (() => {
       return () => {
       };
     }
-    const canEncodePromise = H264Encoder.checkSupport();
-    let canEncode = null;
-    canEncodePromise.then((ok) => {
-      canEncode = ok;
-      if (!ok) {
-        console.warn(
-          "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. Falling back to native AVC playback."
-        );
-        uninstallMSEIntercept();
-      }
-    });
+    const canEncode = await H264Encoder.checkSupport();
+    if (!canEncode) {
+      console.warn(
+        "[hevc.js/hlsjs] VideoEncoder exists but H.264 encoding is not supported. HEVC transcoding is not available in this browser."
+      );
+      return () => {
+      };
+    }
+    console.log("[hevc.js/hlsjs] No native HEVC support \u2014 installing WASM transcoder");
     installMSEIntercept({
       wasmUrl: config.wasmUrl,
       fps: config.fps,
@@ -12191,10 +12201,6 @@ var HevcHls = (() => {
     const preferHevc = config.preferHevc !== false;
     if (hls && preferHevc) {
       hls.on("hlsManifestParsed", (_event, data) => {
-        if (canEncode === false) {
-          console.log("[hevc.js/hlsjs] H.264 encoding not supported \u2014 keeping all AVC levels");
-          return;
-        }
         const levels = data.levels;
         const hasHevc = levels.some((l) => HEVC_RE.test(l.codecs ?? ""));
         const hasAvc = levels.some((l) => !HEVC_RE.test(l.codecs ?? ""));

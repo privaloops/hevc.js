@@ -10,7 +10,7 @@
  * import { attachHevcSupport } from 'hevc.js/dash';
  *
  * const player = dashjs.MediaPlayer().create();
- * attachHevcSupport(player, { wasmUrl: '/hevc-decode.js' });
+ * const cleanup = await attachHevcSupport(player, { wasmUrl: '/hevc-decode.js' });
  * player.initialize(videoElement, mpdUrl, true);
  * ```
  */
@@ -29,22 +29,36 @@ export interface HevcDashPluginConfig extends MSEInterceptConfig {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DashMediaPlayer = any;
 
+/** Check if the browser can play HEVC natively via MSE */
+function hasNativeHevcSupport(): boolean {
+  try {
+    return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Attach HEVC transcoding support to a dash.js MediaPlayer instance.
  *
  * Must be called BEFORE player.initialize().
- * Always installs the MSE intercept to handle incomplete codec strings
- * (e.g. "hev1" without profile/level) that browsers reject even with
- * native HEVC support.
+ * Skips if the browser has native HEVC support (unless forceTranscode is set).
+ * Checks H.264 encoding support before installing the MSE intercept.
  *
  * @param player dash.js MediaPlayer instance
  * @param config Optional transcoder configuration
  * @returns A cleanup function to remove the plugin
  */
-export function attachHevcSupport(
+export async function attachHevcSupport(
   player: DashMediaPlayer,
   config: HevcDashPluginConfig = {},
-): () => void {
+): Promise<() => void> {
+  // Skip transcoding if browser has native HEVC support
+  if (!config.forceTranscode && hasNativeHevcSupport()) {
+    console.log("[hevc.js/dash] Native HEVC support detected — transcoding not needed");
+    return () => {};
+  }
+
   if (!H264Encoder.isSupported()) {
     console.warn(
       "[hevc.js/dash] WebCodecs VideoEncoder not available. " +
@@ -53,21 +67,19 @@ export function attachHevcSupport(
     return () => {};
   }
 
-  // Async capability probe — detects browsers that expose VideoEncoder
-  // but can't actually encode H.264 (e.g. Firefox 133 on Windows 10).
-  H264Encoder.checkSupport().then((ok) => {
-    if (!ok) {
-      console.warn(
-        "[hevc.js/dash] VideoEncoder exists but H.264 encoding is not supported. " +
-        "Falling back to native playback.",
-      );
-      uninstallMSEIntercept();
-    }
-  });
+  // Check H.264 encoding support BEFORE installing MSE intercept
+  const canEncode = await H264Encoder.checkSupport();
+  if (!canEncode) {
+    console.warn(
+      "[hevc.js/dash] VideoEncoder exists but H.264 encoding is not supported. " +
+      "HEVC transcoding is not available in this browser.",
+    );
+    return () => {};
+  }
 
-  // 1. Install MSE intercept ALWAYS — patches isTypeSupported + addSourceBuffer.
-  // Even on browsers with native HEVC, the MPD may have incomplete codec strings
-  // like "hev1" (without profile/level) which MediaSource.isTypeSupported rejects.
+  console.log("[hevc.js/dash] No native HEVC support — installing WASM transcoder");
+
+  // Install MSE intercept — patches isTypeSupported + addSourceBuffer
   installMSEIntercept({
     wasmUrl: config.wasmUrl,
     fps: config.fps,
@@ -75,22 +87,11 @@ export function attachHevcSupport(
     workerUrl: config.workerUrl,
   });
 
-  // 2. Register capabilities filter — tell dash.js to accept HEVC representations.
-  // This runs AFTER dash.js's internal check, so we also need isTypeSupported patched.
+  // Tell dash.js to accept all representations (including HEVC, which it would normally reject)
   if (player.registerCustomCapabilitiesFilter) {
-    player.registerCustomCapabilitiesFilter(
-      (representation: { mimeType?: string; codecs?: string }) => {
-        const codecs = (representation.codecs ?? "").toLowerCase();
-        const mime = (representation.mimeType ?? "").toLowerCase();
-        if (/hev1|hvc1/.test(codecs) || /hev1|hvc1/.test(mime)) {
-          return true;
-        }
-        return true;
-      },
-    );
+    player.registerCustomCapabilitiesFilter(() => true);
   }
 
-  // Return cleanup function
   return () => {
     uninstallMSEIntercept();
   };

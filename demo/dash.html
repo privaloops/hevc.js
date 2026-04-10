@@ -103,7 +103,7 @@ console.error = (...a) => { _err(...a); log('[ERROR]', ...a); };
 let player = null;
 let cleanup = null;
 
-function loadMPD(presetUrl) {
+async function loadMPD(presetUrl) {
   const url = presetUrl || document.getElementById('mpd-url').value.trim();
   if (!url) return;
   document.getElementById('mpd-url').value = url;
@@ -117,8 +117,8 @@ function loadMPD(presetUrl) {
   // Create dash.js player
   player = dashjs.MediaPlayer().create();
 
-  // Attach HEVC support — that's it, one line
-  cleanup = HevcDash.attachHevcSupport(player, {
+  // Attach HEVC support (async — checks H.264 encoding before installing)
+  cleanup = await HevcDash.attachHevcSupport(player, {
     workerUrl: './transcode-worker.js',
   });
 
