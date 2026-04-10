@@ -67,7 +67,7 @@
 <span class="kw">import</span> { <span class="fn">attachHevcSupport</span> } <span class="kw">from</span> <span class="str">'hevc.js/hlsjs'</span>;
 
 <span class="kw">const</span> hls = <span class="kw">new</span> <span class="fn">Hls</span>();
-<span class="fn">attachHevcSupport</span>(hls);
+<span class="kw">await</span> <span class="fn">attachHevcSupport</span>(hls);
 hls.<span class="fn">attachMedia</span>(videoElement);
 hls.<span class="fn">loadSource</span>(m3u8Url);</div>
 </div>
@@ -75,15 +75,8 @@ hls.<span class="fn">loadSource</span>(m3u8Url);</div>
 <!-- WASM decoder -->
 <script src="hevc-decode.js"></script>
 
-<!-- hevc.js/hlsjs bundle — MUST load BEFORE hls.js to patch MSE first -->
+<!-- hevc.js/hlsjs bundle -->
 <script src="hls-bundle.js"></script>
-<script>
-  // Install MSE intercept NOW, before hls.js caches MediaSource references
-  HevcHls.attachHevcSupport(null, { workerUrl: './transcode-worker.js' });
-</script>
-
-<!-- hls.js (loaded AFTER MSE is patched) -->
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 
 <script>
 // --- Logging ---
@@ -102,11 +95,40 @@ console.log = (...a) => { _log(...a); log('[log]', ...a); };
 console.warn = (...a) => { _warn(...a); log('[warn]', ...a); };
 console.error = (...a) => { _err(...a); log('[ERROR]', ...a); };
 
+// --- Init: check H.264 support, install MSE intercept, then load hls.js ---
+let hevcReady = false;
+let hlsCleanup = null;
+
+(async () => {
+  // Install MSE intercept BEFORE loading hls.js (hls.js caches MediaSource refs)
+  hlsCleanup = await HevcHls.attachHevcSupport(null, { workerUrl: './transcode-worker.js' });
+  hevcReady = hlsCleanup !== null && typeof hlsCleanup === 'function';
+
+  if (!hevcReady) {
+    document.getElementById('status').textContent =
+      'HEVC transcoding not available — this browser lacks H.264 VideoEncoder support';
+    return;
+  }
+
+  // Load hls.js dynamically (after MSE is patched)
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
+  script.onload = () => {
+    document.getElementById('status').textContent = 'Ready — choose a preset or enter an HLS URL';
+  };
+  document.head.appendChild(script);
+})();
+
 // --- hls.js + hevc.js ---
 let hls = null;
-let cleanup = null;
 
-function loadHLS(presetUrl) {
+async function loadHLS(presetUrl) {
+  if (!hevcReady || typeof Hls === 'undefined') {
+    document.getElementById('status').textContent =
+      'HEVC transcoding not available in this browser';
+    return;
+  }
+
   const url = presetUrl || document.getElementById('hls-url').value.trim();
   if (!url) return;
   document.getElementById('hls-url').value = url;
@@ -119,17 +141,15 @@ function loadHLS(presetUrl) {
   hls = new Hls({
     debug: false,
     enableWorker: true,
-    // Buffer must be large enough to keep loading video ahead while
-    // transcoding is in progress (~2-3s per 6s segment).
-    maxBufferLength: 30,          // keep loading until 30s buffered
-    maxMaxBufferLength: 60,       // hard cap
-    maxBufferSize: 60 * 1000000,  // 60MB
-    backBufferLength: 30,         // prune 30s behind playhead
-    maxBufferHole: 0.5,           // tolerate 0.5s gaps
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    maxBufferSize: 60 * 1000000,
+    backBufferLength: 30,
+    maxBufferHole: 0.5,
   });
 
-  // Attach HEVC support — patches MSE + filters levels to prefer HEVC
-  cleanup = HevcHls.attachHevcSupport(hls, {
+  // Attach HEVC level filtering
+  await HevcHls.attachHevcSupport(hls, {
     workerUrl: './transcode-worker.js',
   });
 
@@ -160,8 +180,6 @@ function loadHLS(presetUrl) {
   hls.loadSource(url);
   document.getElementById('status').textContent = 'Loading ' + url.split('/').pop() + '...';
 }
-
-document.getElementById('status').textContent = 'Ready — choose a preset or enter an HLS URL';
 </script>
 </body>
 </html>
