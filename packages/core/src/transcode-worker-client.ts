@@ -72,6 +72,49 @@ export class TranscodeWorkerClient {
     });
   }
 
+  /** Send a media segment for streaming transcoding — onChunk called for each partial result */
+  async processMediaSegmentStreaming(
+    data: Uint8Array,
+    onChunk: (h264: Uint8Array, initSegment: Uint8Array | null, codec: string | null) => Promise<void> | void,
+  ): Promise<void> {
+    const id = this._segmentId++;
+    return new Promise<void>((resolve, reject) => {
+      // Queue to serialize async onChunk calls (MSE appends must be sequential)
+      let chainPromise = Promise.resolve();
+      let done = false;
+
+      const handler = (e: MessageEvent) => {
+        const msg = e.data;
+        if (msg.id !== id) return;
+        if (msg.type === "partialTranscoded") {
+          const init = msg.initSegment ? new Uint8Array(msg.initSegment as ArrayBuffer) : null;
+          if (init && !this._initResult) {
+            this._initResult = {
+              initSegment: init,
+              codec: (msg.codec as string) || "avc1.640033",
+            };
+          }
+          const h264 = new Uint8Array(msg.h264 as ArrayBuffer);
+          // Chain async calls so MSE appends don't overlap
+          chainPromise = chainPromise.then(() => onChunk(h264, init, msg.codec ?? null));
+        } else if (msg.type === "streamingDone") {
+          done = true;
+          this._worker.removeEventListener("message", handler);
+          // Wait for all queued onChunk calls to finish before resolving
+          chainPromise.then(() => resolve()).catch(reject);
+        } else if (msg.type === "error") {
+          this._worker.removeEventListener("message", handler);
+          chainPromise.then(() => reject(new Error(msg.message as string))).catch(reject);
+        }
+      };
+      this._worker.addEventListener("message", handler);
+      this._worker.postMessage(
+        { type: "mediaSegmentStreaming", data: data.buffer, id },
+        [data.buffer],
+      );
+    });
+  }
+
   /** Abort current transcoding, reset state for seek */
   abort(): void {
     // Reject all pending
