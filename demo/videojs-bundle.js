@@ -12014,6 +12014,22 @@ var HevcVideojs = (() => {
     }
     const proxy = new Proxy(realSB, {
       set(target, prop, value) {
+        if (prop === "timestampOffset" && value !== target.timestampOffset) {
+          if (queue.length > 0 || processing) {
+            console.log(`[hevc.js] timestampOffset changed (${target.timestampOffset} \u2192 ${value}) \u2014 flushing queue + resetting transcoder`);
+            abortGeneration++;
+            queue.length = 0;
+            processing = false;
+            initParsed = false;
+            initAppended = false;
+            if (workerClient) workerClient.abort();
+            if (fakeUpdating) {
+              fakeUpdating = false;
+              dispatchOnProxy("update");
+              dispatchOnProxy("updateend");
+            }
+          }
+        }
         target[prop] = value;
         return true;
       },

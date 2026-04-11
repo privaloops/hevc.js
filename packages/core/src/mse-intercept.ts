@@ -179,6 +179,24 @@ function createTranscodingProxy(
   // Create the proxy
   const proxy = new Proxy(realSB, {
     set(target, prop, value) {
+      // Detect seek: hls.js changes timestampOffset before appending new segments.
+      // Flush stale segments from the queue to avoid transcoding old data.
+      if (prop === "timestampOffset" && value !== target.timestampOffset) {
+        if (queue.length > 0 || processing) {
+          console.log(`[hevc.js] timestampOffset changed (${target.timestampOffset} → ${value}) — flushing queue + resetting transcoder`);
+          abortGeneration++;
+          queue.length = 0;
+          processing = false;
+          initParsed = false;
+          initAppended = false;
+          if (workerClient) workerClient.abort();
+          if (fakeUpdating) {
+            fakeUpdating = false;
+            dispatchOnProxy("update");
+            dispatchOnProxy("updateend");
+          }
+        }
+      }
       // Forward property sets (appendWindowStart, timestampOffset, etc.) to real SB
       (target as unknown as Record<string | symbol, unknown>)[prop] = value;
       return true;
