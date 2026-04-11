@@ -1,6 +1,6 @@
 # @hevcjs/dashjs
 
-HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/dash.js). Transparently transcodes HEVC segments to H.264 via WebAssembly, enabling HEVC DASH streams on browsers without native HEVC support (Windows without paid codec, older Chrome, etc.).
+HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/dash.js). Software fallback for the ~6% of browsers without native HEVC support (Chrome < 107, Firefox Linux, old GPUs). Transparently transcodes HEVC segments to H.264 via WebAssembly. When native HEVC is available, the plugin detects it and does nothing.
 
 ## Install
 
