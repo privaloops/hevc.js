@@ -61,5 +61,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Internal dev files (not for public repo)
+CLAUDE.md
+MEMENTO-DEV.md
+
 # Spec PDF (copyright ITU-T, usage local uniquement)
 docs/spec/pdf/
