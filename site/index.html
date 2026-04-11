@@ -3,14 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>hevc.js — HEVC/H.265 Decoder in TypeScript</title>
-  <meta name="description" content="Open-source, spec-compliant HEVC/H.265 decoder. 60fps at 1080p, plugins for hls.js, dash.js and Video.js. MIT license.">
-  <meta property="og:title" content="hevc.js — A spec-compliant HEVC decoder for the browser">
-  <meta property="og:description" content="716 pages of ITU spec. 8 days of work. 126/126 pixel-perfect tests. Open source HEVC decoding for any browser.">
+  <title>hevc.js — HEVC/H.265 Decoder in WebAssembly | Browser HEVC Decoding</title>
+  <meta name="description" content="hevc.js is an open-source HEVC/H.265 WASM decoder for the browser. 60fps at 1080p, drop-in plugins for hls.js, dash.js and Video.js. MIT license.">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#0a0a0b">
+  <link rel="canonical" href="https://hevcjs.dev">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
+  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 126/126 pixel-perfect tests. Drop-in plugins for hls.js, dash.js and Video.js.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hevcjs.dev">
+  <meta property="og:site_name" content="hevc.js">
+  <meta property="og:image" content="https://hevcjs.dev/og-image.png">
+
+  <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
+  <meta name="twitter:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 126/126 pixel-perfect tests. MIT license.">
+
+  <!-- Favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "hevc.js",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Web Browser",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "Open-source, spec-compliant HEVC/H.265 decoder in WebAssembly. 60fps at 1080p with drop-in plugins for hls.js, dash.js and Video.js.",
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://hevcjs.dev",
+    "codeRepository": "https://github.com/privaloops/hevc.js"
+  }
+  </script>
+
+  <!-- TODO: Replace Tailwind CDN with inlined, purged CSS for production (~300KB JS saved) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -57,7 +94,7 @@
       position: relative;
     }
     .pipeline-step::after {
-      content: '→';
+      content: '\2192';
       position: absolute;
       right: -1.5rem;
       top: 50%;
@@ -72,22 +109,27 @@
     }
     @media (max-width: 768px) {
       .pipeline-step::after {
-        content: '↓';
+        content: '\2193';
         right: 50%;
         top: auto;
         bottom: -1.5rem;
         transform: translateX(50%);
       }
     }
+    /* Focus states for accessibility */
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid #6366f1;
+      outline-offset: 2px;
+    }
   </style>
 </head>
 <body class="bg-ink text-bone font-sans">
 
   <!-- Hero -->
-  <section class="min-h-screen flex flex-col justify-center px-6 py-20">
+  <header class="min-h-screen flex flex-col justify-center px-6 py-20" aria-label="Introduction">
     <div class="max-w-4xl mx-auto text-center">
       <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent-light text-sm font-medium mb-8">
-        <span class="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+        <span class="w-2 h-2 rounded-full bg-accent animate-pulse" aria-hidden="true"></span>
         Open source &middot; MIT license
       </div>
 
@@ -96,7 +138,7 @@
       </h1>
 
       <p class="text-xl md:text-2xl text-silver max-w-2xl mx-auto mb-4 leading-relaxed">
-        A spec-compliant HEVC/H.265 decoder for the browser.
+        A spec-compliant HEVC/H.265 WASM decoder for the browser.
         <br>TypeScript. 3 lines to integrate.
       </p>
 
@@ -104,319 +146,322 @@
         Built in <span class="text-white font-semibold">8 days</span> by one developer, assisted by AI.
       </p>
 
-      <div class="flex flex-wrap gap-4 justify-center">
-        <a href="https://github.com/privaloops/hevc.js" target="_blank"
+      <nav class="flex flex-wrap gap-4 justify-center" aria-label="Primary actions">
+        <a href="https://github.com/privaloops/hevc.js" target="_blank" rel="noopener noreferrer"
            class="inline-flex items-center gap-2 px-6 py-3 bg-white text-ink font-semibold rounded-lg hover:bg-bone transition-colors">
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
           View on GitHub
         </a>
         <a href="#playground"
            class="inline-flex items-center gap-2 px-6 py-3 bg-accent/15 text-accent-light font-semibold rounded-lg border border-accent/25 hover:bg-accent/25 transition-colors">
           Try the playground
         </a>
-      </div>
+      </nav>
     </div>
-  </section>
+  </header>
 
-  <!-- Numbers -->
-  <section class="px-6 py-20">
-    <div class="max-w-5xl mx-auto">
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">8</div>
-          <div class="text-sm text-silver uppercase tracking-wider">days of work</div>
-          <div class="text-xs text-silver/50 mt-1">from zero to 126/126 tests</div>
-        </div>
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">126<span class="text-accent">/126</span></div>
-          <div class="text-sm text-silver uppercase tracking-wider">pixel-perfect</div>
-          <div class="text-xs text-silver/50 mt-1">vs ffmpeg on every test</div>
-        </div>
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">60<span class="text-accent text-2xl">fps</span></div>
-          <div class="text-sm text-silver uppercase tracking-wider">1080p decode</div>
-          <div class="text-xs text-silver/50 mt-1">WASM, single-thread</div>
-        </div>
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">236<span class="text-accent text-2xl">KB</span></div>
-          <div class="text-sm text-silver uppercase tracking-wider">WASM binary</div>
-          <div class="text-xs text-silver/50 mt-1">gzipped, zero dependencies</div>
-        </div>
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">716</div>
-          <div class="text-sm text-silver uppercase tracking-wider">pages of spec</div>
-          <div class="text-xs text-silver/50 mt-1">ITU-T H.265 v8, transcribed to C++17</div>
-        </div>
-        <div class="stat-card rounded-xl p-6 text-center transition-all">
-          <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">42</div>
-          <div class="text-sm text-silver uppercase tracking-wider">bugs fixed</div>
-          <div class="text-xs text-silver/50 mt-1">49% of commits were corrections</div>
+  <main>
+    <!-- Numbers -->
+    <section class="px-6 py-20" aria-label="Key metrics">
+      <div class="max-w-5xl mx-auto">
+        <h2 class="sr-only">Key numbers</h2>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">8</div>
+            <div class="text-sm text-silver uppercase tracking-wider">days of work</div>
+            <div class="text-xs text-silver/50 mt-1">from zero to 126/126 tests</div>
+          </div>
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">126<span class="text-accent">/126</span></div>
+            <div class="text-sm text-silver uppercase tracking-wider">pixel-perfect</div>
+            <div class="text-xs text-silver/50 mt-1">vs ffmpeg on every test</div>
+          </div>
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">60<span class="text-accent text-2xl">fps</span></div>
+            <div class="text-sm text-silver uppercase tracking-wider">1080p decode</div>
+            <div class="text-xs text-silver/50 mt-1">WASM, single-thread</div>
+          </div>
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">236<span class="text-accent text-2xl">KB</span></div>
+            <div class="text-sm text-silver uppercase tracking-wider">WASM binary</div>
+            <div class="text-xs text-silver/50 mt-1">gzipped, zero dependencies</div>
+          </div>
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">716</div>
+            <div class="text-sm text-silver uppercase tracking-wider">pages of spec</div>
+            <div class="text-xs text-silver/50 mt-1">ITU-T H.265 v8, transcribed to C++17</div>
+          </div>
+          <div class="stat-card rounded-xl p-6 text-center transition-all">
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">42</div>
+            <div class="text-sm text-silver uppercase tracking-wider">bugs fixed</div>
+            <div class="text-xs text-silver/50 mt-1">49% of commits were corrections</div>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Pipeline -->
-  <section class="px-6 py-20">
-    <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">How it works</h2>
-      <p class="text-silver text-center max-w-2xl mx-auto mb-12">
-        When the browser can't play HEVC natively, hevc.js intercepts the media pipeline
-        and transcodes to H.264 — transparent to the player.
-      </p>
+    <!-- Pipeline -->
+    <section class="px-6 py-20" aria-label="How hevc.js works">
+      <div class="max-w-5xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">How it works</h2>
+        <p class="text-silver text-center max-w-2xl mx-auto mb-12">
+          When the browser can't play HEVC natively, hevc.js intercepts the media pipeline
+          and transcodes to H.264 — transparent to the player.
+        </p>
 
-      <!-- Pipeline diagram -->
-      <div class="flex flex-col md:flex-row items-center justify-center gap-3 md:gap-6 mb-12">
-        <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
-          <div class="text-xs text-accent font-mono mb-1">demux</div>
-          <div class="text-sm text-silver">fMP4 → NAL units</div>
+        <!-- Pipeline diagram -->
+        <div class="flex flex-col md:flex-row items-center justify-center gap-3 md:gap-6 mb-12" role="img" aria-label="HEVC decoding pipeline: demux fMP4 to NAL units, decode HEVC to YUV, encode YUV to H.264, mux H.264 to fMP4, then MSE playback">
+          <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
+            <div class="text-xs text-accent font-mono mb-1">demux</div>
+            <div class="text-sm text-silver">fMP4 &rarr; NAL units</div>
+          </div>
+          <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
+            <div class="text-xs text-accent font-mono mb-1">decode</div>
+            <div class="text-sm text-silver">HEVC &rarr; YUV</div>
+          </div>
+          <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
+            <div class="text-xs text-accent font-mono mb-1">encode</div>
+            <div class="text-sm text-silver">YUV &rarr; H.264</div>
+          </div>
+          <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
+            <div class="text-xs text-accent font-mono mb-1">mux</div>
+            <div class="text-sm text-silver">H.264 &rarr; fMP4</div>
+          </div>
+          <div class="code-block rounded-lg px-4 py-3 text-center border-accent/30">
+            <div class="text-xs text-accent font-mono mb-1">MSE</div>
+            <div class="text-sm text-white font-medium">Playback</div>
+          </div>
         </div>
-        <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
-          <div class="text-xs text-accent font-mono mb-1">decode</div>
-          <div class="text-sm text-silver">HEVC → YUV</div>
-        </div>
-        <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
-          <div class="text-xs text-accent font-mono mb-1">encode</div>
-          <div class="text-sm text-silver">YUV → H.264</div>
-        </div>
-        <div class="pipeline-step code-block rounded-lg px-4 py-3 text-center">
-          <div class="text-xs text-accent font-mono mb-1">mux</div>
-          <div class="text-sm text-silver">H.264 → fMP4</div>
-        </div>
-        <div class="code-block rounded-lg px-4 py-3 text-center border-accent/30">
-          <div class="text-xs text-accent font-mono mb-1">MSE</div>
-          <div class="text-sm text-white font-medium">Playback</div>
-        </div>
-      </div>
 
-      <div class="code-block rounded-xl p-6 max-w-2xl mx-auto">
-        <div class="flex items-center gap-2 mb-4">
-          <div class="w-3 h-3 rounded-full bg-red-500/60"></div>
-          <div class="w-3 h-3 rounded-full bg-yellow-500/60"></div>
-          <div class="w-3 h-3 rounded-full bg-green-500/60"></div>
-          <span class="text-xs text-silver/50 ml-2 font-mono">how it runs</span>
-        </div>
-        <pre class="text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-silver/50">// The player (hls.js, dash.js) doesn't know.</span>
+        <div class="code-block rounded-xl p-6 max-w-2xl mx-auto">
+          <div class="flex items-center gap-2 mb-4" aria-hidden="true">
+            <div class="w-3 h-3 rounded-full bg-red-500/60"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500/60"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500/60"></div>
+            <span class="text-xs text-silver/50 ml-2 font-mono">how it runs</span>
+          </div>
+          <pre class="text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-silver/50">// The player (hls.js, dash.js) doesn't know.</span>
 <span class="text-silver/50">// It requests HEVC segments.</span>
 <span class="text-silver/50">// MSE intercept delivers H.264 to the SourceBuffer.</span>
 <span class="text-silver/50">// Seek, ABR, live streams — everything works.</span>
 
 <span class="text-accent">HEVC stream</span>  ──►  <span class="text-silver">Web Worker</span>  ──►  <span class="text-green-400">H.264 to MSE</span>
               <span class="text-silver/40">demux → decode → encode → mux</span></code></pre>
-      </div>
-    </div>
-  </section>
-
-  <!-- Playground -->
-  <section id="playground" class="px-6 py-20">
-    <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Playground</h2>
-      <p class="text-silver text-center max-w-2xl mx-auto mb-12">
-        Drop an HEVC file and watch it decode in real time, frame by frame.
-      </p>
-
-      <div id="playground-area" class="code-block rounded-xl p-8 max-w-3xl mx-auto text-center">
-        <div id="drop-zone" class="border-2 border-dashed border-accent/25 rounded-lg p-12 hover:border-accent/50 transition-colors cursor-pointer">
-          <div class="text-6xl mb-4 opacity-50">▶</div>
-          <p class="text-silver text-lg mb-2">Drop an <span class="text-white font-mono">.h265</span> or <span class="text-white font-mono">.hevc</span> file</p>
-          <p class="text-silver/50 text-sm">or <button id="use-sample" class="text-accent hover:text-accent-light underline">use a sample clip</button></p>
-        </div>
-
-        <!-- Decode results (hidden by default) -->
-        <div id="decode-results" class="hidden mt-6">
-          <canvas id="frame-canvas" class="mx-auto rounded-lg bg-black max-w-full"></canvas>
-          <div class="flex items-center gap-4 mt-4 justify-center">
-            <button id="prev-frame" class="px-3 py-1 bg-ash rounded text-silver hover:text-white text-sm">← Prev</button>
-            <span id="frame-counter" class="text-sm text-silver font-mono">Frame 1/1</span>
-            <button id="next-frame" class="px-3 py-1 bg-ash rounded text-silver hover:text-white text-sm">Next →</button>
-          </div>
-          <div class="grid grid-cols-3 gap-4 mt-6 text-center">
-            <div>
-              <div id="stat-frames" class="text-2xl font-bold text-white">—</div>
-              <div class="text-xs text-silver">frames</div>
-            </div>
-            <div>
-              <div id="stat-time" class="text-2xl font-bold text-white">—</div>
-              <div class="text-xs text-silver">decode time</div>
-            </div>
-            <div>
-              <div id="stat-fps" class="text-2xl font-bold text-white">—</div>
-              <div class="text-xs text-silver">fps</div>
-            </div>
-          </div>
         </div>
       </div>
-      <p class="text-xs text-silver/40 text-center mt-4">Decoding runs entirely in your browser. No data is uploaded.</p>
-    </div>
-  </section>
+    </section>
 
-  <!-- Story -->
-  <section class="px-6 py-20">
-    <div class="max-w-2xl mx-auto">
-      <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-8">The story</h2>
+    <!-- Playground -->
+    <section id="playground" class="px-6 py-20" aria-label="HEVC decoding playground">
+      <div class="max-w-5xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Playground</h2>
+        <p class="text-silver text-center max-w-2xl mx-auto mb-12">
+          Drop an HEVC file and watch it decode in real time, frame by frame.
+        </p>
 
-      <div class="text-silver leading-relaxed space-y-4">
-        <p>
-          <span class="text-white font-medium">Why build a video decoder from scratch?</span>
-          Not because the world needed another one.
-        </p>
-        <p>
-          HEVC/H.265 is one of the most complex specs in multimedia — 716 pages of pseudo-code
-          covering arithmetic coding, 35 intra prediction modes, loop filters, and a hundred
-          edge cases nobody warns you about.
-        </p>
-        <p>
-          Building a conformant decoder typically takes a team of specialists several years.
-          We did it in <span class="text-white">8 working days</span> — one senior developer, working with AI.
-        </p>
-        <p>
-          Not by cutting corners. Every function is a direct transcription of the spec.
-          Every test is a pixel-perfect comparison against ffmpeg.
-          42 bugs were found and fixed along the way.
-        </p>
-        <p class="text-white font-medium">
-          AI doesn't replace engineering judgment. It amplifies it.
-        </p>
-      </div>
+        <div id="playground-area" class="code-block rounded-xl p-8 max-w-3xl mx-auto text-center">
+          <div id="drop-zone" class="border-2 border-dashed border-accent/25 rounded-lg p-12 hover:border-accent/50 transition-colors cursor-pointer" role="button" tabindex="0" aria-label="Drop an HEVC file here or click to select">
+            <div class="text-6xl mb-4 opacity-50" aria-hidden="true">▶</div>
+            <p class="text-silver text-lg mb-2">Drop an <span class="text-white font-mono">.h265</span> or <span class="text-white font-mono">.hevc</span> file</p>
+            <p class="text-silver/50 text-sm">or <button id="use-sample" class="text-accent hover:text-accent-light underline">use a sample clip</button></p>
+          </div>
 
-      <div class="text-center mt-8">
-        <a href="#" class="text-accent hover:text-accent-light text-sm font-medium">
-          Read the full technical case study →
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <!-- Plugins -->
-  <section class="px-6 py-20">
-    <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Drop-in plugins</h2>
-      <p class="text-silver text-center max-w-2xl mx-auto mb-12">
-        HEVC playback for any player. 3 lines of code.
-        <br><span class="text-silver/50">Activates only when native HEVC is unavailable.</span>
-      </p>
-
-      <div class="grid md:grid-cols-3 gap-6">
-        <!-- hls.js -->
-        <div class="code-block rounded-xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm">HLS</div>
-            <div>
-              <div class="text-white font-semibold">hls.js</div>
-              <div class="text-xs text-silver/50">@hevcjs/hlsjs</div>
+          <!-- Decode results (hidden by default) -->
+          <div id="decode-results" class="hidden mt-6">
+            <canvas id="frame-canvas" class="mx-auto rounded-lg bg-black max-w-full" aria-label="Decoded HEVC video frame"></canvas>
+            <div class="flex items-center gap-4 mt-4 justify-center">
+              <button id="prev-frame" class="px-3 py-1 bg-ash rounded text-silver hover:text-white text-sm" aria-label="Previous frame">&larr; Prev</button>
+              <span id="frame-counter" class="text-sm text-silver font-mono">Frame 1/1</span>
+              <button id="next-frame" class="px-3 py-1 bg-ash rounded text-silver hover:text-white text-sm" aria-label="Next frame">Next &rarr;</button>
+            </div>
+            <div class="grid grid-cols-3 gap-4 mt-6 text-center">
+              <div>
+                <div id="stat-frames" class="text-2xl font-bold text-white">—</div>
+                <div class="text-xs text-silver">frames</div>
+              </div>
+              <div>
+                <div id="stat-time" class="text-2xl font-bold text-white">—</div>
+                <div class="text-xs text-silver">decode time</div>
+              </div>
+              <div>
+                <div id="stat-fps" class="text-2xl font-bold text-white">—</div>
+                <div class="text-xs text-silver">fps</div>
+              </div>
             </div>
           </div>
-          <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
+        </div>
+        <p class="text-xs text-silver/40 text-center mt-4">Decoding runs entirely in your browser. No data is uploaded.</p>
+      </div>
+    </section>
+
+    <!-- Story -->
+    <article class="px-6 py-20" aria-label="The story behind hevc.js">
+      <div class="max-w-2xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-8">The story</h2>
+
+        <div class="text-silver leading-relaxed space-y-4">
+          <p>
+            <span class="text-white font-medium">Why build a video decoder from scratch?</span>
+            Not because the world needed another one.
+          </p>
+          <p>
+            HEVC/H.265 is one of the most complex specs in multimedia — 716 pages of pseudo-code
+            covering arithmetic coding, 35 intra prediction modes, loop filters, and a hundred
+            edge cases nobody warns you about.
+          </p>
+          <p>
+            Building a conformant decoder typically takes a team of specialists several years.
+            We did it in <span class="text-white">8 working days</span> — one senior developer, working with AI.
+          </p>
+          <p>
+            Not by cutting corners. Every function is a direct transcription of the spec.
+            Every test is a pixel-perfect comparison against ffmpeg.
+            42 bugs were found and fixed along the way.
+          </p>
+          <p class="text-white font-medium">
+            AI doesn't replace engineering judgment. It amplifies it.
+          </p>
+        </div>
+
+        <div class="text-center mt-8">
+          <a href="#" class="text-accent hover:text-accent-light text-sm font-medium" rel="noopener noreferrer">
+            Read the full technical case study &rarr;
+          </a>
+        </div>
+      </div>
+    </article>
+
+    <!-- Plugins -->
+    <section class="px-6 py-20" aria-label="Player plugins">
+      <div class="max-w-5xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Drop-in plugins</h2>
+        <p class="text-silver text-center max-w-2xl mx-auto mb-12">
+          HEVC playback for any player. 3 lines of code.
+          <br><span class="text-silver/50">Activates only when native HEVC is unavailable.</span>
+        </p>
+
+        <div class="grid md:grid-cols-3 gap-6">
+          <!-- hls.js -->
+          <div class="code-block rounded-xl p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm" aria-hidden="true">HLS</div>
+              <div>
+                <h3 class="text-white font-semibold">hls.js</h3>
+                <div class="text-xs text-silver/50">@hevcjs/hlsjs</div>
+              </div>
+            </div>
+            <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
   <span class="text-accent">from</span> <span class="text-green-400">'@hevcjs/hlsjs'</span>;
 
 <span class="text-accent">await</span> attachHevcSupport(hls);</code></pre>
-        </div>
-
-        <!-- dash.js -->
-        <div class="code-block rounded-xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm">DASH</div>
-            <div>
-              <div class="text-white font-semibold">dash.js</div>
-              <div class="text-xs text-silver/50">@hevcjs/dashjs</div>
-            </div>
           </div>
-          <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
+
+          <!-- dash.js -->
+          <div class="code-block rounded-xl p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm" aria-hidden="true">DASH</div>
+              <div>
+                <h3 class="text-white font-semibold">dash.js</h3>
+                <div class="text-xs text-silver/50">@hevcjs/dashjs</div>
+              </div>
+            </div>
+            <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
   <span class="text-accent">from</span> <span class="text-green-400">'@hevcjs/dashjs'</span>;
 
 <span class="text-accent">await</span> attachHevcSupport(player);</code></pre>
-        </div>
-
-        <!-- Video.js -->
-        <div class="code-block rounded-xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm">VJS</div>
-            <div>
-              <div class="text-white font-semibold">Video.js</div>
-              <div class="text-xs text-silver/50">@hevcjs/videojs</div>
-            </div>
           </div>
-          <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
+
+          <!-- Video.js -->
+          <div class="code-block rounded-xl p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm" aria-hidden="true">VJS</div>
+              <div>
+                <h3 class="text-white font-semibold">Video.js</h3>
+                <div class="text-xs text-silver/50">@hevcjs/videojs</div>
+              </div>
+            </div>
+            <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
   <span class="text-accent">from</span> <span class="text-green-400">'@hevcjs/videojs'</span>;
 
 <span class="text-accent">await</span> attachHevcSupport();</code></pre>
+          </div>
+        </div>
+
+        <div class="text-center mt-8">
+          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/core</code>
         </div>
       </div>
+    </section>
 
-      <div class="text-center mt-8">
-        <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/core</code>
+    <!-- Spec conformance -->
+    <section class="px-6 py-20" aria-label="Spec conformance details">
+      <div class="max-w-3xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Spec conformance</h2>
+        <p class="text-silver text-center mb-12">
+          Implemented per <span class="text-white">ITU-T H.265 v8</span> — transcribed directly from the spec, not from ffmpeg or libde265.
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">CABAC arithmetic decoding (&sect;9.3)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">35 intra prediction modes (&sect;8.4)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">Inter prediction — merge, AMVP, TMVP (&sect;8.5)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">8-tap luma / 4-tap chroma interpolation</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">Weighted prediction — default + explicit</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">Inverse transform — DCT 4-32, DST 4</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">Deblocking filter + SAO (&sect;8.7)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">10-bit decoding (Main 10 profile)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">Multi-slice (dependent + independent)</span>
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
+            <span class="text-green-400" aria-hidden="true">&#10003;</span>
+            <span class="text-sm text-silver">WPP (Wavefront Parallel Processing)</span>
+          </div>
+        </div>
+
+        <p class="text-center text-sm text-silver/50 mt-6">
+          Reaches 83% of <a href="https://github.com/nicostahl/libde265" class="text-accent hover:text-accent-light" rel="noopener noreferrer" target="_blank">libde265</a>
+          speed — a decoder with 10 years of optimizations.
+        </p>
       </div>
-    </div>
-  </section>
-
-  <!-- Spec conformance -->
-  <section class="px-6 py-20">
-    <div class="max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Spec conformance</h2>
-      <p class="text-silver text-center mb-12">
-        Implemented per <span class="text-white">ITU-T H.265 v8</span> — transcribed directly from the spec, not from ffmpeg or libde265.
-      </p>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">CABAC arithmetic decoding (§9.3)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">35 intra prediction modes (§8.4)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">Inter prediction — merge, AMVP, TMVP (§8.5)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">8-tap luma / 4-tap chroma interpolation</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">Weighted prediction — default + explicit</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">Inverse transform — DCT 4-32, DST 4</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">Deblocking filter + SAO (§8.7)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">10-bit decoding (Main 10 profile)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">Multi-slice (dependent + independent)</span>
-        </div>
-        <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-smoke">
-          <span class="text-green-400">✓</span>
-          <span class="text-sm text-silver">WPP (Wavefront Parallel Processing)</span>
-        </div>
-      </div>
-
-      <p class="text-center text-sm text-silver/50 mt-6">
-        Reaches 83% of <a href="https://github.com/nicostahl/libde265" class="text-accent hover:text-accent-light">libde265</a>
-        speed — a decoder with 10 years of optimizations.
-      </p>
-    </div>
-  </section>
+    </section>
+  </main>
 
   <!-- Footer -->
   <footer class="px-6 py-12 border-t border-ash">
     <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
       <div class="text-silver/50 text-sm">
         MIT License &middot;
-        <a href="https://github.com/privaloops/hevc.js" class="text-silver hover:text-white">GitHub</a> &middot;
-        <a href="https://www.npmjs.com/org/hevcjs" class="text-silver hover:text-white">npm</a>
+        <a href="https://github.com/privaloops/hevc.js" class="text-silver hover:text-white" rel="noopener noreferrer" target="_blank">GitHub</a> &middot;
+        <a href="https://www.npmjs.com/org/hevcjs" class="text-silver hover:text-white" rel="noopener noreferrer" target="_blank">npm</a>
       </div>
       <div class="text-silver/50 text-sm">
-        Built by <a href="https://developpement.ai" class="text-accent hover:text-accent-light">developpement.ai</a>
+        Built by <a href="https://developpement.ai" class="text-accent hover:text-accent-light" rel="noopener noreferrer" target="_blank">developpement.ai</a>
       </div>
     </div>
   </footer>
@@ -585,6 +630,14 @@
       if (input.files[0]) input.files[0].arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
     };
     input.click();
+  });
+
+  // Keyboard support for drop zone
+  dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      dropZone.click();
+    }
   });
 
   // Sample clip
