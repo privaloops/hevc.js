@@ -52,13 +52,22 @@
   "keywords": [
     "hevc",
     "h265",
+    "h264",
     "decoder",
+    "transcoding",
     "webassembly",
     "wasm",
     "video",
     "codec",
+    "browser",
+    "mse",
+    "media-source",
+    "streaming",
+    "hls",
+    "hlsjs",
     "dash",
-    "dashjs"
+    "dashjs",
+    "videojs"
   ],
   "license": "MIT",
   "repository": {

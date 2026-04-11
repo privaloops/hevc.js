@@ -11,7 +11,7 @@
 
   <!-- Open Graph -->
   <meta property="og:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
-  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 126/126 pixel-perfect tests. Drop-in plugins for hls.js, dash.js and Video.js.">
+  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. Drop-in plugins for hls.js, dash.js and Video.js.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hevcjs.dev">
   <meta property="og:site_name" content="hevc.js">
@@ -20,7 +20,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
-  <meta name="twitter:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 126/126 pixel-perfect tests. MIT license.">
+  <meta name="twitter:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. MIT license.">
 
   <!-- Favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>">
@@ -117,12 +117,13 @@
       </h1>
 
       <p class="text-xl md:text-2xl text-silver max-w-2xl mx-auto mb-4 leading-relaxed">
-        A spec-compliant HEVC/H.265 WASM decoder for the browser.
-        <br>TypeScript. 3 lines to integrate.
+        716 pages of ITU-T spec. One developer. One AI.
+        <br><span class="text-white font-semibold">8 days</span> to a spec-compliant HEVC decoder.
       </p>
 
       <p class="text-lg text-silver/70 mb-12">
-        Built in <span class="text-white font-semibold">8 days</span> by one developer, assisted by AI.
+        A from-scratch HEVC/H.265 decoder compiled to WebAssembly, with drop-in plugins
+        for hls.js, dash.js and Video.js. For the ~6% of browsers that don't support HEVC natively.
       </p>
 
       <nav class="flex flex-wrap gap-4 justify-center" aria-label="Primary actions">
@@ -148,10 +149,10 @@
           <div class="stat-card rounded-xl p-6 text-center transition-all">
             <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">8</div>
             <div class="text-sm text-silver uppercase tracking-wider">days of work</div>
-            <div class="text-xs text-silver/50 mt-1">from zero to 126/126 tests</div>
+            <div class="text-xs text-silver/50 mt-1">from zero to 128/128 tests</div>
           </div>
           <div class="stat-card rounded-xl p-6 text-center transition-all">
-            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">126<span class="text-accent">/126</span></div>
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">128<span class="text-accent">/128</span></div>
             <div class="text-sm text-silver uppercase tracking-wider">pixel-perfect</div>
             <div class="text-xs text-silver/50 mt-1">vs ffmpeg on every test</div>
           </div>
@@ -226,6 +227,10 @@
 
 <span class="text-accent">HEVC stream</span>  ──►  <span class="text-silver">Web Worker</span>  ──►  <span class="text-green-400">H.264 to MSE</span>
               <span class="text-silver/40">demux → decode → encode → mux</span></code></pre>
+        </div>
+
+        <div class="max-w-2xl mx-auto mt-8 px-4 py-3 rounded-lg bg-smoke border border-ash text-sm text-silver">
+          <span class="text-white font-medium">Tradeoff:</span> the first segment takes 2-3s to transcode (vs instant with native hardware decode). Once buffered, playback is smooth. This is inherent to any software HEVC decoder — when native support is available, hevc.js detects it and does nothing.
         </div>
       </div>
     </section>
@@ -303,7 +308,7 @@
         </div>
 
         <div class="text-center mt-8">
-          <a href="#" class="text-accent hover:text-accent-light text-sm font-medium" rel="noopener noreferrer">
+          <a href="https://developpement.ai/case-studies/hevc-decoder" class="text-accent hover:text-accent-light text-sm font-medium" target="_blank" rel="noopener noreferrer">
             Read the full technical case study &rarr;
           </a>
         </div>
@@ -366,8 +371,10 @@
           </div>
         </div>
 
-        <div class="text-center mt-8">
-          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/core</code>
+        <div class="flex flex-col items-center gap-2 mt-8">
+          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/hlsjs</code>
+          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/dashjs</code>
+          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/videojs</code>
         </div>
       </div>
     </section>
@@ -538,10 +545,10 @@
           const Cb = Module.HEAPU16[cbOff + (row >> 1) * strideC + (col >> 1)] >> shift;
           const Cr = Module.HEAPU16[crOff + (row >> 1) * strideC + (col >> 1)] >> shift;
 
-          // BT.601 YCbCr to RGB
-          const r = Y + 1.402 * (Cr - 128);
-          const g = Y - 0.344136 * (Cb - 128) - 0.714136 * (Cr - 128);
-          const b = Y + 1.772 * (Cb - 128);
+          // BT.709 YCbCr to RGB
+          const r = Y + 1.5748 * (Cr - 128);
+          const g = Y - 0.1873 * (Cb - 128) - 0.4681 * (Cr - 128);
+          const b = Y + 1.8556 * (Cb - 128);
 
           const idx = (row * w + col) * 4;
           rgba[idx]     = r < 0 ? 0 : r > 255 ? 255 : r;
