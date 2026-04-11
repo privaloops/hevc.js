@@ -97,7 +97,6 @@ let hevcReady = false;
 (async () => {
   const cleanup = await HevcVideojs.attachHevcSupport({
     workerUrl: './transcode-worker.js',
-    forceTranscode: true,
   });
   hevcReady = cleanup !== null && typeof cleanup === 'function';
 
