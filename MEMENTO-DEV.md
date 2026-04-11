@@ -615,4 +615,206 @@ Le chemin multi-frame dans `main.cpp` castait en `uint8_t` hardcodé. Le chemin 
 
 ---
 
-*Dernière mise à jour : 22 mars 2026*
+---
+
+## 3e. Phase 10 — Multi-Slice : les 4 derniers tests
+
+Les 4 tests qui échouaient depuis Phase 4 (`conf_i_multislice_256`, `conf_b_xslice_256`, `oracle_bbb1080_50f`, `oracle_bbb4k_25f`) ont été résolus. Le problème : les filtres deblocking et SAO ne respectaient pas les frontières de slice (cross-slice filtering interdit par défaut en HEVC).
+
+**Jalon** : 126/126 tests pixel-perfect. Décodeur HEVC Main/Main 10 feature-complete.
+
+---
+
+## 11. Le pivot monorepo — hevc.js
+
+### Jour ~10 — fin mars 2026 : du décodeur au produit
+
+Le décodeur C++/WASM était fini. La question suivante : **comment le rendre utile dans un navigateur ?**
+
+Le pivot a transformé le projet d'un décodeur HEVC en un **système de transcodage transparent** :
+
+```
+hevc-decode (C++ WASM)
+  └── hevc.js (monorepo pnpm)
+        ├── packages/core      — pipeline demux→decode→encode→mux
+        ├── packages/hlsjs     — plugin hls.js
+        ├── packages/dashjs    — plugin dash.js
+        └── packages/videojs   — plugin Video.js + VHS
+```
+
+**Enseignement n°22 — Le décodeur seul ne sert à rien dans un navigateur** : Un navigateur ne consomme pas du YUV brut. Il faut :
+1. Démuxer le fMP4 (NAL units enfouies dans moof+mdat)
+2. Décoder HEVC → YUV
+3. Ré-encoder en H.264 (le seul codec que MSE accepte partout)
+4. Re-muxer en fMP4 H.264
+5. Injecter dans le SourceBuffer MSE
+
+C'est le pipeline complet qui fait la valeur, pas le décodeur isolé.
+
+### Architecture du transcodage
+
+Le pattern clé : **MSE intercept**. On monkey-patch `MediaSource.addSourceBuffer()` pour retourner un proxy. Le player (hls.js, dash.js) ne sait pas qu'il parle à un proxy. Il envoie du HEVC, reçoit des events MSE normaux, et le vrai SourceBuffer reçoit du H.264.
+
+| Composant | Rôle | Technologie |
+|-----------|------|-------------|
+| `mse-intercept.ts` | Proxy SourceBuffer, backpressure, events | Vanilla JS |
+| `segment-transcoder.ts` | Pipeline demux→decode→encode→mux | mp4box.js + WASM + WebCodecs |
+| `transcode-worker.ts` | Offload dans un Web Worker | postMessage protocol |
+| `h264-encoder.ts` | Wrapper WebCodecs VideoEncoder | WebCodecs API |
+| `fmp4-muxer.ts` | Muxer fMP4 (moof+mdat) artisanal | ISO BMFF from scratch |
+| `fmp4-demuxer.ts` | Extraction NAL units depuis fMP4 | mp4box.js |
+
+**Enseignement n°23 — Le MSE intercept est le pattern le plus puissant et le plus dangereux** : Monkey-patcher `addSourceBuffer` permet la transparence totale (le player ne sait rien). Mais ça implique de gérer soi-même le protocole MSE : `updating`, `updatestart`/`updateend` events, `buffered` ranges, `abort()`, `remove()`, et le timing `timestampOffset` (hls.js l'utilise pour signaler un seek sans appeler abort). Chaque player a ses quirks.
+
+### Les bugs d'intégration player — un autre monde
+
+**Le shift de difficulté** : les bugs Phase 4-7 étaient dans le décodeur (spec vs implémentation, déterministe, reproductible). Les bugs d'intégration player sont dans les **interactions asynchrones** (race conditions, ordering, state machines) :
+
+| Bug | Player | Cause | Impact |
+|-----|--------|-------|--------|
+| Buffer gaps 78ms | hls.js | Durées de sample en float vs entier timescale | Gaps entre segments → rebuffering |
+| Audio SB jamais créé | dash.js | MSE intercept interceptait aussi l'audio | Pas de son |
+| Seek broken (hls.js) | hls.js | hls.js change `timestampOffset` au lieu d'appeler `abort()` | Seek ne reprend jamais |
+| VHS quality switch crash | Video.js | `forceTranscode` désactivé → VHS route vers AVC via le proxy HEVC | MEDIA_ERR_DECODE |
+| ArrayBuffer detached | Worker | Init segment buffer transféré puis réutilisé | Crash postMessage |
+
+**Enseignement n°24 — Chaque player a sa propre interprétation de MSE** : hls.js signale un seek via `timestampOffset` (pas `abort`). dash.js recrée le SourceBuffer à chaque period. Video.js/VHS switch entre AVC et HEVC dynamiquement. Il faut gérer les 3 patterns dans le même intercept.
+
+---
+
+## 12. Le pipeline streaming — avril 2026
+
+### Le problème
+
+Avec des gros segments CMAF (ARTE : 300 frames / 12s / 1.4MB), le premier frame H.264 apparaît après **~2-3s** car le pipeline est séquentiel :
+
+```
+feed(300 NALs) → drain(300 frames) → encode(300) → flush → mux → append MSE
+```
+
+### Les tentatives
+
+4 approches testées, 3 ont échoué :
+
+| # | Approche | Résultat | Pourquoi |
+|---|----------|----------|----------|
+| 1 | Encodage incrémental (1 frame + flush/30) | Frames corrompues | `flush()` entre batches casse les références inter-frames du H.264 encoder (B-frames mode quality) |
+| 2 | Idem + `latencyMode=realtime` + keyframe forcé | Toujours corrompu | Le flush restait destructif même avec keyframes |
+| 3 | Pas de flush, émission sur chunks disponibles | Pas d'amélioration | `onChunk` callbacks ne se déclenchent pas dans la boucle synchrone du Worker (event loop bloqué) |
+| 4 | Décodage séquentiel + encodage par batch de 30 + flush | **OK** | Le decode séquentiel garantit l'ordre correct des frames, `latencyMode=realtime` rend le flush inter-batch safe |
+
+**Approche finale retenue** : decode séquentiel (feed all → drain all), puis encodage par batches de 30 frames avec flush entre chaque. Chaque batch est muxé en fMP4 séparé et émis à MSE. Le premier batch sort après le decode complet + 30 encodes (~1.6s au lieu de ~2.5s).
+
+**Enseignement n°25 — WebCodecs VideoEncoder flush() n'est pas idempotent** : En mode `quality` (défaut), `flush()` peut réordonner les frames de sortie (B-frames), et les frames post-flush perdent leurs références. Le mode `latencyMode=realtime` désactive les B-frames et rend `flush()` safe. C'est un changement d'une ligne mais fondamental.
+
+**Enseignement n°26 — Les callbacks WebCodecs sont asynchrones, même dans un Worker** : `encoder.encode(frame)` est synchrone (queue la frame), mais `onChunk` est appelé via le event loop. Dans une boucle synchrone serrée (feed→drain→encode × 300), le event loop n'a jamais l'occasion de dispatcher les callbacks. Les chunks s'accumulent et sortent tous au `flush()` final. Impossible de faire du "vrai streaming" sans yield ou flush périodique.
+
+### Impact réel du streaming
+
+L'amélioration est modeste car le goulot est le décodage WASM (~70% du temps), pas l'encodage. Le streaming pipeline réduit la latence d'encodage (émet le premier batch de 30 frames sans attendre les 270 restants) mais ne touche pas au decode.
+
+---
+
+## 13. Le reality check — positionnement marché
+
+### Avril 2026 : qui a vraiment besoin de ce transcodage ?
+
+Une analyse du marché navigateur a révélé que l'hypothèse initiale du projet était obsolète :
+
+**Hypothèse initiale (mars 2026)** : "Chrome Windows ne supporte pas HEVC nativement sans le codec payant Microsoft Store".
+
+**Réalité (vérifié avril 2026)** : Chrome 107+ (oct 2022) utilise le décodeur hardware GPU directement, sans le codec Microsoft Store. Tout GPU de 2015+ (Intel Skylake, NVIDIA GTX 950, AMD RX 400) supporte HEVC en hardware.
+
+| Segment | % marché | HEVC natif ? |
+|---------|----------|-------------|
+| Chrome/Edge 107+ (Win/Mac/Android) | ~72% | Oui |
+| Safari | ~15% | Oui |
+| Firefox 137+ (Windows) | ~1% | Oui |
+| Chrome < 107 (vieux, entreprise) | ~3.5% | **Non** |
+| Firefox (Linux, ancien) | ~1% | **Non** |
+| Linux (pas de VAAPI GPU) | ~0.5% | **Non** |
+
+**~94% des navigateurs ont le HEVC natif. Le fallback WASM concerne ~6% du marché.**
+
+Source : [caniuse.com/hevc](https://caniuse.com/hevc), [StatCounter browser version market share](https://gs.statcounter.com/browser-version-market-share/desktop/worldwide/).
+
+**Enseignement n°27 — Valider l'hypothèse marché avant d'optimiser** : On a passé une session entière à optimiser la latence du streaming pipeline pour un fallback qui concerne 6% des utilisateurs. L'étude de marché aurait dû être faite en amont. Le transcodage reste utile (il évite un écran noir total pour ces 6%), mais l'investissement en optimisation de latence a un ROI limité.
+
+### Benchmark vs libde265 — on n'est pas ridicules
+
+Pour calibrer la performance de notre décodeur from-scratch vs l'état de l'art, benchmark contre [libde265](https://github.com/nicostahl/libde265) (décodeur HEVC open source, 10 ans d'optimisations) compilé en WASM avec les mêmes flags :
+
+| Résolution | Notre décodeur | libde265 | Écart |
+|-----------|---------------|----------|-------|
+| QCIF 176×144 (10f) | 460 fps | 420 fps | **Nous +10%** |
+| 1080p (50f) | 60 fps | 70 fps | libde265 +17% |
+| 4K (25f) | 17 fps | 20 fps | libde265 +18% |
+
+**À 17% d'un projet de 10 ans, en partant de 716 pages de spec.** Et en 1080p on atteint le temps réel (60 fps).
+
+Le startup de 2-3s n'est pas un défaut de notre décodeur — c'est le coût incompressible du décodage HEVC software en WASM. Libde265 aurait le même problème (~1.3s de decode au lieu de ~1.5s pour 300 frames 1080p — 200ms de différence).
+
+**Enseignement n°28 — Le plafond est physique, pas algorithmique** : Optimiser notre décodeur à mort (SIMD, cache, etc.) donnerait au mieux les perfs de libde265, soit ~17% de gain. Sur un startup de 2.5s, ça économise ~400ms. Le vrai saut de performance ne peut venir que du hardware (WebCodecs VideoDecoder, WebGPU) — pas du software.
+
+---
+
+## 14. Enseignements pour l'article (suite)
+
+### Sur le pivot "décodeur → produit"
+
+22. **Le décodeur seul ne sert à rien dans un navigateur** : il faut tout le pipeline (demux→decode→encode→mux→MSE) pour que ça joue.
+23. **Le MSE intercept est puissant mais fragile** : monkey-patcher `addSourceBuffer` donne la transparence totale, mais chaque player a ses quirks.
+24. **Chaque player a sa propre interprétation de MSE** : hls.js, dash.js, Video.js/VHS — 3 patterns de seek, 3 patterns d'init, 3 façons de gérer les quality switches.
+
+### Sur WebCodecs et le streaming
+
+25. **`flush()` n'est pas idempotent** : en mode quality, il casse les références inter-frames. `latencyMode=realtime` le rend safe.
+26. **Les callbacks sont asynchrones, même dans un Worker** : impossible de faire du streaming "natif" sans yield ou flush périodique.
+
+### Sur le positionnement
+
+27. **Valider l'hypothèse marché avant d'optimiser** : le fallback concerne ~6% du marché, pas les "Chrome Windows sans codec" qu'on croyait.
+28. **Le plafond est physique** : même libde265 ne résout pas le startup de 2s. Seul le hardware peut.
+
+---
+
+## 15. Statistiques finales (avril 2026)
+
+### Volume de code
+
+| Mesure | Valeur |
+|--------|--------|
+| C++ (src/) | ~7 500 lignes |
+| TypeScript (packages/) | ~3 000 lignes |
+| Total projet | ~10 500 lignes |
+| Tests C++ (oracle) | 126/126 pixel-perfect |
+| Tests e2e (Playwright) | 5/6 passent en local |
+
+### Timeline complète
+
+| Période | Quoi |
+|---------|------|
+| 19-22 mars | Phases 1-7 : décodeur HEVC complet (4 jours) |
+| 23-25 mars | Phase 10 multi-slice, WASM optimize, perf profiling |
+| 26-31 mars | Pivot monorepo hevc.js, packages core/hlsjs/dashjs |
+| 1-5 avril | Plugins dash.js, hls.js, Video.js + bugs d'intégration |
+| 6-10 avril | ABR, seek, timestamps, audio — stabilisation player |
+| 11 avril | Pipeline streaming + reality check marché |
+
+### Bugs par domaine
+
+| Domaine | Bugs | Caractère |
+|---------|------|-----------|
+| CABAC / contextes | 10 | Propagation silencieuse, debug bin-par-bin |
+| Intra prediction | 6 | Modes faux mais partiellement fonctionnels |
+| Transform / résidu | 9 | Off-by-one, transposition, scan order |
+| Structure / coding tree | 5 | Race conditions, héritage CBF |
+| Inter prediction | 3 | Flags ignorés, conditions implicites |
+| Loop filters | 1 | Cross-slice boundary |
+| Intégration player | 5 | Async, MSE protocol, player quirks |
+| Pipeline streaming | 3 | WebCodecs flush, event loop, ArrayBuffer |
+| **Total** | **42** | |
+
+---
+
+*Dernière mise à jour : 11 avril 2026*
