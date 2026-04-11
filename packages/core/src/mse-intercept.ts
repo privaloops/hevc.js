@@ -83,7 +83,6 @@ export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
 
   // Patch addSourceBuffer — return a proxy that handles transcoding
   MediaSource.prototype.addSourceBuffer = function (mimeType: string): SourceBuffer {
-    console.log(`[hevc.js] addSourceBuffer("${mimeType}")`);
     if (!HEVC_DETECT_RE.test(mimeType)) {
       return originalAddSourceBuffer.call(this, mimeType);
     }
@@ -311,6 +310,18 @@ function createTranscodingProxy(
     return transcoder!.processMediaSegment(segment);
   }
 
+  async function transcodeMediaStreaming(
+    segment: Uint8Array,
+    onPartial: (h264: Uint8Array, initSegment: Uint8Array | null, codec: string | null) => Promise<void> | void,
+  ): Promise<void> {
+    if (workerClient) {
+      return workerClient.processMediaSegmentStreaming(segment, onPartial);
+    }
+    return transcoder!.processMediaSegmentStreaming(segment, (h264, init) => {
+      return onPartial(h264, init?.initSegment ?? null, init?.codec ?? null);
+    });
+  }
+
   function getInitResult(): { initSegment: Uint8Array; codec: string } | null {
     if (workerClient) return workerClient.initResult;
     return transcoder!.initResult;
@@ -367,39 +378,51 @@ function createTranscodingProxy(
           // Fall through: initParsed is now true, process this segment as media below
         }
 
-        // Media segment: transcode (in Worker or main thread)
-        console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B)...`);
+        // Media segment: streaming transcode (partial chunks emitted incrementally)
+        console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B) [streaming]...`);
         config.onTranscodeStart?.();
-        const h264Segment = await transcodeMedia(segment);
+        let chunkCount = 0;
+        let firstChunkEmitted = false;
+
+        await transcodeMediaStreaming(segment, async (h264, initSeg, _codec) => {
+          if (abortGeneration !== myGeneration) return;
+
+          // Append init segment on first chunk that carries it
+          if (initSeg && !initAppended) {
+            initAppended = true;
+            lastInitSegment = initSeg;
+            if (updatingGetter.call(realSB)) await waitForRealUpdateEnd();
+            if (abortGeneration !== myGeneration) return;
+            realAppend(initSeg.buffer as ArrayBuffer);
+            await waitForRealUpdateEnd();
+            if (abortGeneration !== myGeneration) return;
+            console.log("[hevc.js] H.264 init segment appended [streaming]");
+          }
+
+          // Append partial H.264 segment
+          if (updatingGetter.call(realSB)) await waitForRealUpdateEnd();
+          if (abortGeneration !== myGeneration) return;
+          realAppend(h264.buffer as ArrayBuffer);
+          await waitForRealUpdateEnd();
+          chunkCount++;
+
+          // Release backpressure after first chunk (player sees content faster)
+          if (!firstChunkEmitted) {
+            firstChunkEmitted = true;
+            if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+              fakeUpdating = false;
+              dispatchOnSB("update");
+              dispatchOnSB("updateend");
+            }
+          }
+        });
+
         config.onTranscodeEnd?.();
-        if (abortGeneration !== myGeneration) return; // aborted during transcode
+        if (abortGeneration !== myGeneration) return;
 
-        // Append H.264 init segment (on first transcode or after resolution change)
-        const initResult = getInitResult();
-        const initChanged = initResult && initResult.initSegment !== lastInitSegment;
-        if (initResult && (!initAppended || initChanged)) {
-          initAppended = true;
-          lastInitSegment = initResult.initSegment;
-          if (target.updating) await waitForRealUpdateEnd();
-          if (abortGeneration !== myGeneration) return;
-          realAppend(initResult.initSegment.buffer as ArrayBuffer);
-          await waitForRealUpdateEnd();
-          if (abortGeneration !== myGeneration) return;
-          console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
-        }
-
-        // Append transcoded media segment
-        if (h264Segment) {
-          if (target.updating) await waitForRealUpdateEnd();
-          if (abortGeneration !== myGeneration) return;
-          realAppend(h264Segment.buffer as ArrayBuffer);
-          await waitForRealUpdateEnd();
-          if (abortGeneration !== myGeneration) return;
-
-          const buffered = target.buffered;
-          const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
-          console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
-        }
+        const buffered = target.buffered;
+        const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
+        console.log(`[hevc.js] Streaming done (${chunkCount} chunks), buffered: ${end}s`);
 
         // Release backpressure if queue dropped below threshold.
         // Guard: fakeUpdating may already be false (released in appendBuffer).

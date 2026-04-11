@@ -11180,6 +11180,7 @@
         // ~0.1 bpp
         framerate: this._fps,
         hardwareAcceleration: "no-preference",
+        latencyMode: "realtime",
         avc: { format: "avc" }
       });
     }
@@ -11689,6 +11690,125 @@
       return mediaSegment;
     }
     /**
+     * Streaming variant — identical encode pipeline as processMediaSegment,
+     * then splits output chunks into batches for incremental MSE append.
+     */
+    async processMediaSegmentStreaming(data, onChunk) {
+      if (!this._decoder || !this._demuxer) {
+        throw new Error("Transcoder not initialized. Call init() and processInitSegment() first.");
+      }
+      const BATCH_SIZE = 30;
+      const samples = this._demuxer.parseSegment(data);
+      if (samples.length === 0) return;
+      const segmentBaseTime = extractTfdt(data) ?? samples[0].dts;
+      if (!this._fpsAutoDetected && !this._config.fps && samples[0].duration > 0) {
+        this._fps = this._timescale / samples[0].duration;
+        this._fpsAutoDetected = true;
+      }
+      const sampleOffsets = [0];
+      for (let i = 0; i < samples.length - 1; i++) {
+        sampleOffsets.push(sampleOffsets[i] + samples[i].duration);
+      }
+      if (!this._paramSetsFed && this._paramSetsBuffer) {
+        this._decoder.feed(this._paramSetsBuffer);
+        this._paramSetsFed = true;
+      }
+      for (const sample of samples) {
+        const totalSize = sample.nalUnits.reduce((sum, n) => sum + 4 + n.length, 0);
+        const nalBuffer = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const nal of sample.nalUnits) {
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 1;
+          nalBuffer.set(nal, offset);
+          offset += nal.length;
+        }
+        this._decoder.feed(nalBuffer);
+      }
+      const frames = this._decoder.drain();
+      if (frames.length === 0) return;
+      const frameW = frames[0].width;
+      const frameH = frames[0].height;
+      if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+        this._encoder.close();
+        this._encoder = null;
+        this._initResult = null;
+      }
+      if (!this._encoder) {
+        this._encoder = new H264Encoder({
+          width: frameW,
+          height: frameH,
+          fps: this._fps,
+          bitrate: this._config.bitrate
+        });
+        this._width = frameW;
+        this._height = frameH;
+      }
+      const chunks = [];
+      this._encoder.onChunk = (chunk) => chunks.push(chunk);
+      for (let i = 0; i < frames.length; i++) {
+        const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
+        this._encoder.encode(frames[i], timestampUs, i === 0);
+      }
+      await this._encoder.flush();
+      if (chunks.length === 0) return;
+      if (!this._initResult) {
+        const avcC = this._encoder.codecDescription;
+        if (!avcC) throw new Error("No avcC description from encoder");
+        this._initResult = {
+          initSegment: this._muxer.generateInit({
+            width: this._width,
+            height: this._height,
+            timescale: this._timescale,
+            avcC
+          }),
+          codec: this._encoder.codec
+        };
+      }
+      let initEmitted = false;
+      for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
+        const batchChunks = [];
+        this._encoder.onChunk = (chunk) => batchChunks.push(chunk);
+        for (let i = batchStart; i < batchEnd; i++) {
+          const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+          const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
+          this._encoder.encode(frames[i], timestampUs, i === 0);
+        }
+        await this._encoder.flush();
+        if (batchChunks.length === 0) continue;
+        if (!this._initResult) {
+          const avcC = this._encoder.codecDescription;
+          if (!avcC) throw new Error("No avcC description from encoder");
+          this._initResult = {
+            initSegment: this._muxer.generateInit({
+              width: this._width,
+              height: this._height,
+              timescale: this._timescale,
+              avcC
+            }),
+            codec: this._encoder.codec
+          };
+        }
+        const batchBaseTime = segmentBaseTime + (batchStart < sampleOffsets.length ? sampleOffsets[batchStart] : 0);
+        const muxerSamples = batchChunks.map((c, i) => {
+          const sampleIdx = batchStart + i;
+          return {
+            data: c.data,
+            duration: sampleIdx < samples.length ? samples[sampleIdx].duration : Math.round(c.duration * this._timescale / 1e6),
+            isKeyframe: c.isKeyframe,
+            compositionTimeOffset: 0
+          };
+        });
+        const mediaSegment = this._muxer.muxSegment(muxerSamples, batchBaseTime);
+        await onChunk(mediaSegment, !initEmitted ? this._initResult : null);
+        initEmitted = true;
+      }
+    }
+    /**
      * Flush remaining frames from the decoder.
      * Returns the final H.264 media segment, or null if no frames remain.
      */
@@ -11826,6 +11946,35 @@
           if (response.h264) transfers.push(response.h264);
           if (response.initSegment) transfers.push(response.initSegment);
           self.postMessage(response, transfers);
+        } catch (err) {
+          self.postMessage({ type: "error", id: msg.id, message: err.message });
+        }
+        break;
+      }
+      case "mediaSegmentStreaming": {
+        try {
+          if (!transcoder) throw new Error("Transcoder not initialized");
+          await transcoder.processMediaSegmentStreaming(
+            new Uint8Array(msg.data),
+            (h264, init) => {
+              const transfers = [h264.buffer];
+              const resp = {
+                type: "partialTranscoded",
+                id: msg.id,
+                h264: h264.buffer,
+                isFirst: false
+              };
+              if (init) {
+                const initCopy = new Uint8Array(init.initSegment);
+                resp.initSegment = initCopy.buffer;
+                resp.codec = init.codec;
+                resp.isFirst = true;
+                transfers.push(initCopy.buffer);
+              }
+              self.postMessage(resp, transfers);
+            }
+          );
+          self.postMessage({ type: "streamingDone", id: msg.id });
         } catch (err) {
           self.postMessage({ type: "error", id: msg.id, message: err.message });
         }

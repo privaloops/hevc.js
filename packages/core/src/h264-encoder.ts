@@ -61,6 +61,7 @@ export class H264Encoder {
       bitrate: config.bitrate ?? this._width * this._height * this._fps * 0.1, // ~0.1 bpp
       framerate: this._fps,
       hardwareAcceleration: "no-preference",
+      latencyMode: "realtime",
       avc: { format: "avc" },
     });
   }

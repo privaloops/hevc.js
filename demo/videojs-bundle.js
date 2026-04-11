@@ -11063,6 +11063,7 @@ var HevcVideojs = (() => {
         // ~0.1 bpp
         framerate: this._fps,
         hardwareAcceleration: "no-preference",
+        latencyMode: "realtime",
         avc: { format: "avc" }
       });
     }
@@ -11696,6 +11697,125 @@ var HevcVideojs = (() => {
       return mediaSegment;
     }
     /**
+     * Streaming variant — identical encode pipeline as processMediaSegment,
+     * then splits output chunks into batches for incremental MSE append.
+     */
+    async processMediaSegmentStreaming(data, onChunk) {
+      if (!this._decoder || !this._demuxer) {
+        throw new Error("Transcoder not initialized. Call init() and processInitSegment() first.");
+      }
+      const BATCH_SIZE = 30;
+      const samples = this._demuxer.parseSegment(data);
+      if (samples.length === 0) return;
+      const segmentBaseTime = extractTfdt(data) ?? samples[0].dts;
+      if (!this._fpsAutoDetected && !this._config.fps && samples[0].duration > 0) {
+        this._fps = this._timescale / samples[0].duration;
+        this._fpsAutoDetected = true;
+      }
+      const sampleOffsets = [0];
+      for (let i = 0; i < samples.length - 1; i++) {
+        sampleOffsets.push(sampleOffsets[i] + samples[i].duration);
+      }
+      if (!this._paramSetsFed && this._paramSetsBuffer) {
+        this._decoder.feed(this._paramSetsBuffer);
+        this._paramSetsFed = true;
+      }
+      for (const sample of samples) {
+        const totalSize = sample.nalUnits.reduce((sum, n) => sum + 4 + n.length, 0);
+        const nalBuffer = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const nal of sample.nalUnits) {
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 0;
+          nalBuffer[offset++] = 1;
+          nalBuffer.set(nal, offset);
+          offset += nal.length;
+        }
+        this._decoder.feed(nalBuffer);
+      }
+      const frames = this._decoder.drain();
+      if (frames.length === 0) return;
+      const frameW = frames[0].width;
+      const frameH = frames[0].height;
+      if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+        this._encoder.close();
+        this._encoder = null;
+        this._initResult = null;
+      }
+      if (!this._encoder) {
+        this._encoder = new H264Encoder({
+          width: frameW,
+          height: frameH,
+          fps: this._fps,
+          bitrate: this._config.bitrate
+        });
+        this._width = frameW;
+        this._height = frameH;
+      }
+      const chunks = [];
+      this._encoder.onChunk = (chunk) => chunks.push(chunk);
+      for (let i = 0; i < frames.length; i++) {
+        const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+        const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
+        this._encoder.encode(frames[i], timestampUs, i === 0);
+      }
+      await this._encoder.flush();
+      if (chunks.length === 0) return;
+      if (!this._initResult) {
+        const avcC = this._encoder.codecDescription;
+        if (!avcC) throw new Error("No avcC description from encoder");
+        this._initResult = {
+          initSegment: this._muxer.generateInit({
+            width: this._width,
+            height: this._height,
+            timescale: this._timescale,
+            avcC
+          }),
+          codec: this._encoder.codec
+        };
+      }
+      let initEmitted = false;
+      for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
+        const batchChunks = [];
+        this._encoder.onChunk = (chunk) => batchChunks.push(chunk);
+        for (let i = batchStart; i < batchEnd; i++) {
+          const offsetUs = i < sampleOffsets.length ? Math.round(sampleOffsets[i] / this._timescale * 1e6) : Math.round(i / this._fps * 1e6);
+          const timestampUs = Math.round(segmentBaseTime / this._timescale * 1e6) + offsetUs;
+          this._encoder.encode(frames[i], timestampUs, i === 0);
+        }
+        await this._encoder.flush();
+        if (batchChunks.length === 0) continue;
+        if (!this._initResult) {
+          const avcC = this._encoder.codecDescription;
+          if (!avcC) throw new Error("No avcC description from encoder");
+          this._initResult = {
+            initSegment: this._muxer.generateInit({
+              width: this._width,
+              height: this._height,
+              timescale: this._timescale,
+              avcC
+            }),
+            codec: this._encoder.codec
+          };
+        }
+        const batchBaseTime = segmentBaseTime + (batchStart < sampleOffsets.length ? sampleOffsets[batchStart] : 0);
+        const muxerSamples = batchChunks.map((c, i) => {
+          const sampleIdx = batchStart + i;
+          return {
+            data: c.data,
+            duration: sampleIdx < samples.length ? samples[sampleIdx].duration : Math.round(c.duration * this._timescale / 1e6),
+            isKeyframe: c.isKeyframe,
+            compositionTimeOffset: 0
+          };
+        });
+        const mediaSegment = this._muxer.muxSegment(muxerSamples, batchBaseTime);
+        await onChunk(mediaSegment, !initEmitted ? this._initResult : null);
+        initEmitted = true;
+      }
+    }
+    /**
      * Flush remaining frames from the decoder.
      * Returns the final H.264 media segment, or null if no frames remain.
      */
@@ -11832,6 +11952,41 @@ var HevcVideojs = (() => {
         );
       });
     }
+    /** Send a media segment for streaming transcoding — onChunk called for each partial result */
+    async processMediaSegmentStreaming(data, onChunk) {
+      const id = this._segmentId++;
+      return new Promise((resolve, reject) => {
+        let chainPromise = Promise.resolve();
+        let done = false;
+        const handler = (e) => {
+          const msg = e.data;
+          if (msg.id !== id) return;
+          if (msg.type === "partialTranscoded") {
+            const init = msg.initSegment ? new Uint8Array(msg.initSegment) : null;
+            if (init && !this._initResult) {
+              this._initResult = {
+                initSegment: init,
+                codec: msg.codec || "avc1.640033"
+              };
+            }
+            const h264 = new Uint8Array(msg.h264);
+            chainPromise = chainPromise.then(() => onChunk(h264, init, msg.codec ?? null));
+          } else if (msg.type === "streamingDone") {
+            done = true;
+            this._worker.removeEventListener("message", handler);
+            chainPromise.then(() => resolve()).catch(reject);
+          } else if (msg.type === "error") {
+            this._worker.removeEventListener("message", handler);
+            chainPromise.then(() => reject(new Error(msg.message))).catch(reject);
+          }
+        };
+        this._worker.addEventListener("message", handler);
+        this._worker.postMessage(
+          { type: "mediaSegmentStreaming", data: data.buffer, id },
+          [data.buffer]
+        );
+      });
+    }
     /** Abort current transcoding, reset state for seek */
     abort() {
       for (const [, { reject }] of this._pendingResolves) {
@@ -11948,7 +12103,6 @@ var HevcVideojs = (() => {
       };
     }
     MediaSource.prototype.addSourceBuffer = function(mimeType) {
-      console.log(`[hevc.js] addSourceBuffer("${mimeType}")`);
       if (!HEVC_DETECT_RE.test(mimeType)) {
         return originalAddSourceBuffer.call(this, mimeType);
       }
@@ -12135,6 +12289,14 @@ var HevcVideojs = (() => {
       }
       return transcoder.processMediaSegment(segment);
     }
+    async function transcodeMediaStreaming(segment, onPartial) {
+      if (workerClient) {
+        return workerClient.processMediaSegmentStreaming(segment, onPartial);
+      }
+      return transcoder.processMediaSegmentStreaming(segment, (h264, init) => {
+        return onPartial(h264, init?.initSegment ?? null, init?.codec ?? null);
+      });
+    }
     function getInitResult() {
       if (workerClient) return workerClient.initResult;
       return transcoder.initResult;
@@ -12173,33 +12335,41 @@ var HevcVideojs = (() => {
               continue;
             }
           }
-          console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B)...`);
+          console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B) [streaming]...`);
           config.onTranscodeStart?.();
-          const h264Segment = await transcodeMedia(segment);
+          let chunkCount = 0;
+          let firstChunkEmitted = false;
+          await transcodeMediaStreaming(segment, async (h264, initSeg, _codec) => {
+            if (abortGeneration !== myGeneration) return;
+            if (initSeg && !initAppended) {
+              initAppended = true;
+              lastInitSegment = initSeg;
+              if (updatingGetter.call(realSB)) await waitForRealUpdateEnd();
+              if (abortGeneration !== myGeneration) return;
+              realAppend(initSeg.buffer);
+              await waitForRealUpdateEnd();
+              if (abortGeneration !== myGeneration) return;
+              console.log("[hevc.js] H.264 init segment appended [streaming]");
+            }
+            if (updatingGetter.call(realSB)) await waitForRealUpdateEnd();
+            if (abortGeneration !== myGeneration) return;
+            realAppend(h264.buffer);
+            await waitForRealUpdateEnd();
+            chunkCount++;
+            if (!firstChunkEmitted) {
+              firstChunkEmitted = true;
+              if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+                fakeUpdating = false;
+                dispatchOnSB("update");
+                dispatchOnSB("updateend");
+              }
+            }
+          });
           config.onTranscodeEnd?.();
           if (abortGeneration !== myGeneration) return;
-          const initResult = getInitResult();
-          const initChanged = initResult && initResult.initSegment !== lastInitSegment;
-          if (initResult && (!initAppended || initChanged)) {
-            initAppended = true;
-            lastInitSegment = initResult.initSegment;
-            if (target.updating) await waitForRealUpdateEnd();
-            if (abortGeneration !== myGeneration) return;
-            realAppend(initResult.initSegment.buffer);
-            await waitForRealUpdateEnd();
-            if (abortGeneration !== myGeneration) return;
-            console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
-          }
-          if (h264Segment) {
-            if (target.updating) await waitForRealUpdateEnd();
-            if (abortGeneration !== myGeneration) return;
-            realAppend(h264Segment.buffer);
-            await waitForRealUpdateEnd();
-            if (abortGeneration !== myGeneration) return;
-            const buffered = target.buffered;
-            const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
-            console.log(`[hevc.js] H.264 segment appended, buffered: ${end}s`);
-          }
+          const buffered = target.buffered;
+          const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
+          console.log(`[hevc.js] Streaming done (${chunkCount} chunks), buffered: ${end}s`);
           if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
             fakeUpdating = false;
             dispatchOnSB("update");
