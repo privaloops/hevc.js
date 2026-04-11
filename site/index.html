@@ -421,5 +421,185 @@
     </div>
   </footer>
 
+<script>
+(function() {
+  const dropZone = document.getElementById('drop-zone');
+  const useSample = document.getElementById('use-sample');
+  const results = document.getElementById('decode-results');
+  const canvas = document.getElementById('frame-canvas');
+  const ctx = canvas.getContext('2d');
+  const frameCounter = document.getElementById('frame-counter');
+  const prevBtn = document.getElementById('prev-frame');
+  const nextBtn = document.getElementById('next-frame');
+  const statFrames = document.getElementById('stat-frames');
+  const statTime = document.getElementById('stat-time');
+  const statFps = document.getElementById('stat-fps');
+
+  let frames = [];
+  let currentFrame = 0;
+  let decoder = null;
+
+  // Load WASM module
+  async function loadDecoder() {
+    if (decoder) return decoder;
+    const script = document.createElement('script');
+    script.src = 'wasm/hevc-decode.js';
+    document.head.appendChild(script);
+    await new Promise(r => script.onload = r);
+    const Module = await HEVCDecoderModule();
+    const api = {
+      create: Module.cwrap('hevc_decoder_create', 'number', []),
+      destroy: Module.cwrap('hevc_decoder_destroy', null, ['number']),
+      decode: Module.cwrap('hevc_decoder_decode', 'number', ['number', 'number', 'number']),
+      getFrameCount: Module.cwrap('hevc_decoder_get_frame_count', 'number', ['number']),
+      getFrame: Module.cwrap('hevc_decoder_get_frame', 'number', ['number', 'number', 'number']),
+    };
+    decoder = { Module, api };
+    return decoder;
+  }
+
+  // Decode a bitstream and extract all frames
+  async function decodeBitstream(data) {
+    dropZone.innerHTML = '<div class="text-accent text-lg">Loading WASM decoder...</div>';
+
+    const { Module, api } = await loadDecoder();
+    const dec = api.create();
+
+    dropZone.innerHTML = '<div class="text-accent text-lg">Decoding...</div>';
+    await new Promise(r => setTimeout(r, 50)); // let UI update
+
+    const ptr = Module._malloc(data.length);
+    Module.HEAPU8.set(data, ptr);
+
+    const t0 = performance.now();
+    const ret = api.decode(dec, ptr, data.length);
+    const elapsed = performance.now() - t0;
+
+    Module._free(ptr);
+
+    if (ret !== 0) {
+      dropZone.innerHTML = '<div class="text-red-400 text-lg">Decode failed (error ' + ret + ')</div>';
+      api.destroy(dec);
+      return;
+    }
+
+    const count = api.getFrameCount(dec);
+    frames = [];
+
+    const framePtr = Module._malloc(48);
+    for (let i = 0; i < count; i++) {
+      if (api.getFrame(dec, i, framePtr) !== 0) continue;
+
+      const yPtr    = Module.getValue(framePtr, '*');
+      const cbPtr   = Module.getValue(framePtr + 4, '*');
+      const crPtr   = Module.getValue(framePtr + 8, '*');
+      const w       = Module.getValue(framePtr + 12, 'i32');
+      const h       = Module.getValue(framePtr + 16, 'i32');
+      const strideY = Module.getValue(framePtr + 20, 'i32');
+      const strideC = Module.getValue(framePtr + 24, 'i32');
+      const cw      = Module.getValue(framePtr + 28, 'i32');
+      const ch      = Module.getValue(framePtr + 32, 'i32');
+      const bd      = Module.getValue(framePtr + 36, 'i32');
+      const shift   = bd > 8 ? bd - 8 : 0;
+
+      // Convert YUV to RGBA on canvas
+      const rgba = new Uint8ClampedArray(w * h * 4);
+      const yOff = yPtr >> 1;
+      const cbOff = cbPtr >> 1;
+      const crOff = crPtr >> 1;
+
+      for (let row = 0; row < h; row++) {
+        for (let col = 0; col < w; col++) {
+          const Y  = Module.HEAPU16[yOff + row * strideY + col] >> shift;
+          const Cb = Module.HEAPU16[cbOff + (row >> 1) * strideC + (col >> 1)] >> shift;
+          const Cr = Module.HEAPU16[crOff + (row >> 1) * strideC + (col >> 1)] >> shift;
+
+          // BT.601 YCbCr to RGB
+          const r = Y + 1.402 * (Cr - 128);
+          const g = Y - 0.344136 * (Cb - 128) - 0.714136 * (Cr - 128);
+          const b = Y + 1.772 * (Cb - 128);
+
+          const idx = (row * w + col) * 4;
+          rgba[idx]     = r < 0 ? 0 : r > 255 ? 255 : r;
+          rgba[idx + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+          rgba[idx + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+          rgba[idx + 3] = 255;
+        }
+      }
+      frames.push({ rgba, w, h });
+    }
+    Module._free(framePtr);
+    api.destroy(dec);
+
+    // Show results
+    currentFrame = 0;
+    statFrames.textContent = count;
+    statTime.textContent = (elapsed / 1000).toFixed(2) + 's';
+    statFps.textContent = (count / (elapsed / 1000)).toFixed(0);
+
+    dropZone.classList.add('hidden');
+    results.classList.remove('hidden');
+    showFrame(0);
+  }
+
+  function showFrame(idx) {
+    if (idx < 0 || idx >= frames.length) return;
+    currentFrame = idx;
+    const f = frames[idx];
+    canvas.width = f.w;
+    canvas.height = f.h;
+    // Scale canvas display for large frames
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+    const imgData = new ImageData(f.rgba, f.w, f.h);
+    ctx.putImageData(imgData, 0, 0);
+    frameCounter.textContent = 'Frame ' + (idx + 1) + '/' + frames.length;
+  }
+
+  // Navigation
+  prevBtn.addEventListener('click', () => showFrame(currentFrame - 1));
+  nextBtn.addEventListener('click', () => showFrame(currentFrame + 1));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') showFrame(currentFrame - 1);
+    if (e.key === 'ArrowRight') showFrame(currentFrame + 1);
+  });
+
+  // Drag & drop
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-accent'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-accent'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('border-accent');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    file.arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
+  });
+
+  // Click to select file
+  dropZone.addEventListener('click', (e) => {
+    if (e.target === useSample || e.target.closest('#use-sample')) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.265,.h265,.hevc,.bin';
+    input.onchange = () => {
+      if (input.files[0]) input.files[0].arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
+    };
+    input.click();
+  });
+
+  // Sample clip
+  useSample.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    dropZone.innerHTML = '<div class="text-accent text-lg">Downloading sample (110KB)...</div>';
+    try {
+      const resp = await fetch('samples/bbb1080p.265');
+      const data = new Uint8Array(await resp.arrayBuffer());
+      decodeBitstream(data);
+    } catch (err) {
+      dropZone.innerHTML = '<div class="text-red-400">Failed to load sample: ' + err.message + '</div>';
+    }
+  });
+})();
+</script>
 </body>
 </html>
