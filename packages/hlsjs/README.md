@@ -1,6 +1,6 @@
 # @hevcjs/hlsjs
 
-HEVC/H.265 playback plugin for [hls.js](https://github.com/video-dev/hls.js). Transparently transcodes HEVC segments to H.264 via WebAssembly, enabling HEVC HLS streams on browsers without native HEVC support.
+HEVC/H.265 playback plugin for [hls.js](https://github.com/video-dev/hls.js). Software fallback for the ~6% of browsers without native HEVC support (Chrome < 107, Firefox Linux, old GPUs). Transparently transcodes HEVC segments to H.264 via WebAssembly. When native HEVC is available, the plugin detects it and does nothing.
 
 ## Install
 
