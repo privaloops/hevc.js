@@ -1,8 +1,7 @@
 # Build
 build/
-build-release/
+build-*/
 .cache/
-build-wasm/
 cmake-build-*/
 
 # IDE
@@ -51,6 +50,11 @@ pnpm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Local logs
+*.log
+*.err
+!CHANGELOG.md
 
 # Python
 __pycache__/
