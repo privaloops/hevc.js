@@ -10,6 +10,12 @@ import type { MSEInterceptConfig } from "@hevcjs/core";
 
 export interface HevcVideojsConfig extends MSEInterceptConfig {
   forceTranscode?: boolean;
+  /**
+   * When true, block AVC video renditions so VHS only selects HEVC.
+   * Useful for streams with both AVC and HEVC variants.
+   * Default: same as forceTranscode.
+   */
+  forceHevcRenditions?: boolean;
 }
 
 function hasNativeHevcSupport(): boolean {
@@ -48,7 +54,27 @@ export async function attachHevcSupport(
     workerUrl: config.workerUrl,
   });
 
+  // Block AVC video renditions AFTER MSE intercept is installed.
+  // Order matters: MSE intercept swaps hev1→avc1 internally — our blocker
+  // must sit on top so it only blocks real AVC calls from VHS, not swapped ones.
+  const forceHevc = config.forceHevcRenditions ?? config.forceTranscode ?? false;
+  let savedIsTypeSupported: typeof MediaSource.isTypeSupported | null = null;
+  if (forceHevc) {
+    const mseInterceptedITS = MediaSource.isTypeSupported;
+    savedIsTypeSupported = mseInterceptedITS;
+    MediaSource.isTypeSupported = function (mimeType: string): boolean {
+      if (/video\/mp4/.test(mimeType) && /avc1/i.test(mimeType) && !/hev1|hvc1/i.test(mimeType)) {
+        console.log(`[hevc.js/videojs] Blocking AVC: ${mimeType}`);
+        return false;
+      }
+      return mseInterceptedITS.call(MediaSource, mimeType);
+    };
+  }
+
   return () => {
     uninstallMSEIntercept();
+    if (savedIsTypeSupported) {
+      MediaSource.isTypeSupported = savedIsTypeSupported;
+    }
   };
 }
