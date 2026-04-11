@@ -32,10 +32,12 @@ Etat d'avancement par phase et prochaines taches.
 - [x] **Fix audio SourceBuffer** : backpressure `fakeUpdating` relâchée immédiatement quand queue peu remplie
 - [x] **Fix artefacts ABR switch** : encoder H.264 recréé sur changement de résolution
 - [x] **E2E BrowserStack validation** : 6 tests (gaps, audio, HLS ABR, seek DASH/HLS, détection native) sur 5 browsers
+- [x] **Cohabitation Video.js + VHS** : monkey-patch SB (au lieu de Proxy) pour compatibilité VHS. Demo videojs.html + quality selector. Testé avec ARTE HEVC CMAF.
+- [x] **Seek hls.js long stream** : timestampOffset flush dans le proxy MSE. Testé sur ARTE 88min (3 seeks : forward, near-end, backward).
+- [x] **MSE intercept monkey-patch** : Proxy remplacé par monkey-patch sur le SB réel. VHS accède aux SBs via mediaSource.sourceBuffers, pas la ref retournée.
 
 ### A faire
-- [ ] **Cohabitation plugins videojs** : tester avec videojs-http-streaming + quality selector
-- [ ] **Seek hls.js (long stream)** : validé sur streams courts (30s), à tester sur streams > 5min
+- [ ] **Pipeline incrémental (streaming decode→encode)** : actuellement feed ALL → drain ALL → encode ALL → mux. Avec des gros segments (ARTE CMAF 300 frames / 12s), le premier frame apparaît après 5.5s. Le fix : drainer les frames au fil du feed et encoder/muxer par batch (~50 frames). Objectif : <500ms au premier frame quel que soit la taille du segment source.
 - [ ] **Performance décodeur WASM** : bottleneck principal (~50fps 720p, ~20fps 4K). Pistes : SIMD intrinsics manuels, optimisation mémoire.
 - [ ] **Tests unitaires** : Vitest + happy-dom pour les packages JS, Playwright pour les demos.
 - [ ] **npm publish** : finaliser `package.json` racine, vérifier exports, publier `hevc.js`.
