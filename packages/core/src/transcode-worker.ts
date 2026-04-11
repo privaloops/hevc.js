@@ -94,6 +94,37 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
+    case "mediaSegmentStreaming": {
+      try {
+        if (!transcoder) throw new Error("Transcoder not initialized");
+        await transcoder.processMediaSegmentStreaming(
+          new Uint8Array(msg.data),
+          (h264, init) => {
+            const transfers: ArrayBuffer[] = [h264.buffer as ArrayBuffer];
+            const resp: Record<string, unknown> = {
+              type: "partialTranscoded",
+              id: msg.id,
+              h264: h264.buffer,
+              isFirst: false,
+            };
+            if (init) {
+              // Copy init segment — original buffer is reused across calls
+              const initCopy = new Uint8Array(init.initSegment);
+              resp.initSegment = initCopy.buffer;
+              resp.codec = init.codec;
+              resp.isFirst = true;
+              transfers.push(initCopy.buffer as ArrayBuffer);
+            }
+            self.postMessage(resp, transfers);
+          },
+        );
+        self.postMessage({ type: "streamingDone", id: msg.id });
+      } catch (err) {
+        self.postMessage({ type: "error", id: msg.id, message: (err as Error).message });
+      }
+      break;
+    }
+
     case "flush": {
       try {
         if (!transcoder) break;

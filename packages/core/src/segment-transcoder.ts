@@ -252,6 +252,160 @@ export class SegmentTranscoder {
   }
 
   /**
+   * Streaming variant — identical encode pipeline as processMediaSegment,
+   * then splits output chunks into batches for incremental MSE append.
+   */
+  async processMediaSegmentStreaming(
+    data: Uint8Array,
+    onChunk: (h264: Uint8Array, init: TranscodedInit | null) => Promise<void> | void,
+  ): Promise<void> {
+    if (!this._decoder || !this._demuxer) {
+      throw new Error("Transcoder not initialized. Call init() and processInitSegment() first.");
+    }
+
+    const BATCH_SIZE = 30;
+
+    // === Phase 1: identical to processMediaSegment (sequential) ===
+
+    const samples = this._demuxer.parseSegment(data);
+    if (samples.length === 0) return;
+
+    const segmentBaseTime = extractTfdt(data) ?? samples[0]!.dts;
+
+    if (!this._fpsAutoDetected && !this._config.fps && samples[0]!.duration > 0) {
+      this._fps = this._timescale / samples[0]!.duration;
+      this._fpsAutoDetected = true;
+    }
+
+    const sampleOffsets: number[] = [0];
+    for (let i = 0; i < samples.length - 1; i++) {
+      sampleOffsets.push(sampleOffsets[i]! + samples[i]!.duration);
+    }
+
+    if (!this._paramSetsFed && this._paramSetsBuffer) {
+      this._decoder.feed(this._paramSetsBuffer);
+      this._paramSetsFed = true;
+    }
+
+    // Feed ALL NALs (same as sequential)
+    for (const sample of samples) {
+      const totalSize = sample.nalUnits.reduce((sum, n) => sum + 4 + n.length, 0);
+      const nalBuffer = new Uint8Array(totalSize);
+      let offset = 0;
+      for (const nal of sample.nalUnits) {
+        nalBuffer[offset++] = 0; nalBuffer[offset++] = 0;
+        nalBuffer[offset++] = 0; nalBuffer[offset++] = 1;
+        nalBuffer.set(nal, offset);
+        offset += nal.length;
+      }
+      this._decoder.feed(nalBuffer);
+    }
+
+    // Drain ALL frames (same as sequential)
+    const frames = this._decoder.drain();
+    if (frames.length === 0) return;
+
+    // Encoder setup (same as sequential)
+    const frameW = frames[0]!.width;
+    const frameH = frames[0]!.height;
+    if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
+      this._encoder.close();
+      this._encoder = null;
+      this._initResult = null;
+    }
+    if (!this._encoder) {
+      this._encoder = new H264Encoder({
+        width: frameW, height: frameH,
+        fps: this._fps, bitrate: this._config.bitrate,
+      });
+      this._width = frameW;
+      this._height = frameH;
+    }
+
+    // Encode ALL frames (same as sequential)
+    const chunks: EncodedChunk[] = [];
+    this._encoder.onChunk = (chunk) => chunks.push(chunk);
+
+    for (let i = 0; i < frames.length; i++) {
+      const offsetUs = i < sampleOffsets.length
+        ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
+        : Math.round((i / this._fps) * 1_000_000);
+      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
+      this._encoder.encode(frames[i]!, timestampUs, i === 0);
+    }
+
+    await this._encoder.flush();
+    if (chunks.length === 0) return;
+
+    // Generate init (same as sequential)
+    if (!this._initResult) {
+      const avcC = this._encoder.codecDescription;
+      if (!avcC) throw new Error("No avcC description from encoder");
+      this._initResult = {
+        initSegment: this._muxer.generateInit({
+          width: this._width, height: this._height,
+          timescale: this._timescale, avcC,
+        }),
+        codec: this._encoder.codec,
+      };
+    }
+
+    // === Phase 2: encode in batches of BATCH_SIZE, flush+mux+emit each ===
+    // latencyMode="realtime" → no B-frames, flush is safe between batches
+
+    let initEmitted = false;
+
+    for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
+      const batchChunks: EncodedChunk[] = [];
+      this._encoder.onChunk = (chunk) => batchChunks.push(chunk);
+
+      for (let i = batchStart; i < batchEnd; i++) {
+        const offsetUs = i < sampleOffsets.length
+          ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
+          : Math.round((i / this._fps) * 1_000_000);
+        const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
+        this._encoder.encode(frames[i]!, timestampUs, i === 0);
+      }
+
+      await this._encoder.flush();
+      if (batchChunks.length === 0) continue;
+
+      // Generate init on first batch
+      if (!this._initResult) {
+        const avcC = this._encoder.codecDescription;
+        if (!avcC) throw new Error("No avcC description from encoder");
+        this._initResult = {
+          initSegment: this._muxer.generateInit({
+            width: this._width, height: this._height,
+            timescale: this._timescale, avcC,
+          }),
+          codec: this._encoder.codec,
+        };
+      }
+
+      const batchBaseTime = segmentBaseTime +
+        (batchStart < sampleOffsets.length ? sampleOffsets[batchStart]! : 0);
+
+      const muxerSamples = batchChunks.map((c, i) => {
+        const sampleIdx = batchStart + i;
+        return {
+          data: c.data,
+          duration: sampleIdx < samples.length
+            ? samples[sampleIdx]!.duration
+            : Math.round(c.duration * this._timescale / 1_000_000),
+          isKeyframe: c.isKeyframe,
+          compositionTimeOffset: 0,
+        };
+      });
+
+      const mediaSegment = this._muxer.muxSegment(muxerSamples, batchBaseTime);
+      await onChunk(mediaSegment, !initEmitted ? this._initResult : null);
+      initEmitted = true;
+    }
+  }
+
+  /**
    * Flush remaining frames from the decoder.
    * Returns the final H.264 media segment, or null if no frames remain.
    */
