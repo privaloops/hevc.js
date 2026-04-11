@@ -10,21 +10,24 @@ A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop
 
 ## The problem
 
-HEVC (H.265) delivers 50% better compression than H.264 at the same quality. But you can't ship HEVC and assume it plays everywhere:
+HEVC (H.265) delivers 50% better compression than H.264 at the same quality. Since Chrome 107 (Oct 2022), **~94% of browsers support HEVC natively** via hardware decode. But ~6% don't:
 
-| Platform | HEVC support |
-|---|---|
-| **Safari** (macOS/iOS) | Native, hardware-accelerated |
-| **Chrome/Edge** (macOS) | Hardware-accelerated via VideoToolbox |
-| **Chrome/Edge** (Windows) | Requires [HEVC Video Extensions](https://apps.microsoft.com/detail/9nmzlz57r3t7) ($0.99) — not pre-installed by default. Some OEM devices ship with a free version, but it's not guaranteed |
-| **Firefox** (all platforms) | Partial support since v139, with [DRM limitations on Windows](https://connect.mozilla.org/t5/discussions/request-hevc-h-265-drm-support-on-windows-firefox/td-p/106471) |
-| **Linux** (all browsers) | Effectively unsupported |
+| Platform | HEVC support | Market share |
+|---|---|---|
+| **Safari** (macOS/iOS) | Native, hardware-accelerated | ~15% |
+| **Chrome/Edge 107+** (Win/Mac/Android) | Native, hardware GPU decode | ~72% |
+| **Firefox 137+** (Windows only) | Native, hardware-dependent | ~1% |
+| **Chrome < 107** (old installs, enterprise) | **No** | ~3.5% |
+| **Firefox** (Linux, older versions) | **No** | ~1% |
+| **Linux** (all browsers, no VAAPI GPU) | **No** | ~0.5% |
 
-Content providers either avoid HEVC, maintain dual AVC/HEVC pipelines, or accept broken playback for a portion of their audience.
+For the ~6% without native HEVC, content providers must either maintain a dual AVC/HEVC pipeline on the server, or accept that these users get no HEVC playback at all.
 
-## The solution
+## The solution — a software fallback
 
-hevc.js intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 before they reach the browser's decoder:
+hevc.js is a **last-resort fallback** for the ~6% of browsers without native HEVC. When the browser can't play HEVC natively, hevc.js intercepts the player's MediaSource pipeline and transparently transcodes HEVC segments to H.264 client-side:
+
+> **When native HEVC is available, hevc.js detects it and does nothing.** No overhead, no transcoding. The fallback only activates when needed.
 
 ```
 HEVC stream ──► demux (mp4box.js) ──► decode (WASM) ──► encode (WebCodecs) ──► H.264 to MSE
@@ -120,7 +123,9 @@ Single-threaded, Apple Silicon (M-series):
 | **4K decode** | 28 fps | 21 fps |
 | **1080p transcode** | — | ~2.5x realtime (6s segment in 2.4s) |
 
-The WASM decoder is within 20% of native C++ performance. The full transcode pipeline (demux + decode + encode + mux) runs at ~2.5x realtime for 1080p, enough for smooth playback with buffer headroom.
+The WASM decoder is within 20% of native C++ performance, and **within 17% of libde265** (a mature, 10-year-old optimized HEVC decoder) when both are compiled to WASM. The full transcode pipeline (demux + decode + encode + mux) runs at ~2.5x realtime for 1080p, enough for smooth playback with buffer headroom.
+
+**Tradeoff**: the software fallback introduces 2-3s of startup latency on the first segment (vs instant playback with native hardware decode). Once buffered, playback is smooth. This is the cost of software decoding — any WASM HEVC decoder (including libde265) has a similar startup cost.
 
 ### Bottleneck breakdown (1080p segment)
 
@@ -211,13 +216,17 @@ int hevc_decoder_get_frame(HEVCDecoder* dec, int index, HEVCFrame* frame);
 
 ## Browser compatibility
 
-The transcoding pipeline requires **WebCodecs VideoEncoder** with H.264 encoding support:
+**~94% of browsers play HEVC natively** (hardware decode). hevc.js activates only for the ~6% that don't:
 
-| Browser | VideoEncoder H.264 | hevc.js works | Notes |
+| Browser | Native HEVC | hevc.js needed? | Transcoding works? |
 |---|---|---|---|
-| **Chrome/Edge** 94+ | Yes | Yes | Full support on all platforms |
-| **Safari** 16.4+ | Yes | Not needed | Native HEVC playback — transcoding unnecessary |
-| **Firefox** (all versions) | **No** | **No** — graceful fallback to AVC | Firefox exposes `VideoEncoder` since v130, but H.264 encoding fails at runtime ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)). `isConfigSupported()` may even return `true` incorrectly. hevc.js detects this and falls back to native AVC levels when available. |
+| **Safari** 13+ | Yes (hardware) | No — bypassed | — |
+| **Chrome/Edge 107+** (Win/Mac) | Yes (hardware GPU) | No — bypassed | — |
+| **Chrome 94-106** (all platforms) | No | **Yes** | Yes (WebCodecs H.264) |
+| **Chrome < 94** | No | **Yes** | No (no WebCodecs) — falls back to AVC |
+| **Firefox 137+** (Windows) | Partial (hardware) | No — bypassed | — |
+| **Firefox** (Linux, older) | No | **Yes** | No — Firefox H.264 encoding broken ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)), falls back to AVC |
+| **Linux** (Chrome, no VAAPI) | No | **Yes** | Yes (software encode) |
 
 Other requirements (supported by all modern browsers):
 - **WebAssembly**
