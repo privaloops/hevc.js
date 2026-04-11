@@ -11948,6 +11948,7 @@ var HevcDash = (() => {
       };
     }
     MediaSource.prototype.addSourceBuffer = function(mimeType) {
+      console.log(`[hevc.js] addSourceBuffer("${mimeType}")`);
       if (!HEVC_DETECT_RE.test(mimeType)) {
         return originalAddSourceBuffer.call(this, mimeType);
       }
@@ -12003,80 +12004,122 @@ var HevcDash = (() => {
       });
     }
     const listeners = /* @__PURE__ */ new Map();
-    function dispatchOnProxy(type) {
+    function dispatchOnSB(type) {
       const set = listeners.get(type);
-      if (!set) return;
-      const evt = new Event(type);
-      for (const fn of set) {
-        if (typeof fn === "function") fn(evt);
-        else fn.handleEvent(evt);
+      if (set) {
+        const evt = new Event(type);
+        for (const fn of set) {
+          if (typeof fn === "function") fn.call(realSB, evt);
+          else fn.handleEvent(evt);
+        }
       }
+      const onProp = realSB[`__hevc_on${type}`];
+      if (typeof onProp === "function") onProp.call(realSB, new Event(type));
     }
-    const proxy = new Proxy(realSB, {
-      set(target, prop, value) {
-        target[prop] = value;
-        return true;
-      },
-      get(target, prop, receiver) {
-        if (prop === "updating") {
-          return fakeUpdating || target.updating;
-        }
-        if (prop === "abort") {
-          return function() {
-            abortGeneration++;
-            queue.length = 0;
-            processing = false;
-            fakeUpdating = false;
-            initParsed = false;
-            initAppended = false;
-            if (workerClient) workerClient.abort();
-            console.log("[hevc.js] abort() \u2014 queue + transcoder reset (gen=" + abortGeneration + ")");
-            target.abort();
-          };
-        }
-        if (prop === "appendBuffer") {
-          return function(data) {
-            const bytes = toUint8Array(data);
-            queue.push(bytes);
-            fakeUpdating = true;
-            dispatchOnProxy("updatestart");
-            if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
-              fakeUpdating = false;
-              dispatchOnProxy("update");
-              dispatchOnProxy("updateend");
-            }
-            processNext(target);
-          };
-        }
-        if (prop === "addEventListener") {
-          return function(type, fn, options) {
-            if (!listeners.has(type)) listeners.set(type, /* @__PURE__ */ new Set());
-            listeners.get(type).add(fn);
-          };
-        }
-        if (prop === "removeEventListener") {
-          return function(type, fn, options) {
-            listeners.get(type)?.delete(fn);
-          };
-        }
-        if (prop === "remove") {
-          return function(start2, end) {
-            dispatchOnProxy("updatestart");
-            target.remove(start2, end);
-            target.addEventListener("updateend", () => {
-              dispatchOnProxy("update");
-              dispatchOnProxy("updateend");
-            }, { once: true });
-          };
-        }
-        const value = Reflect.get(target, prop, target);
-        if (typeof value === "function") {
-          return value.bind(target);
-        }
-        return value;
-      }
-    });
     const realAppend = realSB.appendBuffer.bind(realSB);
+    const realAbort = realSB.abort.bind(realSB);
+    const realAddEventListener = realSB.addEventListener.bind(realSB);
+    const realRemoveEventListener = realSB.removeEventListener.bind(realSB);
+    const updatingGetter = Object.getOwnPropertyDescriptor(SourceBuffer.prototype, "updating").get;
+    function waitForRealUpdateEnd() {
+      return new Promise((resolve) => {
+        if (!updatingGetter.call(realSB)) {
+          resolve();
+          return;
+        }
+        realAddEventListener("updateend", () => resolve(), { once: true });
+      });
+    }
+    Object.defineProperty(realSB, "appendBuffer", {
+      value: function(data) {
+        const bytes = toUint8Array(data);
+        queue.push(bytes);
+        fakeUpdating = true;
+        dispatchOnSB("updatestart");
+        if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+          fakeUpdating = false;
+          dispatchOnSB("update");
+          dispatchOnSB("updateend");
+        }
+        processNext(realSB);
+      },
+      writable: true,
+      configurable: true
+    });
+    Object.defineProperty(realSB, "abort", {
+      value: function() {
+        abortGeneration++;
+        queue.length = 0;
+        processing = false;
+        fakeUpdating = false;
+        initParsed = false;
+        initAppended = false;
+        if (workerClient) workerClient.abort();
+        console.log("[hevc.js] abort() \u2014 queue + transcoder reset (gen=" + abortGeneration + ")");
+        realAbort();
+      },
+      writable: true,
+      configurable: true
+    });
+    Object.defineProperty(realSB, "addEventListener", {
+      value: function(type, fn, options) {
+        if (!listeners.has(type)) listeners.set(type, /* @__PURE__ */ new Set());
+        listeners.get(type).add(fn);
+      },
+      writable: true,
+      configurable: true
+    });
+    Object.defineProperty(realSB, "removeEventListener", {
+      value: function(type, fn) {
+        listeners.get(type)?.delete(fn);
+      },
+      writable: true,
+      configurable: true
+    });
+    const realRemove = realSB.remove.bind(realSB);
+    Object.defineProperty(realSB, "remove", {
+      value: function(start2, end) {
+        dispatchOnSB("updatestart");
+        realRemove(start2, end);
+        realAddEventListener("updateend", () => {
+          dispatchOnSB("update");
+          dispatchOnSB("updateend");
+        }, { once: true });
+      },
+      writable: true,
+      configurable: true
+    });
+    Object.defineProperty(realSB, "updating", {
+      get() {
+        return fakeUpdating || updatingGetter.call(realSB);
+      },
+      configurable: true
+    });
+    const tsOffsetDesc = Object.getOwnPropertyDescriptor(SourceBuffer.prototype, "timestampOffset");
+    Object.defineProperty(realSB, "timestampOffset", {
+      get() {
+        return tsOffsetDesc.get.call(realSB);
+      },
+      set(value) {
+        const old = tsOffsetDesc.get.call(realSB);
+        if (value !== old && (queue.length > 0 || processing)) {
+          console.log(`[hevc.js] timestampOffset changed (${old} \u2192 ${value}) \u2014 flushing queue`);
+          abortGeneration++;
+          queue.length = 0;
+          processing = false;
+          initParsed = false;
+          initAppended = false;
+          if (workerClient) workerClient.abort();
+          if (fakeUpdating) {
+            fakeUpdating = false;
+            dispatchOnSB("update");
+            dispatchOnSB("updateend");
+          }
+        }
+        tsOffsetDesc.set.call(realSB, value);
+      },
+      configurable: true
+    });
     async function transcodeInit(segment) {
       if (workerClient) {
         await workerClient.waitReady();
@@ -12104,8 +12147,8 @@ var HevcDash = (() => {
         while (queue.length > 0) {
           if (abortGeneration !== myGeneration) return;
           const segment = queue.shift();
-          if (target.updating) {
-            await waitForUpdateEnd(target);
+          if (updatingGetter.call(realSB)) {
+            await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
           }
           const isInit = isInitSegment(segment);
@@ -12124,8 +12167,8 @@ var HevcDash = (() => {
             if (isInit) {
               if (fakeUpdating) {
                 fakeUpdating = false;
-                dispatchOnProxy("update");
-                dispatchOnProxy("updateend");
+                dispatchOnSB("update");
+                dispatchOnSB("updateend");
               }
               continue;
             }
@@ -12140,18 +12183,18 @@ var HevcDash = (() => {
           if (initResult && (!initAppended || initChanged)) {
             initAppended = true;
             lastInitSegment = initResult.initSegment;
-            if (target.updating) await waitForUpdateEnd(target);
+            if (target.updating) await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
             realAppend(initResult.initSegment.buffer);
-            await waitForUpdateEnd(target);
+            await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
             console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
           }
           if (h264Segment) {
-            if (target.updating) await waitForUpdateEnd(target);
+            if (target.updating) await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
             realAppend(h264Segment.buffer);
-            await waitForUpdateEnd(target);
+            await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
             const buffered = target.buffered;
             const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
@@ -12159,8 +12202,8 @@ var HevcDash = (() => {
           }
           if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
             fakeUpdating = false;
-            dispatchOnProxy("update");
-            dispatchOnProxy("updateend");
+            dispatchOnSB("update");
+            dispatchOnSB("updateend");
           }
         }
       } catch (err) {
@@ -12171,34 +12214,25 @@ var HevcDash = (() => {
           err?.stack
         );
         fakeUpdating = false;
-        dispatchOnProxy("error");
+        dispatchOnSB("error");
       } finally {
         if (abortGeneration === myGeneration) {
           processing = false;
           if (fakeUpdating) {
             fakeUpdating = false;
-            dispatchOnProxy("update");
-            dispatchOnProxy("updateend");
+            dispatchOnSB("update");
+            dispatchOnSB("updateend");
           }
         }
       }
     }
-    return proxy;
+    return realSB;
   }
   function isInitSegment(data) {
     if (data.byteLength < 8) return false;
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const boxType = view.getUint32(4);
     return boxType === 1718909296 || boxType === 1836019574;
-  }
-  function waitForUpdateEnd(sb) {
-    return new Promise((resolve) => {
-      if (!sb.updating) {
-        resolve();
-        return;
-      }
-      sb.addEventListener("updateend", () => resolve(), { once: true });
-    });
   }
   function toUint8Array(data) {
     if (data instanceof Uint8Array) return data;

@@ -97,6 +97,7 @@ let hevcReady = false;
 (async () => {
   const cleanup = await HevcVideojs.attachHevcSupport({
     workerUrl: './transcode-worker.js',
+    forceTranscode: true,
   });
   hevcReady = cleanup !== null && typeof cleanup === 'function';
 
@@ -131,9 +132,7 @@ function loadStream(presetUrl) {
 
   player = videojs('player', {
     html5: {
-      vhs: {
-        overrideNative: true,
-      },
+      vhs: {},
     },
     controls: true,
     autoplay: true,
@@ -145,12 +144,21 @@ function loadStream(presetUrl) {
     const ql = player.qualityLevels();
     ql.on('addqualitylevel', (e) => {
       const level = e.qualityLevel;
-      log(`[quality] Level added: ${level.width}x${level.height} ${level.label || ''}`);
+      const codec = level.codecs || '';
+      // VHS doesn't always expose codecs — fall back to URL pattern
+      const src = level.id || level.label || '';
+      const isHevc = /hev1|hvc1/i.test(codec) || /h265|hevc/i.test(src);
+      log(`[quality] Level added: ${level.width}x${level.height} ${isHevc ? '(HEVC)' : '(AVC)'} ${src.split('/').pop() || codec}`);
+
+      // When forceTranscode is on, disable AVC levels to force HEVC path
+      if (hevcReady && !isHevc) {
+        level.enabled = false;
+      }
     });
     ql.on('change', () => {
       const active = ql[ql.selectedIndex];
       if (active) {
-        log(`[quality] Switched to: ${active.width}x${active.height}`);
+        log(`[quality] Switched to: ${active.width}x${active.height} ${active.codecs || ''}`);
         document.getElementById('status').textContent =
           `Playing ${active.width}x${active.height} via Video.js + hevc.js`;
       }
@@ -159,6 +167,27 @@ function loadStream(presetUrl) {
   // Activate quality selector UI menu in control bar
   if (player.hlsQualitySelector) {
     player.hlsQualitySelector({ displayCurrentQuality: true });
+  }
+
+  // Force HEVC renditions only — disable AVC before VHS starts loading segments.
+  // Must happen on loadedmetadata (after manifest is parsed, before segments load).
+  if (hevcReady) {
+    player.on('loadedmetadata', () => {
+      try {
+        const reps = player.tech(true)?.vhs?.representations?.() || [];
+        let hevcCount = 0;
+        reps.forEach((r) => {
+          const isHevc = /hev1|hvc1/i.test(r.codecs || '') || /h265|hevc/i.test(r.uri || '');
+          if (!isHevc) {
+            r.enabled(false);
+            log(`[vhs] Disabled AVC rendition: ${r.width}x${r.height} ${r.codecs || ''}`);
+          } else {
+            hevcCount++;
+          }
+        });
+        if (hevcCount > 0) log(`[vhs] Forced ${hevcCount} HEVC-only rendition(s)`);
+      } catch (e) { /* VHS not available */ }
+    });
   }
 
   player.on('playing', () => {

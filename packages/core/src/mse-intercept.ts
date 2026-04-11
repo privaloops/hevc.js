@@ -83,6 +83,7 @@ export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
 
   // Patch addSourceBuffer — return a proxy that handles transcoding
   MediaSource.prototype.addSourceBuffer = function (mimeType: string): SourceBuffer {
+    console.log(`[hevc.js] addSourceBuffer("${mimeType}")`);
     if (!HEVC_DETECT_RE.test(mimeType)) {
       return originalAddSourceBuffer.call(this, mimeType);
     }
@@ -163,127 +164,134 @@ function createTranscodingProxy(
     });
   }
 
-  // Event listeners registered by dash.js
+  // Event listeners: intercept to control event dispatch timing
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
-  function dispatchOnProxy(type: string): void {
+  function dispatchOnSB(type: string): void {
+    // Fire to listeners registered via our intercepted addEventListener
     const set = listeners.get(type);
-    if (!set) return;
-    const evt = new Event(type);
-    for (const fn of set) {
-      if (typeof fn === "function") fn(evt);
-      else fn.handleEvent(evt);
+    if (set) {
+      const evt = new Event(type);
+      for (const fn of set) {
+        if (typeof fn === "function") fn.call(realSB, evt);
+        else fn.handleEvent(evt);
+      }
     }
+    // Also fire on* property handler if set
+    const onProp = (realSB as any)[`__hevc_on${type}`];
+    if (typeof onProp === "function") onProp.call(realSB, new Event(type));
   }
 
-  // Create the proxy
-  const proxy = new Proxy(realSB, {
-    set(target, prop, value) {
-      // Detect seek: hls.js changes timestampOffset before appending new segments.
-      // Flush stale segments from the queue to avoid transcoding old data.
-      if (prop === "timestampOffset" && value !== target.timestampOffset) {
-        if (queue.length > 0 || processing) {
-          console.log(`[hevc.js] timestampOffset changed (${target.timestampOffset} → ${value}) — flushing queue + resetting transcoder`);
-          abortGeneration++;
-          queue.length = 0;
-          processing = false;
-          initParsed = false;
-          initAppended = false;
-          if (workerClient) workerClient.abort();
-          if (fakeUpdating) {
-            fakeUpdating = false;
-            dispatchOnProxy("update");
-            dispatchOnProxy("updateend");
-          }
-        }
+  // Save original methods before monkey-patching
+  const realAppend = realSB.appendBuffer.bind(realSB);
+  const realAbort = realSB.abort.bind(realSB);
+  const realAddEventListener = realSB.addEventListener.bind(realSB);
+  const realRemoveEventListener = realSB.removeEventListener.bind(realSB);
+
+  // Internal wait using the real (unpatched) addEventListener
+  const updatingGetter = Object.getOwnPropertyDescriptor(SourceBuffer.prototype, "updating")!.get!;
+  function waitForRealUpdateEnd(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (!updatingGetter.call(realSB)) { resolve(); return; }
+      realAddEventListener("updateend", () => resolve(), { once: true });
+    });
+  }
+
+  // Monkey-patch the real SourceBuffer instance — same object in mediaSource.sourceBuffers
+  Object.defineProperty(realSB, "appendBuffer", {
+    value: function (data: BufferSource): void {
+      const bytes = toUint8Array(data);
+      queue.push(bytes);
+
+      fakeUpdating = true;
+      dispatchOnSB("updatestart");
+
+      // Release backpressure immediately if queue is shallow enough
+      if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
+        fakeUpdating = false;
+        dispatchOnSB("update");
+        dispatchOnSB("updateend");
       }
-      // Forward property sets (appendWindowStart, timestampOffset, etc.) to real SB
-      (target as unknown as Record<string | symbol, unknown>)[prop] = value;
-      return true;
+
+      processNext(realSB);
     },
-    get(target, prop, receiver) {
-      // Override updating to include our fake state
-      if (prop === "updating") {
-        return fakeUpdating || target.updating;
-      }
-
-      // Override abort — cancel pending transcoding + reset state for seek
-      if (prop === "abort") {
-        return function (): void {
-          abortGeneration++;  // signal stale processNext to exit
-          queue.length = 0;
-          processing = false;
-          fakeUpdating = false;
-          initParsed = false;   // Next append will be a new init segment
-          initAppended = false;
-          if (workerClient) workerClient.abort();
-          console.log("[hevc.js] abort() — queue + transcoder reset (gen=" + abortGeneration + ")");
-          target.abort();
-        };
-      }
-
-      // Override appendBuffer
-      if (prop === "appendBuffer") {
-        return function (data: BufferSource): void {
-          const bytes = toUint8Array(data);
-          queue.push(bytes);
-
-          fakeUpdating = true;
-          dispatchOnProxy("updatestart");
-
-          // Release backpressure immediately if queue is shallow enough.
-          // This lets the player create audio SourceBuffers and continue
-          // buffering while video transcoding runs in the background.
-          if (queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
-            fakeUpdating = false;
-            dispatchOnProxy("update");
-            dispatchOnProxy("updateend");
-          }
-
-          processNext(target);
-        };
-      }
-
-      // Override addEventListener — register ONLY on proxy map, NOT on real SB.
-      // This prevents hls.js from receiving real SB events directly (which
-      // would double-fire updateend and crash hls.js's buffer controller).
-      if (prop === "addEventListener") {
-        return function (type: string, fn: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {
-          if (!listeners.has(type)) listeners.set(type, new Set());
-          listeners.get(type)!.add(fn);
-        };
-      }
-
-      if (prop === "removeEventListener") {
-        return function (type: string, fn: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void {
-          listeners.get(type)?.delete(fn);
-        };
-      }
-
-      // Override remove — forward to real SB and relay events to proxy listeners
-      if (prop === "remove") {
-        return function (start: number, end: number): void {
-          dispatchOnProxy("updatestart");
-          target.remove(start, end);
-          target.addEventListener("updateend", () => {
-            dispatchOnProxy("update");
-            dispatchOnProxy("updateend");
-          }, { once: true });
-        };
-      }
-
-      // Everything else: forward to real SB with correct `this`
-      // Native SourceBuffer getters (buffered, appendWindowStart, etc.)
-      // throw "Illegal invocation" if `this` is not the real SourceBuffer.
-      const value = Reflect.get(target, prop, target);
-      if (typeof value === "function") {
-        return value.bind(target);
-      }
-      return value;
-    },
+    writable: true, configurable: true,
   });
 
-  const realAppend = realSB.appendBuffer.bind(realSB);
+  Object.defineProperty(realSB, "abort", {
+    value: function (): void {
+      abortGeneration++;
+      queue.length = 0;
+      processing = false;
+      fakeUpdating = false;
+      initParsed = false;
+      initAppended = false;
+      if (workerClient) workerClient.abort();
+      console.log("[hevc.js] abort() — queue + transcoder reset (gen=" + abortGeneration + ")");
+      realAbort();
+    },
+    writable: true, configurable: true,
+  });
+
+  Object.defineProperty(realSB, "addEventListener", {
+    value: function (type: string, fn: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(fn);
+    },
+    writable: true, configurable: true,
+  });
+
+  Object.defineProperty(realSB, "removeEventListener", {
+    value: function (type: string, fn: EventListenerOrEventListenerObject): void {
+      listeners.get(type)?.delete(fn);
+    },
+    writable: true, configurable: true,
+  });
+
+  // Patch remove() — relay events through our listener map
+  const realRemove = realSB.remove.bind(realSB);
+  Object.defineProperty(realSB, "remove", {
+    value: function (start: number, end: number): void {
+      dispatchOnSB("updatestart");
+      realRemove(start, end);
+      realAddEventListener("updateend", () => {
+        dispatchOnSB("update");
+        dispatchOnSB("updateend");
+      }, { once: true });
+    },
+    writable: true, configurable: true,
+  });
+
+  // Intercept 'updating' getter — include our fake state
+  Object.defineProperty(realSB, "updating", {
+    get() { return fakeUpdating || updatingGetter.call(realSB); },
+    configurable: true,
+  });
+
+  // Intercept timestampOffset setter — detect seek (hls.js doesn't call abort)
+  const tsOffsetDesc = Object.getOwnPropertyDescriptor(SourceBuffer.prototype, "timestampOffset");
+  Object.defineProperty(realSB, "timestampOffset", {
+    get() { return tsOffsetDesc!.get!.call(realSB); },
+    set(value: number) {
+      const old = tsOffsetDesc!.get!.call(realSB);
+      if (value !== old && (queue.length > 0 || processing)) {
+        console.log(`[hevc.js] timestampOffset changed (${old} → ${value}) — flushing queue`);
+        abortGeneration++;
+        queue.length = 0;
+        processing = false;
+        initParsed = false;
+        initAppended = false;
+        if (workerClient) workerClient.abort();
+        if (fakeUpdating) {
+          fakeUpdating = false;
+          dispatchOnSB("update");
+          dispatchOnSB("updateend");
+        }
+      }
+      tsOffsetDesc!.set!.call(realSB, value);
+    },
+    configurable: true,
+  });
 
   // Unified transcode interface — works with both Worker and main-thread
   async function transcodeInit(segment: Uint8Array): Promise<void> {
@@ -320,8 +328,8 @@ function createTranscodingProxy(
         const segment = queue.shift()!;
 
         // Wait for real SB to be ready
-        if (target.updating) {
-          await waitForUpdateEnd(target);
+        if (updatingGetter.call(realSB)) {
+          await waitForRealUpdateEnd();
           if (abortGeneration !== myGeneration) return;
         }
 
@@ -351,8 +359,8 @@ function createTranscodingProxy(
             // Release backpressure — init-only append, no media to transcode
             if (fakeUpdating) {
               fakeUpdating = false;
-              dispatchOnProxy("update");
-              dispatchOnProxy("updateend");
+              dispatchOnSB("update");
+              dispatchOnSB("updateend");
             }
             continue;
           }
@@ -372,20 +380,20 @@ function createTranscodingProxy(
         if (initResult && (!initAppended || initChanged)) {
           initAppended = true;
           lastInitSegment = initResult.initSegment;
-          if (target.updating) await waitForUpdateEnd(target);
+          if (target.updating) await waitForRealUpdateEnd();
           if (abortGeneration !== myGeneration) return;
           realAppend(initResult.initSegment.buffer as ArrayBuffer);
-          await waitForUpdateEnd(target);
+          await waitForRealUpdateEnd();
           if (abortGeneration !== myGeneration) return;
           console.log(`[hevc.js] H.264 init segment appended${initChanged && lastInitSegment ? " (resolution change)" : ""}`);
         }
 
         // Append transcoded media segment
         if (h264Segment) {
-          if (target.updating) await waitForUpdateEnd(target);
+          if (target.updating) await waitForRealUpdateEnd();
           if (abortGeneration !== myGeneration) return;
           realAppend(h264Segment.buffer as ArrayBuffer);
-          await waitForUpdateEnd(target);
+          await waitForRealUpdateEnd();
           if (abortGeneration !== myGeneration) return;
 
           const buffered = target.buffered;
@@ -397,8 +405,8 @@ function createTranscodingProxy(
         // Guard: fakeUpdating may already be false (released in appendBuffer).
         if (fakeUpdating && queue.length < MAX_QUEUE_BEFORE_BACKPRESSURE) {
           fakeUpdating = false;
-          dispatchOnProxy("update");
-          dispatchOnProxy("updateend");
+          dispatchOnSB("update");
+          dispatchOnSB("updateend");
         }
       }
     } catch (err) {
@@ -406,21 +414,21 @@ function createTranscodingProxy(
       console.error("[hevc.js/dash] Transcoding error:",
         (err as Error)?.message ?? err, (err as Error)?.stack);
       fakeUpdating = false;
-      dispatchOnProxy("error");
+      dispatchOnSB("error");
     } finally {
       if (abortGeneration === myGeneration) {
         processing = false;
         // Ensure player is unblocked when queue drains
         if (fakeUpdating) {
           fakeUpdating = false;
-          dispatchOnProxy("update");
-          dispatchOnProxy("updateend");
+          dispatchOnSB("update");
+          dispatchOnSB("updateend");
         }
       }
     }
   }
 
-  return proxy as unknown as SourceBuffer;
+  return realSB;
 }
 
 /**
