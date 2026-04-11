@@ -1,8 +1,7 @@
 # Build
 build/
-build-release/
+build-*/
 .cache/
-build-wasm/
 cmake-build-*/
 
 # IDE
@@ -52,10 +51,19 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Local logs
+*.log
+*.err
+!CHANGELOG.md
+
 # Python
 __pycache__/
 *.pyc
 .venv/
+
+# Internal dev files (not for public repo)
+CLAUDE.md
+MEMENTO-DEV.md
 
 # Spec PDF (copyright ITU-T, usage local uniquement)
 docs/spec/pdf/
