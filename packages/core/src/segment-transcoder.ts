@@ -137,11 +137,10 @@ export class SegmentTranscoder {
       log.debug(`Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0]!.duration})`);
     }
 
-    // Build cumulative timestamps from actual sample durations (timescale units)
-    const sampleOffsets: number[] = [0];
-    for (let i = 0; i < samples.length - 1; i++) {
-      sampleOffsets.push(sampleOffsets[i]! + samples[i]!.duration);
-    }
+    // Sort sample PTS (composition times) for display-order timestamp assignment.
+    // drain() returns frames in display order (POC), but samples are in decode order.
+    // Using DTS-based offsets would assign wrong timestamps when B-frames are present.
+    const sortedPts = samples.map(s => s.pts).sort((a, b) => a - b);
 
     // 2. Feed VPS/SPS/PPS on first segment (from hvcC in init segment)
     if (!this._paramSetsFed && this._paramSetsBuffer) {
@@ -165,7 +164,7 @@ export class SegmentTranscoder {
       this._decoder.feed(nalBuffer);
     }
 
-    // 4. Drain decoded YUV frames
+    // 4. Drain decoded YUV frames (display order)
     const frames = this._decoder.drain();
     const tDecodeEnd = performance.now();
     if (frames.length === 0) {
@@ -197,12 +196,11 @@ export class SegmentTranscoder {
     this._encoder.onChunk = (chunk) => chunks.push(chunk);
 
     for (let i = 0; i < frames.length; i++) {
-      // Use actual sample durations for timestamps when available,
-      // fall back to uniform spacing for extra decoded frames
-      const offsetUs = i < sampleOffsets.length
-        ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
-        : Math.round((i / this._fps) * 1_000_000);
-      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
+      // Use PTS-sorted timestamps: frames are in display order from drain(),
+      // so frame[i] corresponds to the i-th smallest PTS value.
+      const timestampUs = i < sortedPts.length
+        ? Math.round((sortedPts[i]! / this._timescale) * 1_000_000)
+        : Math.round((segmentBaseTime / this._timescale) * 1_000_000) + Math.round((i / this._fps) * 1_000_000);
       this._encoder.encode(frames[i]!, timestampUs, i === 0);
     }
 
@@ -223,23 +221,32 @@ export class SegmentTranscoder {
 
       this._initResult = {
         initSegment,
-        codec: "avc1.42001f",
+        codec: this._encoder.codec,
       };
     }
 
     // 7. Mux H.264 chunks into fMP4 media segment
-    // Use original sample durations (timescale units) to avoid rounding drift.
-    // frames[i]↔samples[i] mapping is safe for CFR content (uniform durations).
+    // Use sorted PTS durations for display-order frames.
+    const sortedDurations: number[] = [];
+    for (let i = 0; i < sortedPts.length - 1; i++) {
+      sortedDurations.push(sortedPts[i + 1]! - sortedPts[i]!);
+    }
+    if (sortedPts.length > 0) {
+      sortedDurations.push(samples[0]!.duration); // last frame uses nominal duration
+    }
+
     const muxerSamples = chunks.map((c, i) => ({
       data: c.data,
-      duration: i < samples.length
-        ? samples[i]!.duration
+      duration: i < sortedDurations.length
+        ? sortedDurations[i]!
         : Math.round(c.duration * this._timescale / 1_000_000),
       isKeyframe: c.isKeyframe,
       compositionTimeOffset: 0,
     }));
 
-    const mediaSegment = this._muxer.muxSegment(muxerSamples, segmentBaseTime);
+    // Use the smallest PTS as the base decode time for the muxed segment
+    const muxBaseTime = sortedPts.length > 0 ? sortedPts[0]! : segmentBaseTime;
+    const mediaSegment = this._muxer.muxSegment(muxerSamples, muxBaseTime);
 
     const tEncodeEnd = performance.now();
     this.lastPerfStats = {
@@ -266,8 +273,6 @@ export class SegmentTranscoder {
 
     const BATCH_SIZE = 30;
 
-    // === Phase 1: identical to processMediaSegment (sequential) ===
-
     const samples = this._demuxer.parseSegment(data);
     if (samples.length === 0) return;
 
@@ -278,17 +283,14 @@ export class SegmentTranscoder {
       this._fpsAutoDetected = true;
     }
 
-    const sampleOffsets: number[] = [0];
-    for (let i = 0; i < samples.length - 1; i++) {
-      sampleOffsets.push(sampleOffsets[i]! + samples[i]!.duration);
-    }
+    // Sort PTS for display-order timestamp assignment (same fix as sequential path)
+    const sortedPts = samples.map(s => s.pts).sort((a, b) => a - b);
 
     if (!this._paramSetsFed && this._paramSetsBuffer) {
       this._decoder.feed(this._paramSetsBuffer);
       this._paramSetsFed = true;
     }
 
-    // Feed ALL NALs (same as sequential)
     for (const sample of samples) {
       const totalSize = sample.nalUnits.reduce((sum, n) => sum + 4 + n.length, 0);
       const nalBuffer = new Uint8Array(totalSize);
@@ -302,11 +304,10 @@ export class SegmentTranscoder {
       this._decoder.feed(nalBuffer);
     }
 
-    // Drain ALL frames (same as sequential)
+    // Drain frames in display order
     const frames = this._decoder.drain();
     if (frames.length === 0) return;
 
-    // Encoder setup (same as sequential)
     const frameW = frames[0]!.width;
     const frameH = frames[0]!.height;
     if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
@@ -323,37 +324,7 @@ export class SegmentTranscoder {
       this._height = frameH;
     }
 
-    // Encode ALL frames (same as sequential)
-    const chunks: EncodedChunk[] = [];
-    this._encoder.onChunk = (chunk) => chunks.push(chunk);
-
-    for (let i = 0; i < frames.length; i++) {
-      const offsetUs = i < sampleOffsets.length
-        ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
-        : Math.round((i / this._fps) * 1_000_000);
-      const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
-      this._encoder.encode(frames[i]!, timestampUs, i === 0);
-    }
-
-    await this._encoder.flush();
-    if (chunks.length === 0) return;
-
-    // Generate init (same as sequential)
-    if (!this._initResult) {
-      const avcC = this._encoder.codecDescription;
-      if (!avcC) throw new Error("No avcC description from encoder");
-      this._initResult = {
-        initSegment: this._muxer.generateInit({
-          width: this._width, height: this._height,
-          timescale: this._timescale, avcC,
-        }),
-        codec: this._encoder.codec,
-      };
-    }
-
-    // === Phase 2: encode in batches of BATCH_SIZE, flush+mux+emit each ===
-    // latencyMode="realtime" → no B-frames, flush is safe between batches
-
+    // Encode in batches, using PTS-sorted timestamps
     let initEmitted = false;
 
     for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
@@ -362,17 +333,15 @@ export class SegmentTranscoder {
       this._encoder.onChunk = (chunk) => batchChunks.push(chunk);
 
       for (let i = batchStart; i < batchEnd; i++) {
-        const offsetUs = i < sampleOffsets.length
-          ? Math.round((sampleOffsets[i]! / this._timescale) * 1_000_000)
-          : Math.round((i / this._fps) * 1_000_000);
-        const timestampUs = Math.round((segmentBaseTime / this._timescale) * 1_000_000) + offsetUs;
+        const timestampUs = i < sortedPts.length
+          ? Math.round((sortedPts[i]! / this._timescale) * 1_000_000)
+          : Math.round((segmentBaseTime / this._timescale) * 1_000_000) + Math.round((i / this._fps) * 1_000_000);
         this._encoder.encode(frames[i]!, timestampUs, i === 0);
       }
 
       await this._encoder.flush();
       if (batchChunks.length === 0) continue;
 
-      // Generate init on first batch
       if (!this._initResult) {
         const avcC = this._encoder.codecDescription;
         if (!avcC) throw new Error("No avcC description from encoder");
@@ -385,16 +354,19 @@ export class SegmentTranscoder {
         };
       }
 
-      const batchBaseTime = segmentBaseTime +
-        (batchStart < sampleOffsets.length ? sampleOffsets[batchStart]! : 0);
+      // Use PTS-sorted base time for each batch
+      const batchBaseTime = batchStart < sortedPts.length
+        ? sortedPts[batchStart]!
+        : segmentBaseTime;
 
       const muxerSamples = batchChunks.map((c, i) => {
-        const sampleIdx = batchStart + i;
+        const ptsIdx = batchStart + i;
+        const duration = (ptsIdx < sortedPts.length - 1)
+          ? sortedPts[ptsIdx + 1]! - sortedPts[ptsIdx]!
+          : samples[0]!.duration;
         return {
           data: c.data,
-          duration: sampleIdx < samples.length
-            ? samples[sampleIdx]!.duration
-            : Math.round(c.duration * this._timescale / 1_000_000),
+          duration,
           isKeyframe: c.isKeyframe,
           compositionTimeOffset: 0,
         };
