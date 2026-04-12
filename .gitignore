@@ -26,8 +26,9 @@ build*/*.wasm
 *.265
 *.h265
 *.hevc
-# Allow committed test fixtures
+# Allow committed test fixtures and site samples
 !tests/conformance/fixtures/*.265
+!site/samples/*.265
 
 # Conformance bitstreams (generated/downloaded, not committed)
 tests/conformance/edge-cases/
