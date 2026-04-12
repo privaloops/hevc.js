@@ -204,7 +204,6 @@ static const ContextInitEntry cabacInitValues[NUM_CABAC_CONTEXTS] = {
     // CTX_CODED_SUB_BLOCK_FLAG (77-80) — Table 9-28
     {{ 91, 121, 121 }}, {{ 171, 140, 140 }}, {{ 134, 61, 61 }}, {{ 141, 154, 154 }},
     // CTX_SIG_COEFF_FLAG — 27 luma + 15 chroma = 42 contexts (spec Table 9-29)
-    // Ref: libde265 contextmodel.cc:232 — 42 init values per initType, offset 27 for chroma
     // Luma (27 contexts: 4x4[9], 8x8_diag[6], 8x8_nondiag[6], NxN[6])
     {{ 111, 155, 170 }}, {{ 111, 154, 154 }}, {{ 125, 139, 139 }}, {{ 110, 153, 153 }},
     {{ 110, 139, 139 }}, {{  94, 123, 123 }}, {{ 124, 123, 123 }}, {{ 108,  63,  63 }},

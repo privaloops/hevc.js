@@ -56,6 +56,10 @@ export async function attachHevcSupport(
   // Skip transcoding if browser has native HEVC support
   if (!config.forceTranscode && hasNativeHevcSupport()) {
     console.log("[hevc.js/dash] Native HEVC support detected — transcoding not needed");
+    // Still register capabilities filter so dash.js accepts HEVC representations
+    if (player?.registerCustomCapabilitiesFilter) {
+      player.registerCustomCapabilitiesFilter(() => true);
+    }
     return () => {};
   }
 

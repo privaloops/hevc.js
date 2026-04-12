@@ -17,6 +17,8 @@ export type { MuxerInitConfig, MuxerSample } from "./fmp4-muxer.js";
 export { MSEController } from "./mse-controller.js";
 export { TranscodePipeline } from "./transcode-pipeline.js";
 export type { TranscodePipelineConfig } from "./transcode-pipeline.js";
+export { setLogLevel } from "./log.js";
+export type { LogLevel } from "./log.js";
 export { installMSEIntercept, uninstallMSEIntercept } from "./mse-intercept.js";
 export type { MSEInterceptConfig } from "./mse-intercept.js";
 export { SegmentTranscoder } from "./segment-transcoder.js";

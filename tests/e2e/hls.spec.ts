@@ -5,6 +5,7 @@ import {
   assertNoWasmCrash,
   assertStatus,
   getLog,
+  enableForceTranscode,
 } from './helpers';
 
 const HLS_STREAMS = [
@@ -41,13 +42,16 @@ test.describe('HLS Player', () => {
         () => {
           const v = document.querySelector<HTMLVideoElement>('#player');
           const log = document.querySelector<HTMLTextAreaElement>('#log');
+          const logText = log?.value ?? '';
           const playing = v && v.currentTime > 0.5 && !v.paused;
-          const noEncoder = log && (
-            log.value.includes('Encoder creation error') ||
-            log.value.includes('H.264 encoding not supported') ||
-            log.value.includes('bufferAppendError') ||
-            log.value.includes('AdaptationSet has been removed')
+          const native = logText.includes('Native HEVC support detected');
+          const noEncoder = (
+            logText.includes('Encoder creation error') ||
+            logText.includes('H.264 encoding not supported') ||
+            logText.includes('bufferAppendError') ||
+            logText.includes('AdaptationSet has been removed')
           );
+          if (playing && native) return 'native';
           if (playing) return 'playing';
           if (noEncoder) return 'no_encoder';
           return false;
@@ -70,8 +74,65 @@ test.describe('HLS Player', () => {
         expect(t1).toBeGreaterThan(t0 + 0.5);
         await assertStatus(page, /Playing/);
       }
+      if (result === 'native') {
+        // Native HEVC — playback works without transcoding
+        const t0 = await page.evaluate(() =>
+          document.querySelector<HTMLVideoElement>('#player')!.currentTime
+        );
+        await page.waitForTimeout(2000);
+        const t1 = await page.evaluate(() =>
+          document.querySelector<HTMLVideoElement>('#player')!.currentTime
+        );
+        expect(t1).toBeGreaterThan(t0 + 0.5);
+      }
 
       assertNoWasmCrash(errors);
     });
   }
+});
+
+test.describe('HLS Player — forceTranscode', () => {
+  test('ABR — forced WASM transcode pipeline', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await loadDemoPage(page, 'hls.html');
+    await enableForceTranscode(page);
+
+    await page.fill('input[type="text"]', 'streams/hls_abr/master.m3u8');
+    await page.getByRole('button', { name: 'Load' }).click();
+
+    const outcome = await page.waitForFunction(
+      () => {
+        const v = document.querySelector<HTMLVideoElement>('#player');
+        const log = document.querySelector<HTMLTextAreaElement>('#log');
+        const playing = v && v.currentTime > 0.5 && !v.paused;
+        const noEncoder = log && (
+          log.value.includes('Encoder creation error') ||
+          log.value.includes('H.264 encoding not supported') ||
+          log.value.includes('not available')
+        );
+        if (playing) return 'playing';
+        if (noEncoder) return 'no_encoder';
+        return false;
+      },
+      { timeout: 45_000 }
+    );
+
+    const result = await outcome.jsonValue();
+    const log = await getLog(page);
+
+    if (result === 'playing') {
+      expect(log).toContain('Worker transcoder ready');
+
+      const t0 = await page.evaluate(() =>
+        document.querySelector<HTMLVideoElement>('#player')!.currentTime
+      );
+      await page.waitForTimeout(3000);
+      const t1 = await page.evaluate(() =>
+        document.querySelector<HTMLVideoElement>('#player')!.currentTime
+      );
+      expect(t1).toBeGreaterThan(t0 + 0.5);
+    }
+
+    assertNoWasmCrash(errors);
+  });
 });

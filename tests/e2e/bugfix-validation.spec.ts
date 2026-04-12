@@ -17,6 +17,8 @@ import {
   getBufferedRanges,
   assertContiguousBuffer,
   takeScreenshot,
+  enableForceTranscode,
+  hasAudioSourceBuffer,
 } from './helpers';
 
 // Filter non-fatal errors (known browser limitations)
@@ -80,10 +82,9 @@ async function testABR(page: import('@playwright/test').Page, demo: 'dash' | 'hl
   }
 
   if (result === 'native') {
-    // Native HEVC — verify playback works without transcoding
+    // Native HEVC — verify detection message present
     const log = await getLog(page);
     expect(log).toContain('Native HEVC support detected');
-    expect(log).not.toContain('Worker transcoder ready');
   }
 
   // Both paths: verify playback progresses smoothly
@@ -95,6 +96,10 @@ async function testABR(page: import('@playwright/test').Page, demo: 'dash' | 'hl
     document.querySelector<HTMLVideoElement>('#player')!.currentTime
   );
   expect(t1).toBeGreaterThan(t0 + 1.0);
+
+  // ABR streams have audio — verify it's present
+  const hasAudio = await hasAudioSourceBuffer(page);
+  expect(hasAudio, 'Audio track should be present in ABR stream').toBe(true);
 
   assertNoWasmCrash(errors);
   expect(filterFatalErrors(errors)).toHaveLength(0);
@@ -183,6 +188,82 @@ test.describe('HLS — seek', () => {
   test('seek forward and resume playback', async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await testSeek(page, 'hls', errors);
+  });
+});
+
+// ────────────────────────────────────────────
+// 4b. forceTranscode — ABR + seek
+// ────────────────────────────────────────────
+test.describe('DASH ABR — forceTranscode', () => {
+  test('forced transcode pipeline works on native-HEVC browser', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await loadDemoPage(page, 'dash.html');
+    await enableForceTranscode(page);
+    await loadPreset(page, 'ABR 480p/720p/1080p + audio (30s)');
+
+    const result = await waitForPlaying(page);
+    if (result === 'no_encoder') {
+      test.skip(true, 'Browser lacks H.264 VideoEncoder');
+      return;
+    }
+
+    if (result === 'playing') {
+      const log = await getLog(page);
+      expect(log).toContain('installing WASM transcoder');
+      expect(log).toContain('Worker transcoder ready');
+      expect(log).not.toContain('Native HEVC support detected');
+
+      await page.waitForTimeout(6000);
+      const ranges = await getBufferedRanges(page);
+      expect(ranges.length).toBeGreaterThan(0);
+      assertContiguousBuffer(ranges);
+
+      // Verify audio is present in ABR stream
+      const hasAudio = await hasAudioSourceBuffer(page);
+      expect(hasAudio, 'Audio should be present when force-transcoding ABR stream').toBe(true);
+    }
+
+    assertNoWasmCrash(errors);
+  });
+});
+
+test.describe('DASH seek — forceTranscode', () => {
+  test('seek works with forced WASM transcode', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await loadDemoPage(page, 'dash.html');
+    await enableForceTranscode(page);
+    await loadPreset(page, 'ABR 480p/720p/1080p + audio (30s)');
+
+    const result = await waitForPlaying(page);
+    if (result === 'no_encoder') {
+      test.skip(true, 'Browser lacks H.264 VideoEncoder');
+      return;
+    }
+
+    await page.waitForTimeout(6000);
+
+    await page.evaluate(() => {
+      document.querySelector<HTMLVideoElement>('#player')!.currentTime = 15;
+    });
+
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector<HTMLVideoElement>('#player');
+        return v && v.currentTime > 15.5 && !v.paused;
+      },
+      { timeout: 30_000 }
+    );
+
+    const t0 = await page.evaluate(() =>
+      document.querySelector<HTMLVideoElement>('#player')!.currentTime
+    );
+    await page.waitForTimeout(3000);
+    const t1 = await page.evaluate(() =>
+      document.querySelector<HTMLVideoElement>('#player')!.currentTime
+    );
+    expect(t1).toBeGreaterThan(t0 + 1.0);
+
+    assertNoWasmCrash(errors);
   });
 });
 

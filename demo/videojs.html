@@ -3,79 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>hevc.js — Video.js + VHS + HEVC</title>
+<title>hevc.js — Video.js HEVC Playback</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="demo.css">
 <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #1a1a2e; color: #e0e0e0;
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px;
-  }
-  h1 { font-size: 1.4em; margin-bottom: 8px; color: #fff; }
-  .subtitle { font-size: 0.85em; color: #888; margin-bottom: 16px; }
-  .container { max-width: 960px; width: 100%; }
-  .video-js { width: 100% !important; aspect-ratio: 16/9; }
-  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-  button {
-    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
-    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em;
-  }
-  button:hover { background: #0f3460; }
-  input[type="text"] {
-    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
-    padding: 8px 12px; border-radius: 4px; font-size: 0.9em; flex: 1;
-  }
-  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
-  .presets button { font-size: 0.8em; padding: 4px 10px; }
-  #status { margin-top: 8px; font-size: 0.85em; color: #e94560; min-height: 1.2em; }
-  #log {
-    width: 100%; height: 220px; margin-top: 12px;
-    background: #0d1117; color: #8b949e; border: 1px solid #0f3460;
-    border-radius: 4px; font-family: monospace; font-size: 0.78em;
-    padding: 8px; resize: vertical;
-  }
-</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2.0.0/dist/videojs-hls-quality-selector.css">
 </head>
 <body>
 
-<h1>hevc.js — Video.js + VHS + HEVC</h1>
-<p class="subtitle">HEVC HLS via Video.js + videojs-http-streaming + MSE intercept (HEVC&#8594;H.264)</p>
+<nav class="demo-nav">
+  <a href="https://hevcjs.dev" class="demo-nav-brand">hevc<span>.js</span></a>
+  <a href="index.html">Decoder</a>
+  <a href="dash.html">dash.js</a>
+  <a href="hls.html">hls.js</a>
+  <a href="videojs.html" class="active">Video.js</a>
+</nav>
 
-<div class="container">
-  <div class="controls">
-    <input type="text" id="hls-url" placeholder="Enter HEVC HLS URL (.m3u8)...">
-    <button onclick="loadStream()">Load</button>
+<main class="demo-main">
+  <h1 class="demo-title">Video.js HEVC Playback</h1>
+  <p class="demo-subtitle">HEVC HLS via Video.js + VHS + MSE intercept (HEVC &rarr; H.264)</p>
+
+  <div class="demo-controls">
+    <input type="text" id="hls-url" class="demo-input" placeholder="Enter HEVC HLS URL (.m3u8)...">
+    <button class="demo-btn demo-btn-primary" onclick="loadStream()">Load</button>
   </div>
-  <div class="presets">
-    <button onclick="loadStream('streams/hls_abr/master.m3u8')">BBB ABR (30s)</button>
-    <button onclick="loadStream('https://manifest-arte.akamaized.net/api/manifest/v1/Generate/bbc30788-8f2b-4407-a231-5ccf6485d1a5/fr/XQ+KS+CHEV1/125603-000-A.m3u8')">ARTE HEVC</button>
+  <div class="demo-presets">
+    <button class="demo-btn" onclick="loadStream('streams/hls_abr/master.m3u8')">BBB ABR (30s)</button>
   </div>
 
-  <video-js id="player" class="vjs-big-play-centered vjs-fluid" controls>
-  </video-js>
-  <div id="status">Loading...</div>
-  <textarea id="log" readonly></textarea>
-</div>
+  <div class="demo-toggle">
+    <input type="checkbox" id="force-transcode" class="demo-toggle-switch">
+    <label for="force-transcode" class="demo-toggle-label">Force transcoding (bypass native HEVC detection)</label>
+  </div>
+
+  <video-js id="player" class="vjs-big-play-centered vjs-fluid" controls></video-js>
+  <div id="status" class="demo-status">Loading...</div>
+  <textarea id="log" class="demo-log" readonly></textarea>
+</main>
+
+<footer class="demo-footer">
+  <a href="https://hevcjs.dev">hevc.js</a> &middot; <a href="https://github.com/privaloops/hevc.js">GitHub</a> &middot; MIT License
+</footer>
 
 <!-- WASM decoder -->
 <script src="hevc-decode.js"></script>
-
-<!-- Video.js (includes VHS / videojs-http-streaming) -->
+<!-- Video.js -->
 <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-
-<!-- contrib-quality-levels (data layer) -->
+<!-- contrib-quality-levels -->
 <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@4.1.0/dist/videojs-contrib-quality-levels.min.js"></script>
-
-<!-- hls-quality-selector (UI menu) -->
+<!-- hls-quality-selector -->
 <script src="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2.0.0/dist/videojs-hls-quality-selector.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2.0.0/dist/videojs-hls-quality-selector.css">
-
-<!-- hevc.js core bundle (MSE intercept) -->
+<!-- hevc.js/videojs bundle -->
 <script src="videojs-bundle.js"></script>
 
 <script>
-// --- Logging ---
 const logEl = document.getElementById('log');
 function log(...args) {
   const line = args.map(a => {
@@ -91,16 +74,17 @@ console.log = (...a) => { _log(...a); log('[log]', ...a); };
 console.warn = (...a) => { _warn(...a); log('[warn]', ...a); };
 console.error = (...a) => { _err(...a); log('[ERROR]', ...a); };
 
-// --- Init: install MSE intercept BEFORE Video.js creates any SourceBuffer ---
 let hevcReady = false;
 
 (async () => {
+  const forceTranscode = document.getElementById('force-transcode').checked;
   const cleanup = await HevcVideojs.attachHevcSupport({
     workerUrl: './transcode-worker.js',
+    forceTranscode,
   });
   hevcReady = cleanup !== null && typeof cleanup === 'function';
 
-  if (!hevcReady) {
+  if (!hevcReady && !forceTranscode) {
     document.getElementById('status').textContent =
       'HEVC transcoding not available — native HEVC or no VideoEncoder';
     return;
@@ -109,7 +93,16 @@ let hevcReady = false;
   document.getElementById('status').textContent = 'Ready — choose a preset or enter an HLS URL';
 })();
 
-// --- Video.js player ---
+document.getElementById('force-transcode').addEventListener('change', async () => {
+  const forceTranscode = document.getElementById('force-transcode').checked;
+  const cleanup = await HevcVideojs.attachHevcSupport({
+    workerUrl: './transcode-worker.js',
+    forceTranscode,
+  });
+  hevcReady = cleanup !== null && typeof cleanup === 'function';
+  document.getElementById('status').textContent = 'Toggle changed — reload a stream to apply';
+});
+
 let player = null;
 
 function loadStream(presetUrl) {
@@ -119,8 +112,7 @@ function loadStream(presetUrl) {
 
   if (player) {
     player.dispose();
-    // Recreate the video-js element (dispose removes it)
-    const wrap = document.querySelector('.container');
+    const wrap = document.querySelector('.demo-main');
     const statusEl = document.getElementById('status');
     const vjsEl = document.createElement('video-js');
     vjsEl.id = 'player';
@@ -130,69 +122,35 @@ function loadStream(presetUrl) {
   }
 
   player = videojs('player', {
-    html5: {
-      vhs: {},
-    },
+    html5: { vhs: {} },
     controls: true,
     autoplay: true,
     muted: false,
   });
 
-  // Enable quality levels (contrib-quality-levels) + UI selector
   if (player.qualityLevels) {
     const ql = player.qualityLevels();
     ql.on('addqualitylevel', (e) => {
       const level = e.qualityLevel;
-      const codec = level.codecs || '';
-      // VHS doesn't always expose codecs — fall back to URL pattern
-      const src = level.id || level.label || '';
-      const isHevc = /hev1|hvc1/i.test(codec) || /h265|hevc/i.test(src);
-      log(`[quality] Level added: ${level.width}x${level.height} ${isHevc ? '(HEVC)' : '(AVC)'} ${src.split('/').pop() || codec}`);
-
-      // When forceTranscode is on, disable AVC levels to force HEVC path
-      if (hevcReady && !isHevc) {
-        level.enabled = false;
-      }
+      log(`[quality] Level added: ${level.width}x${level.height} ${level.codecs || ''}`);
     });
     ql.on('change', () => {
       const active = ql[ql.selectedIndex];
       if (active) {
-        log(`[quality] Switched to: ${active.width}x${active.height} ${active.codecs || ''}`);
+        log(`[quality] Switched to: ${active.width}x${active.height}`);
         document.getElementById('status').textContent =
           `Playing ${active.width}x${active.height} via Video.js + hevc.js`;
       }
     });
   }
-  // Activate quality selector UI menu in control bar
   if (player.hlsQualitySelector) {
     player.hlsQualitySelector({ displayCurrentQuality: true });
-  }
-
-  // Force HEVC renditions only — disable AVC before VHS starts loading segments.
-  // Must happen on loadedmetadata (after manifest is parsed, before segments load).
-  if (hevcReady) {
-    player.on('loadedmetadata', () => {
-      try {
-        const reps = player.tech(true)?.vhs?.representations?.() || [];
-        let hevcCount = 0;
-        reps.forEach((r) => {
-          const isHevc = /hev1|hvc1/i.test(r.codecs || '') || /h265|hevc/i.test(r.uri || '');
-          if (!isHevc) {
-            r.enabled(false);
-            log(`[vhs] Disabled AVC rendition: ${r.width}x${r.height} ${r.codecs || ''}`);
-          } else {
-            hevcCount++;
-          }
-        });
-        if (hevcCount > 0) log(`[vhs] Forced ${hevcCount} HEVC-only rendition(s)`);
-      } catch (e) { /* VHS not available */ }
-    });
   }
 
   player.on('playing', () => {
     document.getElementById('status').textContent = 'Playing via Video.js + hevc.js';
   });
-  player.on('error', (e) => {
+  player.on('error', () => {
     const err = player.error();
     log(`[videojs] Error: ${err?.code} ${err?.message}`);
     document.getElementById('status').textContent = `Error: ${err?.message}`;
