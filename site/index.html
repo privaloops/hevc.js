@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>hevc.js — HEVC/H.265 Decoder in WebAssembly | Browser HEVC Decoding</title>
-  <meta name="description" content="hevc.js is an open-source HEVC/H.265 WASM decoder for the browser. 60fps at 1080p, drop-in plugins for hls.js, dash.js and Video.js. MIT license.">
+  <meta name="description" content="hevc.js is an open-source HEVC/H.265 WASM decoder for the browser. 60fps at 1080p, drop-in plugin for dash.js. MIT license.">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#0a0a0b">
   <link rel="canonical" href="https://hevcjs.dev">
 
   <!-- Open Graph -->
   <meta property="og:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
-  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. Drop-in plugins for hls.js, dash.js and Video.js.">
+  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. Drop-in plugin for dash.js.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hevcjs.dev">
   <meta property="og:site_name" content="hevc.js">
@@ -40,7 +40,7 @@
       "price": "0",
       "priceCurrency": "USD"
     },
-    "description": "Open-source, spec-compliant HEVC/H.265 decoder in WebAssembly. 60fps at 1080p with drop-in plugins for hls.js, dash.js and Video.js.",
+    "description": "Open-source, spec-compliant HEVC/H.265 decoder in WebAssembly. 60fps at 1080p with drop-in plugin for dash.js.",
     "license": "https://opensource.org/licenses/MIT",
     "url": "https://hevcjs.dev",
     "codeRepository": "https://github.com/privaloops/hevc.js"
@@ -122,8 +122,8 @@
       </p>
 
       <p class="text-lg text-silver/70 mb-12">
-        A from-scratch HEVC/H.265 decoder compiled to WebAssembly, with drop-in plugins
-        for hls.js, dash.js and Video.js. For the ~6% of browsers that don't support HEVC natively.
+        A from-scratch HEVC/H.265 decoder compiled to WebAssembly, with a drop-in plugin
+        for dash.js. For the ~6% of browsers that don't support HEVC natively.
       </p>
 
       <nav class="flex flex-wrap gap-4 justify-center" aria-label="Primary actions">
@@ -318,28 +318,13 @@
     <!-- Plugins -->
     <section class="px-6 py-20" aria-label="Player plugins">
       <div class="max-w-5xl mx-auto">
-        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Drop-in plugins</h2>
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Drop-in plugin</h2>
         <p class="text-silver text-center max-w-2xl mx-auto mb-12">
-          HEVC playback for any player. 3 lines of code.
+          HEVC playback for dash.js. 3 lines of code.
           <br><span class="text-silver/50">Activates only when native HEVC is unavailable.</span>
         </p>
 
-        <div class="grid md:grid-cols-3 gap-6">
-          <!-- hls.js -->
-          <div class="code-block rounded-xl p-6">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm" aria-hidden="true">HLS</div>
-              <div>
-                <h3 class="text-white font-semibold">hls.js</h3>
-                <div class="text-xs text-silver/50">@hevcjs/hlsjs</div>
-              </div>
-            </div>
-            <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
-  <span class="text-accent">from</span> <span class="text-green-400">'@hevcjs/hlsjs'</span>;
-
-<span class="text-accent">await</span> attachHevcSupport(hls);</code></pre>
-          </div>
-
+        <div class="max-w-md mx-auto">
           <!-- dash.js -->
           <div class="code-block rounded-xl p-6">
             <div class="flex items-center gap-3 mb-4">
@@ -354,38 +339,15 @@
 
 <span class="text-accent">await</span> attachHevcSupport(player);</code></pre>
           </div>
-
-          <!-- Video.js -->
-          <div class="code-block rounded-xl p-6">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold text-sm" aria-hidden="true">VJS</div>
-              <div>
-                <h3 class="text-white font-semibold">Video.js</h3>
-                <div class="text-xs text-silver/50">@hevcjs/videojs</div>
-              </div>
-            </div>
-            <pre class="text-xs font-mono text-silver leading-relaxed"><code><span class="text-accent">import</span> { attachHevcSupport }
-  <span class="text-accent">from</span> <span class="text-green-400">'@hevcjs/videojs'</span>;
-
-<span class="text-accent">await</span> attachHevcSupport();</code></pre>
-          </div>
         </div>
 
         <div class="flex flex-col items-center gap-2 mt-8">
-          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/hlsjs</code>
           <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/dashjs</code>
-          <code class="text-sm font-mono text-silver/60 bg-ash/50 px-4 py-2 rounded-lg">npm install @hevcjs/videojs</code>
         </div>
 
         <div class="flex flex-wrap gap-4 justify-center mt-8">
           <a href="demo/dash.html" class="inline-flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent-light text-sm font-medium rounded-lg border border-accent/20 hover:bg-accent/25 transition-colors">
             dash.js demo &rarr;
-          </a>
-          <a href="demo/hls.html" class="inline-flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent-light text-sm font-medium rounded-lg border border-accent/20 hover:bg-accent/25 transition-colors">
-            hls.js demo &rarr;
-          </a>
-          <a href="demo/videojs.html" class="inline-flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent-light text-sm font-medium rounded-lg border border-accent/20 hover:bg-accent/25 transition-colors">
-            Video.js demo &rarr;
           </a>
         </div>
       </div>

@@ -6,7 +6,7 @@
 
 **Play HEVC/H.265 video in any browser. No plugin. No install. No server changes.**
 
-A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop-in plugins for hls.js, dash.js and Video.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
+A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a drop-in plugin for dash.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
 
 1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
@@ -14,26 +14,12 @@ Built in 8 days by one developer, assisted by AI — [read the story](https://he
 
 ---
 
-## JavaScript plugins
+## JavaScript plugin
 
 ### Installation
 
 ```bash
-npm install @hevcjs/hlsjs   # for hls.js
-npm install @hevcjs/dashjs   # for dash.js
-npm install @hevcjs/videojs  # for Video.js
-```
-
-### hls.js
-
-```js
-import Hls from 'hls.js';
-import { attachHevcSupport } from '@hevcjs/hlsjs';
-
-const hls = new Hls();
-attachHevcSupport(hls, { workerUrl: './transcode-worker.js' });
-hls.attachMedia(videoElement);
-hls.loadSource('https://example.com/stream.m3u8');
+npm install @hevcjs/dashjs
 ```
 
 ### dash.js
@@ -45,16 +31,6 @@ import { attachHevcSupport } from '@hevcjs/dashjs';
 const player = dashjs.MediaPlayer().create();
 attachHevcSupport(player, { workerUrl: './transcode-worker.js' });
 player.initialize(videoElement, 'https://example.com/manifest.mpd', true);
-```
-
-### Video.js
-
-```js
-import videojs from 'video.js';
-import { attachHevcSupport } from '@hevcjs/videojs';
-
-attachHevcSupport({ workerUrl: './transcode-worker.js' });
-const player = videojs('my-video');
 ```
 
 ### How the transcoding works
@@ -212,11 +188,9 @@ hevc.js/
 │
 ├── packages/
 │   ├── core/               @hevcjs/core — WASM decoder + transcoding pipeline
-│   ├── hlsjs/              @hevcjs/hlsjs — hls.js plugin
-│   ├── dashjs/             @hevcjs/dashjs — dash.js plugin
-│   └── videojs/            @hevcjs/videojs — Video.js plugin
+│   └── dashjs/             @hevcjs/dashjs — dash.js plugin
 │
-├── demo/                   Browser demos (DASH + HLS + Video.js)
+├── demo/                   Browser demos (DASH)
 └── tests/                  Unit tests + 128 oracle tests (pixel-perfect vs ffmpeg)
 ```
 
@@ -228,8 +202,6 @@ hevc.js/
 |---|---|
 | [Decoder](https://hevcjs.dev/demo/) | Raw WASM decoder — drop a .265 file, frame-by-frame playback |
 | [dash.js](https://hevcjs.dev/demo/dash.html) | HEVC DASH streams via dash.js + WASM transcoding |
-| [hls.js](https://hevcjs.dev/demo/hls.html) | HEVC HLS streams via hls.js + WASM transcoding |
-| [Video.js](https://hevcjs.dev/demo/videojs.html) | HEVC HLS via Video.js + VHS + MSE intercept |
 
 Each demo includes a **"Force transcoding"** toggle to bypass native HEVC detection — useful for testing the WASM pipeline on browsers that already support HEVC.
 
