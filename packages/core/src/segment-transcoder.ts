@@ -11,6 +11,7 @@
 
 import { HEVCDecoder } from "./decoder.js";
 import { FMP4Demuxer } from "./fmp4-demuxer.js";
+import { log } from "./log.js";
 import { H264Encoder } from "./h264-encoder.js";
 import type { EncodedChunk } from "./h264-encoder.js";
 import { FMP4Muxer } from "./fmp4-muxer.js";
@@ -133,7 +134,7 @@ export class SegmentTranscoder {
     if (!this._fpsAutoDetected && !this._config.fps && samples[0]!.duration > 0) {
       this._fps = this._timescale / samples[0]!.duration;
       this._fpsAutoDetected = true;
-      console.log(`[hevc.js] Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0]!.duration})`);
+      log.debug(`Auto-detected fps: ${this._fps.toFixed(2)} (timescale=${this._timescale}, sample_duration=${samples[0]!.duration})`);
     }
 
     // Build cumulative timestamps from actual sample durations (timescale units)
@@ -176,7 +177,7 @@ export class SegmentTranscoder {
     const frameW = frames[0]!.width;
     const frameH = frames[0]!.height;
     if (this._encoder && (frameW !== this._width || frameH !== this._height)) {
-      console.log(`[hevc.js] Resolution changed ${this._width}x${this._height} → ${frameW}x${frameH}, recreating encoder`);
+      log.info(`Resolution changed ${this._width}x${this._height} → ${frameW}x${frameH}, recreating encoder`);
       this._encoder.close();
       this._encoder = null;
       this._initResult = null; // force new H.264 init segment

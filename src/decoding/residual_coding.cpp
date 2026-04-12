@@ -106,8 +106,7 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
                                       int numSbPerSide,
                                       bool transformSkipOrBypass) {
     // Table 9-50 — spec has only 15 entries (i=0..14), position 15 is never accessed
-    // (it's always lastScanPos which is implicitly significant).
-    // Ref: libde265 slice.cc:1983 — uses 99 as sentinel for position 15.
+    // (it's always lastScanPos which is implicitly significant). 99 = sentinel.
     static const int ctxIdxMap[16] = {
         0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 99
     };
@@ -162,8 +161,7 @@ static int derive_sig_coeff_flag_ctx(int cIdx, int log2TrafoSize,
         }
     }
 
-    // eq 9-54, 9-55: ctxInc derivation
-    // Ref: libde265 slice.cc:2129 — uses 27 for chroma, conformant with spec eq 9-55.
+    // eq 9-54, 9-55: ctxInc derivation (27 = chroma offset per spec eq 9-55)
     if (cIdx == 0)
         return sigCtx;                                            // eq 9-54
     else

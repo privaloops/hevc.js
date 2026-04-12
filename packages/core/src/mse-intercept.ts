@@ -7,6 +7,8 @@
  * 3. Passes audio and other non-HEVC tracks through untouched
  */
 
+import { log, setLogLevel } from "./log.js";
+import type { LogLevel } from "./log.js";
 import { SegmentTranscoder } from "./segment-transcoder.js";
 import type { SegmentTranscoderConfig } from "./segment-transcoder.js";
 import { TranscodeWorkerClient } from "./transcode-worker-client.js";
@@ -22,6 +24,8 @@ export interface MSEInterceptConfig extends SegmentTranscoderConfig {
   onTranscodeStart?: () => void;
   /** Called when video transcoding ends — use to resume player buffering. */
   onTranscodeEnd?: () => void;
+  /** Log verbosity: 'debug' | 'info' | 'warn' (default) | 'error' | 'silent'. */
+  logLevel?: LogLevel;
 }
 
 interface InterceptState {
@@ -38,6 +42,8 @@ let interceptState: InterceptState | null = null;
  * Install the MSE intercept. Call before dash.js initializes.
  */
 export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
+  if (config.logLevel) setLogLevel(config.logLevel);
+
   if (interceptState?.active) {
     // Already installed — update config (allows late-binding of callbacks)
     Object.assign(interceptState.config, config);
@@ -61,7 +67,7 @@ export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
     if (HEVC_DETECT_RE.test(mimeType)) {
       const h264Mime = mimeType.replace(HEVC_CODEC_RE, H264_CODEC);
       const result = originalIsTypeSupported.call(MediaSource, h264Mime);
-      console.log(`[hevc.js] isTypeSupported("${mimeType}") → "${h264Mime}" → ${result}`);
+      log.debug(`isTypeSupported("${mimeType}") → "${h264Mime}" → ${result}`);
       return result;
     }
     return originalIsTypeSupported.call(MediaSource, mimeType);
@@ -87,7 +93,7 @@ export function installMSEIntercept(config: MSEInterceptConfig = {}): void {
       return originalAddSourceBuffer.call(this, mimeType);
     }
 
-    console.log(`[hevc.js] addSourceBuffer("${mimeType}") → creating H.264 proxy`);
+    log.info(`addSourceBuffer("${mimeType}") → creating H.264 proxy`);
     const h264Mime = `video/mp4; codecs="${H264_CODEC}"`;
     const realSB = originalAddSourceBuffer.call(this, h264Mime);
 
@@ -151,14 +157,14 @@ function createTranscodingProxy(
       bitrate: config.bitrate,
     });
     workerClient.waitReady().then(() => {
-      console.log("[hevc.js] Worker transcoder ready");
+      log.info("Worker transcoder ready");
     }).catch((err) => {
-      console.error("[hevc.js] Worker init failed:", (err as Error)?.message ?? err);
+      log.error("Worker init failed:", (err as Error)?.message ?? err);
     });
   } else {
     transcoder = new SegmentTranscoder(config);
     transcoder.init().catch((err) => {
-      console.error("[hevc.js] Main-thread transcoder init failed:",
+      log.error("Main-thread transcoder init failed:",
         (err as Error)?.message ?? err, (err as Error)?.stack);
     });
   }
@@ -226,7 +232,7 @@ function createTranscodingProxy(
       initParsed = false;
       initAppended = false;
       if (workerClient) workerClient.abort();
-      console.log("[hevc.js] abort() — queue + transcoder reset (gen=" + abortGeneration + ")");
+      log.debug("abort() — queue + transcoder reset (gen=" + abortGeneration + ")");
       realAbort();
     },
     writable: true, configurable: true,
@@ -274,7 +280,7 @@ function createTranscodingProxy(
     set(value: number) {
       const old = tsOffsetDesc!.get!.call(realSB);
       if (value !== old && (queue.length > 0 || processing)) {
-        console.log(`[hevc.js] timestampOffset changed (${old} → ${value}) — flushing queue`);
+        log.debug(`timestampOffset changed (${old} → ${value}) — flushing queue`);
         abortGeneration++;
         queue.length = 0;
         processing = false;
@@ -351,7 +357,7 @@ function createTranscodingProxy(
         if (isInit || !initParsed) {
           const initData = isInit ? segment : cachedInitData;
           if (!initData) {
-            console.error("[hevc.js] No init segment available — cannot process media");
+            log.error("No init segment available — cannot process media");
             continue;
           }
 
@@ -364,7 +370,7 @@ function createTranscodingProxy(
           initParsed = true;
           // Reset initAppended — after a new init, we need a fresh H.264 init
           initAppended = false;
-          console.log("[hevc.js] Init segment parsed");
+          log.debug("Init segment parsed");
 
           if (isInit) {
             // Release backpressure — init-only append, no media to transcode
@@ -379,7 +385,7 @@ function createTranscodingProxy(
         }
 
         // Media segment: streaming transcode (partial chunks emitted incrementally)
-        console.log(`[hevc.js] Transcoding segment (${segment.byteLength}B) [streaming]...`);
+        log.debug(`Transcoding segment (${segment.byteLength}B) [streaming]...`);
         config.onTranscodeStart?.();
         let chunkCount = 0;
         let firstChunkEmitted = false;
@@ -396,7 +402,7 @@ function createTranscodingProxy(
             realAppend(initSeg.buffer as ArrayBuffer);
             await waitForRealUpdateEnd();
             if (abortGeneration !== myGeneration) return;
-            console.log("[hevc.js] H.264 init segment appended [streaming]");
+            log.debug("H.264 init segment appended [streaming]");
           }
 
           // Append partial H.264 segment
@@ -422,7 +428,7 @@ function createTranscodingProxy(
 
         const buffered = target.buffered;
         const end = buffered.length ? buffered.end(buffered.length - 1).toFixed(2) : "0";
-        console.log(`[hevc.js] Streaming done (${chunkCount} chunks), buffered: ${end}s`);
+        log.debug(`Streaming done (${chunkCount} chunks), buffered: ${end}s`);
 
         // Release backpressure if queue dropped below threshold.
         // Guard: fakeUpdating may already be false (released in appendBuffer).
@@ -434,7 +440,7 @@ function createTranscodingProxy(
       }
     } catch (err) {
       if (abortGeneration !== myGeneration) return; // aborted — swallow error
-      console.error("[hevc.js/dash] Transcoding error:",
+      log.error("Transcoding error:",
         (err as Error)?.message ?? err, (err as Error)?.stack);
       fakeUpdating = false;
       dispatchOnSB("error");
@@ -464,13 +470,6 @@ function isInitSegment(data: Uint8Array): boolean {
   const boxType = view.getUint32(4);
   // 'ftyp' = 0x66747970, 'moov' = 0x6D6F6F76
   return boxType === 0x66747970 || boxType === 0x6D6F6F76;
-}
-
-function waitForUpdateEnd(sb: SourceBuffer): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (!sb.updating) { resolve(); return; }
-    sb.addEventListener("updateend", () => resolve(), { once: true });
-  });
 }
 
 function toUint8Array(data: BufferSource): Uint8Array {

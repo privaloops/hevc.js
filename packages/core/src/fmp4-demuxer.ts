@@ -8,6 +8,7 @@
 
 import { createFile as mp4boxCreateFile, Log as MP4BoxLog } from "mp4box";
 import type { MP4Info, MP4Sample, MP4Track, ArrayBufferWithStart } from "mp4box";
+import { log } from "./log.js";
 
 export interface DemuxedSample {
   trackId: number;
@@ -75,7 +76,7 @@ export class FMP4Demuxer {
     };
 
     this._mp4box.onError = (e: Error) => {
-      console.error("[FMP4Demuxer] mp4box error:", e);
+      log.error("[FMP4Demuxer] mp4box error:", e);
     };
   }
 

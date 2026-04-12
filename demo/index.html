@@ -3,43 +3,100 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HEVC Decode — WebAssembly Demo</title>
+<title>hevc.js — HEVC/H.265 WebAssembly Decoder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="demo.css">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-  h1 { font-size: 1.4em; margin-bottom: 12px; color: #fff; }
-  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
-  button, label { background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
-  button:hover, label:hover { background: #0f3460; }
-  button:disabled { opacity: 0.4; cursor: default; }
-  input[type="file"] { display: none; }
-  canvas { border: 1px solid #0f3460; border-radius: 4px; max-width: 100%; background: #000; }
-  .info { font-size: 0.85em; color: #aaa; margin-top: 8px; text-align: center; }
-  .info span { color: #53c1de; }
-  #status { margin-top: 8px; font-size: 0.85em; color: #e94560; }
-  .frame-nav { display: flex; gap: 8px; align-items: center; }
-  .frame-nav span { min-width: 80px; text-align: center; }
+  .drop-zone {
+    border: 2px dashed rgba(99,102,241,0.25);
+    border-radius: 0.75rem;
+    padding: 3rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    margin-bottom: 1rem;
+    width: 100%;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: rgba(99,102,241,0.5); }
+  .drop-zone-icon { font-size: 3rem; opacity: 0.4; margin-bottom: 0.75rem; }
+  .drop-zone p { color: #a1a1aa; font-size: 0.9rem; }
+  .drop-zone .highlight { color: #fff; font-family: 'JetBrains Mono', monospace; }
+  .drop-zone button {
+    background: none; border: none; color: #6366f1; cursor: pointer;
+    text-decoration: underline; font-family: inherit; font-size: inherit;
+  }
+  .drop-zone button:hover { color: #818cf8; }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    width: 100%;
+    margin-top: 1rem;
+  }
+  .stat-item { text-align: center; }
+  .stat-value {
+    font-size: 1.5rem; font-weight: 700; color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .stat-label { font-size: 0.75rem; color: #a1a1aa; }
 </style>
 </head>
 <body>
 
-<h1>HEVC/H.265 WebAssembly Decoder</h1>
+<nav class="demo-nav">
+  <a href="https://hevcjs.dev" class="demo-nav-brand">hevc<span>.js</span></a>
+  <a href="index.html" class="active">Decoder</a>
+  <a href="dash.html">dash.js</a>
+  <a href="hls.html">hls.js</a>
+  <a href="videojs.html">Video.js</a>
+</nav>
 
-<div class="controls">
-  <label for="file-input">Open .265 file</label>
-  <input type="file" id="file-input" accept=".265,.hevc,.h265,.bin">
-  <div class="frame-nav">
-    <button id="btn-prev" disabled>&lt; Prev</button>
-    <span id="frame-label">—</span>
-    <button id="btn-next" disabled>Next &gt;</button>
+<main class="demo-main">
+  <h1 class="demo-title">HEVC/H.265 WebAssembly Decoder</h1>
+  <p class="demo-subtitle">Drop an HEVC bitstream and watch it decode frame by frame in your browser</p>
+
+  <div class="drop-zone" id="drop-zone">
+    <div class="drop-zone-icon">&#9654;</div>
+    <p>Drop a <span class="highlight">.h265</span> or <span class="highlight">.hevc</span> file here</p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #71717a;">or <button id="use-sample">use a sample clip</button></p>
+    <input type="file" id="file-input" accept=".265,.hevc,.h265,.bin" style="display:none">
   </div>
-  <button id="btn-play" disabled>Play</button>
-</div>
 
-<canvas id="display" width="640" height="480"></canvas>
+  <canvas id="display" class="demo-canvas" width="640" height="480"></canvas>
 
-<div class="info" id="info"></div>
-<div id="status">Loading WASM module...</div>
+  <div class="demo-controls" style="justify-content: center; margin-top: 0.75rem;">
+    <div class="demo-frame-nav">
+      <button id="btn-prev" class="demo-btn" disabled>&larr; Prev</button>
+      <span id="frame-label">&mdash;</span>
+      <button id="btn-next" class="demo-btn" disabled>Next &rarr;</button>
+    </div>
+    <button id="btn-play" class="demo-btn" disabled>Play</button>
+  </div>
+
+  <div class="demo-info" id="info"></div>
+  <div id="status" class="demo-status" style="text-align: center;">Loading WASM module...</div>
+
+  <div class="stats-grid" id="stats" style="display: none;">
+    <div class="stat-item">
+      <div class="stat-value" id="stat-frames">&mdash;</div>
+      <div class="stat-label">frames</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="stat-time">&mdash;</div>
+      <div class="stat-label">decode time</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="stat-fps">&mdash;</div>
+      <div class="stat-label">fps</div>
+    </div>
+  </div>
+</main>
+
+<footer class="demo-footer">
+  <a href="https://hevcjs.dev">hevc.js</a> &middot; <a href="https://github.com/privaloops/hevc.js">GitHub</a> &middot; MIT License
+</footer>
 
 <script>
 const VERTEX_SRC = `
@@ -52,19 +109,17 @@ const VERTEX_SRC = `
   }
 `;
 
-// BT.709 YUV -> RGB (full range for decoded HEVC)
 const FRAGMENT_SRC = `
   precision mediump float;
   varying vec2 v_tex;
   uniform sampler2D u_texY;
   uniform sampler2D u_texCb;
   uniform sampler2D u_texCr;
-  uniform float u_scale; // 1/255 for 8-bit, 1/1023 for 10-bit
+  uniform float u_scale;
   void main() {
     float y  = texture2D(u_texY,  v_tex).r / u_scale;
     float cb = texture2D(u_texCb, v_tex).r / u_scale - 0.5;
     float cr = texture2D(u_texCr, v_tex).r / u_scale - 0.5;
-    // BT.709
     float r = y + 1.5748 * cr;
     float g = y - 0.1873 * cb - 0.4681 * cr;
     float b = y + 1.8556 * cb;
@@ -82,7 +137,6 @@ let playTimer = null;
 let decodeStartTime = 0;
 let decodeTimeMs = 0;
 
-// --- WebGL setup ---
 function initGL() {
   const canvas = document.getElementById('display');
   gl = canvas.getContext('webgl');
@@ -96,7 +150,6 @@ function initGL() {
   gl.linkProgram(program);
   gl.useProgram(program);
 
-  // Fullscreen quad
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
@@ -110,7 +163,6 @@ function initGL() {
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
   gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
 
-  // Textures
   texY  = createTexture(0);
   texCb = createTexture(1);
   texCr = createTexture(2);
@@ -144,7 +196,6 @@ function createTexture(unit) {
 function uploadPlane(tex, unit, data, width, height, bitDepth) {
   gl.activeTexture(gl.TEXTURE0 + unit);
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  // Convert uint16 to float-compatible uint8 (normalize to 0-255 range)
   const scale = bitDepth <= 8 ? 1 : (255 / ((1 << bitDepth) - 1));
   const u8 = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) {
@@ -158,9 +209,6 @@ function renderFrame(frame) {
   canvas.width = frame.width;
   canvas.height = frame.height;
   gl.viewport(0, 0, frame.width, frame.height);
-
-  // For 8-bit: textures store val/255, shader reads as val/255, scale=1.0
-  // For 10-bit: textures store val*255/1023/255 = val/1023, shader needs scale=1.0
   gl.uniform1f(uScale, 1.0);
 
   uploadPlane(texY,  0, frame.y,  frame.width, frame.height, frame.bitDepth);
@@ -170,14 +218,13 @@ function renderFrame(frame) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// --- Worker communication ---
 function initWorker() {
   worker = new Worker('worker.js');
   worker.onmessage = (e) => {
     const msg = e.data;
     switch (msg.type) {
       case 'ready':
-        setStatus('Ready — open a .265 file');
+        setStatus('Ready — open a .265 file or use the sample clip');
         break;
       case 'info':
         streamInfo = msg.info;
@@ -219,32 +266,60 @@ function updateInfo() {
   const msPerFrame = decodeTimeMs > 0 ? (decodeTimeMs / frames.length).toFixed(1) : '—';
   el.innerHTML = `<span>${streamInfo.width}x${streamInfo.height}</span> ` +
     `<span>${streamInfo.bitDepth}-bit</span> ` +
-    `<span>${frames.length} frames</span> ` +
-    `<span>${fps} fps</span> ` +
     `<span>${msPerFrame} ms/frame</span> ` +
     `<span>.wasm ${(window._wasmSize / 1024).toFixed(0)}KB</span>`;
+
+  const statsEl = document.getElementById('stats');
+  statsEl.style.display = 'grid';
+  document.getElementById('stat-frames').textContent = frames.length;
+  document.getElementById('stat-time').textContent = (decodeTimeMs / 1000).toFixed(2) + 's';
+  document.getElementById('stat-fps').textContent = fps;
 }
 
 function setStatus(msg) {
   document.getElementById('status').textContent = msg;
 }
 
-// --- Event handlers ---
-document.getElementById('file-input').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+// Drop zone
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('click', () => document.getElementById('file-input').click());
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) decodeFile(file);
+});
 
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) decodeFile(file);
+});
+
+document.getElementById('use-sample').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  setStatus('Downloading sample...');
+  const resp = await fetch('bbb1080_singleslice.265');
+  const data = await resp.arrayBuffer();
+  decodeStartTime = performance.now();
+  worker.postMessage({ type: 'decode', data }, [data]);
+  setStatus('Decoding sample...');
+});
+
+async function decodeFile(file) {
   frames = [];
   streamInfo = null;
   playing = false;
   clearInterval(playTimer);
   document.getElementById('btn-play').textContent = 'Play';
+  document.getElementById('stats').style.display = 'none';
 
   setStatus('Decoding ' + file.name + '...');
   const data = await file.arrayBuffer();
   decodeStartTime = performance.now();
   worker.postMessage({ type: 'decode', data }, [data]);
-});
+}
 
 document.getElementById('btn-prev').addEventListener('click', () => showFrame(currentFrame - 1));
 document.getElementById('btn-next').addEventListener('click', () => showFrame(currentFrame + 1));
@@ -257,24 +332,19 @@ document.getElementById('btn-play').addEventListener('click', () => {
     playing = true;
     document.getElementById('btn-play').textContent = 'Pause';
     playTimer = setInterval(() => {
-      if (currentFrame >= frames.length - 1) {
-        currentFrame = -1; // loop
-      }
+      if (currentFrame >= frames.length - 1) currentFrame = -1;
       showFrame(currentFrame + 1);
-    }, 40); // ~25fps
+    }, 40);
   }
 });
 
-// Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') showFrame(currentFrame - 1);
   else if (e.key === 'ArrowRight') showFrame(currentFrame + 1);
   else if (e.key === ' ') { e.preventDefault(); document.getElementById('btn-play').click(); }
 });
 
-// --- Init ---
 if (initGL()) {
-  // Track WASM size
   fetch('hevc-decode.wasm').then(r => { window._wasmSize = +r.headers.get('content-length') || 0; });
   initWorker();
 } else {

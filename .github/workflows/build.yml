@@ -39,7 +39,7 @@ jobs:
           version: 3.1.51
 
       - name: Configure
-        run: emcmake cmake -B build-wasm -DBUILD_TESTS=OFF
+        run: emcmake cmake -B build-wasm -DBUILD_WASM=ON -DBUILD_TESTS=OFF
 
       - name: Build
         run: cmake --build build-wasm --parallel

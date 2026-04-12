@@ -120,3 +120,26 @@ export async function takeScreenshot(page: Page, name: string) {
     fullPage: false,
   });
 }
+
+/** Enable the "Force transcoding" toggle on demo pages */
+export async function enableForceTranscode(page: Page) {
+  const toggle = page.locator('#force-transcode');
+  if (await toggle.count() > 0 && !(await toggle.isChecked())) {
+    await toggle.check();
+  }
+}
+
+/** Check that the player has audio (via AudioContext or volume/muted state) */
+export async function hasAudioSourceBuffer(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>('#player, video');
+    if (!video) return false;
+    try {
+      // Check if video has buffered content and is not muted
+      if (video.buffered && video.buffered.length > 0 && !video.muted && video.volume > 0) {
+        return true;
+      }
+    } catch { /* buffered may throw in some states */ }
+    return false;
+  });
+}

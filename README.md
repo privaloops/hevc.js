@@ -1,6 +1,10 @@
 # hevc.js
 
-**Play HEVC/H.265 video in any browser. No codec license. No plugin. No install.**
+[![Build](https://github.com/privaloops/hevc.js/actions/workflows/build.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/build.yml)
+[![Tests](https://github.com/privaloops/hevc.js/actions/workflows/test.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Play HEVC/H.265 video in any browser. No plugin. No install. No server changes.**
 
 A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with drop-in plugins for hls.js, dash.js and Video.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
 
@@ -216,7 +220,20 @@ hevc.js/
 └── tests/                  Unit tests + 128 oracle tests (pixel-perfect vs ffmpeg)
 ```
 
-## Demo
+## Demos
+
+**[Live demos](https://hevcjs.dev/demo/)** — try each plugin in your browser:
+
+| Demo | Description |
+|---|---|
+| [Decoder](https://hevcjs.dev/demo/) | Raw WASM decoder — drop a .265 file, frame-by-frame playback |
+| [dash.js](https://hevcjs.dev/demo/dash.html) | HEVC DASH streams via dash.js + WASM transcoding |
+| [hls.js](https://hevcjs.dev/demo/hls.html) | HEVC HLS streams via hls.js + WASM transcoding |
+| [Video.js](https://hevcjs.dev/demo/videojs.html) | HEVC HLS via Video.js + VHS + MSE intercept |
+
+Each demo includes a **"Force transcoding"** toggle to bypass native HEVC detection — useful for testing the WASM pipeline on browsers that already support HEVC.
+
+### Run locally
 
 ```bash
 pnpm install
@@ -226,4 +243,8 @@ npx serve demo      # Open http://localhost:3000
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+HEVC/H.265 may be covered by patents managed by Access Advance and other patent pools. This software is an independent implementation and does not include or grant any patent license. Users are responsible for evaluating patent obligations in their jurisdiction and use case.
+
+Media samples use [Big Buck Bunny](https://peach.blender.org/) (CC-BY 3.0, Blender Foundation). See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for full attribution.

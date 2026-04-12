@@ -5,6 +5,7 @@
  * heavy work to a Web Worker via postMessage.
  */
 
+import { log } from "./log.js";
 import type { SegmentTranscoderConfig, TranscodedInit } from "./segment-transcoder.js";
 
 export interface TranscodeWorkerClientConfig extends SegmentTranscoderConfig {
@@ -34,7 +35,7 @@ export class TranscodeWorkerClient {
 
     this._worker.onmessage = (e: MessageEvent) => this._onMessage(e.data);
     this._worker.onerror = (e: ErrorEvent) => {
-      console.error("[hevc.js/worker] Worker error:", e.message);
+      log.error("Worker error:", e.message);
     };
 
     // Init the transcoder inside the worker
@@ -164,7 +165,7 @@ export class TranscodeWorkerClient {
         const perf = msg.perf as { demuxMs: number; decodeMs: number; encodeMs: number; frames: number } | null;
         if (perf) {
           const totalMs = perf.demuxMs + perf.decodeMs + perf.encodeMs;
-          console.log(`[hevc.js/perf] Segment #${id} transcoded in ${totalMs.toFixed(0)}ms (${perf.frames}f — demux:${perf.demuxMs.toFixed(0)}ms decode:${perf.decodeMs.toFixed(0)}ms encode:${perf.encodeMs.toFixed(0)}ms)`);
+          log.debug(`Segment #${id} transcoded in ${totalMs.toFixed(0)}ms (${perf.frames}f — demux:${perf.demuxMs.toFixed(0)}ms decode:${perf.decodeMs.toFixed(0)}ms encode:${perf.encodeMs.toFixed(0)}ms)`);
         }
         const pending = this._pendingResolves.get(id);
         if (!pending) break;
@@ -194,7 +195,7 @@ export class TranscodeWorkerClient {
           // to unblock processNext (otherwise it awaits forever)
           this._initParsedReject(new Error(msg.message as string));
         } else {
-          console.error("[hevc.js/worker]", msg.message);
+          log.error(msg.message);
         }
         break;
       }
