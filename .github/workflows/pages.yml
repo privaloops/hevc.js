@@ -53,9 +53,8 @@ jobs:
       - name: Prepare Pages artifact
         run: |
           mkdir -p _site/demo
-          # Landing page at root
-          cp site/index.html _site/index.html
-          cp site/CNAME _site/CNAME
+          # Landing page + assets at root
+          cp -r site/* _site/
           # Demo pages under /demo/
           cp -r demo/* _site/demo/
 
