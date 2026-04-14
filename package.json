@@ -9,20 +9,20 @@
       "import": "./packages/core/dist/index.js",
       "types": "./packages/core/dist/index.d.ts"
     },
-    "./dashjs": {
-      "import": "./packages/dashjs/dist/index.js",
-      "types": "./packages/dashjs/dist/index.d.ts"
+    "./dashjs-plugin": {
+      "import": "./packages/dashjs-plugin/dist/index.js",
+      "types": "./packages/dashjs-plugin/dist/index.d.ts"
     },
     "./wasm": "./packages/core/dist/wasm/hevc-decode.wasm"
   },
   "files": [
     "packages/core/dist/",
-    "packages/dashjs/dist/"
+    "packages/dashjs-plugin/dist/"
   ],
   "scripts": {
     "build:wasm": "emcmake cmake -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm && cp build-wasm/hevc-decode.js build-wasm/hevc-decode.wasm packages/core/dist/wasm/",
     "build:core": "pnpm --filter @hevcjs/core build",
-    "build:dashjs": "pnpm --filter @hevcjs/dashjs build",
+    "build:dashjs": "pnpm --filter @hevcjs/dashjs-plugin build",
     "build:demo:dash-bundle": "npx esbuild demo/dash-entry.ts --bundle --format=iife --global-name=HevcDash --outfile=demo/dash-bundle.js --external:dashjs --sourcemap --target=es2020",
     "build:demo:worker": "npx esbuild packages/core/src/transcode-worker.ts --bundle --format=iife --outfile=demo/transcode-worker.js --sourcemap --target=es2020",
     "build:demo:wasm": "cp build-wasm/hevc-decode.js build-wasm/hevc-decode.wasm demo/",

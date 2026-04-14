@@ -1,4 +1,4 @@
-# @hevcjs/dashjs
+# @hevcjs/dashjs-plugin
 
 HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/dash.js). Software fallback for the ~6% of browsers without native HEVC support (Chrome < 107, Firefox Linux, old GPUs). Transparently transcodes HEVC segments to H.264 via WebAssembly. When native HEVC is available, the plugin detects it and does nothing.
 
@@ -12,7 +12,7 @@ npm install hevc.js dashjs
 
 ```js
 import dashjs from 'dashjs';
-import { attachHevcSupport } from 'hevc.js/dashjs';
+import { attachHevcSupport } from 'hevc.js/dashjs-plugin';
 
 const video = document.querySelector('video');
 const player = dashjs.MediaPlayer().create();
@@ -43,7 +43,7 @@ Audio and subtitle tracks pass through untouched.
 ### `attachHevcSupport(player, config?)`
 
 ```ts
-import { attachHevcSupport } from 'hevc.js/dashjs';
+import { attachHevcSupport } from 'hevc.js/dashjs-plugin';
 
 const cleanup = attachHevcSupport(player, {
   workerUrl: '/transcode-worker.js',   // Web Worker for off-main-thread transcoding
@@ -59,8 +59,8 @@ cleanup();
 ### Lower-level API
 
 ```ts
-import { installMSEIntercept, uninstallMSEIntercept } from 'hevc.js/dashjs';
-import { SegmentTranscoder } from 'hevc.js/dashjs';
+import { installMSEIntercept, uninstallMSEIntercept } from 'hevc.js/dashjs-plugin';
+import { SegmentTranscoder } from 'hevc.js/dashjs-plugin';
 
 // Manual MSE patching (without dash.js)
 installMSEIntercept({ wasmUrl: '/hevc-decode.js' });

@@ -19,14 +19,14 @@ Built in 8 days by one developer, assisted by AI — [read the story](https://he
 ### Installation
 
 ```bash
-npm install @hevcjs/dashjs
+npm install @hevcjs/dashjs-plugin
 ```
 
 ### dash.js
 
 ```js
 import dashjs from 'dashjs';
-import { attachHevcSupport } from '@hevcjs/dashjs';
+import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
 
 const player = dashjs.MediaPlayer().create();
 attachHevcSupport(player, { workerUrl: './transcode-worker.js' });
@@ -188,7 +188,7 @@ hevc.js/
 │
 ├── packages/
 │   ├── core/               @hevcjs/core — WASM decoder + transcoding pipeline
-│   └── dashjs/             @hevcjs/dashjs — dash.js plugin
+│   └── dashjs-plugin/      @hevcjs/dashjs-plugin — dash.js plugin
 │
 ├── demo/                   Browser demos (DASH)
 └── tests/                  Unit tests + 128 oracle tests (pixel-perfect vs ffmpeg)
