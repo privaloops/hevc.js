@@ -57,6 +57,9 @@ jobs:
           cp -r site/* _site/
           # Demo pages under /demo/
           cp -r demo/* _site/demo/
+          # Fix relative paths: site/ and demo/ are siblings locally,
+          # but flattened on GH Pages (demo/ under root)
+          sed -i 's|\.\./demo/|./demo/|g' _site/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
