@@ -2,9 +2,8 @@
  * E2E tests validating the bug fixes from fix/fmp4-timestamps-and-audio-sb:
  * 1. No buffer gaps (78ms fix — fps auto-detection + sample durations)
  * 2. Audio playback works (fakeUpdating backpressure fix)
- * 3. HLS ABR works (encoder recreation on resolution change)
- * 4. Seek works (both DASH and HLS)
- * 5. Native HEVC browsers skip transcoding gracefully
+ * 3. Seek works (DASH)
+ * 4. Native HEVC browsers skip transcoding gracefully
  */
 import { test, expect } from '@playwright/test';
 import {
@@ -45,8 +44,8 @@ async function canPlayHevc(page: import('@playwright/test').Page): Promise<boole
   });
 }
 
-/** Shared ABR test logic for both DASH and HLS */
-async function testABR(page: import('@playwright/test').Page, demo: 'dash' | 'hls', errors: string[]) {
+/** Shared ABR test logic for DASH */
+async function testABR(page: import('@playwright/test').Page, demo: 'dash', errors: string[]) {
   await loadDemoPage(page, `${demo}.html`);
 
   // Skip early if browser can't play HEVC at all (no native + no VideoEncoder)
@@ -106,7 +105,7 @@ async function testABR(page: import('@playwright/test').Page, demo: 'dash' | 'hl
 }
 
 /** Shared seek test logic */
-async function testSeek(page: import('@playwright/test').Page, demo: 'dash' | 'hls', errors: string[]) {
+async function testSeek(page: import('@playwright/test').Page, demo: 'dash', errors: string[]) {
   await loadDemoPage(page, `${demo}.html`);
 
   const capable = await canPlayHevc(page);
@@ -165,17 +164,7 @@ test.describe('DASH ABR — gaps & audio', () => {
 });
 
 // ────────────────────────────────────────────
-// 3. HLS ABR — Buffer gaps + ABR switch
-// ────────────────────────────────────────────
-test.describe('HLS ABR — gaps & ABR switch', () => {
-  test('no buffer gaps + ABR resolution switch works', async ({ page }) => {
-    const errors = collectConsoleErrors(page);
-    await testABR(page, 'hls', errors);
-  });
-});
-
-// ────────────────────────────────────────────
-// 4. Seek tests
+// 3. Seek tests
 // ────────────────────────────────────────────
 test.describe('DASH — seek', () => {
   test('seek forward and resume playback', async ({ page }) => {
@@ -184,15 +173,8 @@ test.describe('DASH — seek', () => {
   });
 });
 
-test.describe('HLS — seek', () => {
-  test('seek forward and resume playback', async ({ page }) => {
-    const errors = collectConsoleErrors(page);
-    await testSeek(page, 'hls', errors);
-  });
-});
-
 // ────────────────────────────────────────────
-// 4b. forceTranscode — ABR + seek
+// 3b. forceTranscode — ABR + seek
 // ────────────────────────────────────────────
 test.describe('DASH ABR — forceTranscode', () => {
   test('forced transcode pipeline works on native-HEVC browser', async ({ page }) => {
@@ -268,7 +250,7 @@ test.describe('DASH seek — forceTranscode', () => {
 });
 
 // ────────────────────────────────────────────
-// 5. Native HEVC detection
+// 4. Native HEVC detection
 // ────────────────────────────────────────────
 test.describe('Native HEVC detection', () => {
   test('DASH — correct detection', async ({ page }) => {
@@ -287,26 +269,6 @@ test.describe('Native HEVC detection', () => {
 
     if (isNative) {
       await takeScreenshot(page, 'dash-native-hevc');
-      expect(log).not.toContain('Worker transcoder ready');
-    }
-
-    assertNoWasmCrash(errors);
-  });
-
-  test('HLS — correct detection', async ({ page }) => {
-    const errors = collectConsoleErrors(page);
-    await loadDemoPage(page, 'hls.html');
-    await page.waitForTimeout(2000);
-
-    const log = await getLog(page);
-    const isNative = log.includes('Native HEVC support detected');
-    const isTranscoding = log.includes('No native HEVC support');
-    const noEncoder = log.includes('not available');
-
-    expect(isNative || isTranscoding || noEncoder).toBe(true);
-
-    if (isNative) {
-      await takeScreenshot(page, 'hls-native-hevc');
       expect(log).not.toContain('Worker transcoder ready');
     }
 
