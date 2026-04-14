@@ -41,9 +41,9 @@
   <div id="status" class="demo-status">Loading...</div>
   <textarea id="log" class="demo-log" readonly></textarea>
 
-  <div class="demo-code"><span class="cm">// npm install @hevcjs/dashjs dashjs</span>
+  <div class="demo-code"><span class="cm">// npm install @hevcjs/dashjs-plugin dashjs</span>
 <span class="kw">import</span> dashjs <span class="kw">from</span> <span class="str">'dashjs'</span>;
-<span class="kw">import</span> { <span class="fn">attachHevcSupport</span> } <span class="kw">from</span> <span class="str">'@hevcjs/dashjs'</span>;
+<span class="kw">import</span> { <span class="fn">attachHevcSupport</span> } <span class="kw">from</span> <span class="str">'@hevcjs/dashjs-plugin'</span>;
 
 <span class="kw">const</span> player = dashjs.<span class="fn">MediaPlayer</span>().<span class="fn">create</span>();
 <span class="kw">await</span> <span class="fn">attachHevcSupport</span>(player);

@@ -80,7 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `workerUrl` option in `attachHevcSupport()` enables Worker mode
   - Fallback to main-thread when `workerUrl` is not provided
 
-- **`@hevcjs/dashjs` — dash.js HEVC plugin**:
+- **`@hevcjs/dashjs-plugin` — dash.js HEVC plugin**:
   - `attachHevcSupport(player)` — one-line integration with dash.js
   - Transparent MSE interception: patches `MediaSource.isTypeSupported`, `addSourceBuffer`, `navigator.mediaCapabilities.decodingInfo`
   - Proxy SourceBuffer with proper `updating` state management — dash.js waits during transcoding, no segment flooding
@@ -97,8 +97,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `HEVCDecoder.create()` supports global `HEVCDecoderModule` from script tag
 
 - **hevc.js monorepo restructure**:
-  - pnpm workspace with `packages/core/`, `packages/dashjs/`
-  - npm subpath exports: `hevc.js`, `hevc.js/dashjs`
+  - pnpm workspace with `packages/core/`, `packages/dashjs-plugin/`
+  - npm subpath exports: `hevc.js`, `hevc.js/dashjs-plugin`
   - tsup build (ESM + .d.ts), TypeScript strict mode
   - esbuild demo bundling (`pnpm build:demo`)
   - C++ source and tests unchanged (128/128 tests pass)
