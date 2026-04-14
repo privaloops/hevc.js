@@ -5,7 +5,7 @@ const LOCAL_DEMO = process.env.LOCAL_DEMO === '1';
 const LOCAL_PORT = 8090;
 const BASE_URL = LOCAL_DEMO
   ? `http://localhost:${LOCAL_PORT}`
-  : 'https://privaloops.github.io/hevc.js';
+  : 'https://privaloops.github.io/hevc.js/demo';
 
 const BS_USER = process.env.BROWSERSTACK_USERNAME || '';
 const BS_KEY = process.env.BROWSERSTACK_ACCESS_KEY || '';

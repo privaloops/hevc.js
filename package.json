@@ -9,38 +9,24 @@
       "import": "./packages/core/dist/index.js",
       "types": "./packages/core/dist/index.d.ts"
     },
-    "./videojs": {
-      "import": "./packages/videojs/dist/index.js",
-      "types": "./packages/videojs/dist/index.d.ts"
-    },
     "./dashjs": {
       "import": "./packages/dashjs/dist/index.js",
       "types": "./packages/dashjs/dist/index.d.ts"
-    },
-    "./hlsjs": {
-      "import": "./packages/hlsjs/dist/index.js",
-      "types": "./packages/hlsjs/dist/index.d.ts"
     },
     "./wasm": "./packages/core/dist/wasm/hevc-decode.wasm"
   },
   "files": [
     "packages/core/dist/",
-    "packages/videojs/dist/",
-    "packages/dashjs/dist/",
-    "packages/hlsjs/dist/"
+    "packages/dashjs/dist/"
   ],
   "scripts": {
     "build:wasm": "emcmake cmake -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm && cp build-wasm/hevc-decode.js build-wasm/hevc-decode.wasm packages/core/dist/wasm/",
     "build:core": "pnpm --filter @hevcjs/core build",
-    "build:videojs": "pnpm --filter @hevcjs/videojs build",
     "build:dashjs": "pnpm --filter @hevcjs/dashjs build",
-    "build:hlsjs": "pnpm --filter @hevcjs/hlsjs build",
     "build:demo:dash-bundle": "npx esbuild demo/dash-entry.ts --bundle --format=iife --global-name=HevcDash --outfile=demo/dash-bundle.js --external:dashjs --sourcemap --target=es2020",
-    "build:demo:hls-bundle": "npx esbuild demo/hls-entry.ts --bundle --format=iife --global-name=HevcHls --outfile=demo/hls-bundle.js --external:hls.js --sourcemap --target=es2020",
-    "build:demo:videojs-bundle": "npx esbuild demo/videojs-entry.ts --bundle --format=iife --global-name=HevcVideojs --outfile=demo/videojs-bundle.js --sourcemap --target=es2020",
     "build:demo:worker": "npx esbuild packages/core/src/transcode-worker.ts --bundle --format=iife --outfile=demo/transcode-worker.js --sourcemap --target=es2020",
     "build:demo:wasm": "cp build-wasm/hevc-decode.js build-wasm/hevc-decode.wasm demo/",
-    "build:demo": "pnpm build:demo:dash-bundle && pnpm build:demo:hls-bundle && pnpm build:demo:videojs-bundle && pnpm build:demo:worker && pnpm build:demo:wasm",
+    "build:demo": "pnpm build:demo:dash-bundle && pnpm build:demo:worker && pnpm build:demo:wasm",
     "build:js": "pnpm -r build",
     "build": "pnpm build:wasm && pnpm build:js",
     "dev": "pnpm -r --parallel dev",
@@ -64,11 +50,8 @@
     "mse",
     "media-source",
     "streaming",
-    "hls",
-    "hlsjs",
     "dash",
-    "dashjs",
-    "videojs"
+    "dashjs"
   ],
   "license": "MIT",
   "author": "Thibaut Lion",

@@ -7,12 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **E2E bug fix validation tests** (Playwright + BrowserStack): 6 tests couvrant gaps buffer, audio, HLS ABR, seek DASH/HLS, détection HEVC natif. Validé sur Chrome/Edge Windows, Chrome/Safari macOS, Firefox (skip)
+- **E2E bug fix validation tests** (Playwright + BrowserStack): tests couvrant gaps buffer, audio, seek DASH, détection HEVC natif. Validé sur Chrome/Edge Windows, Chrome/Safari macOS, Firefox (skip)
 - **BrowserStack Local tunnel support**: `LOCAL_DEMO=1` pour tester contre localhost via tunnel. Script `tools/run-e2e-bs-local.sh`
-- **E2E cross-browser tests** (Playwright + BrowserStack): 8 tests DASH + HLS (page load, 720p/1080p/4K transcode pipeline) sur 6 browsers (Chrome/Edge/Firefox Windows, Chrome/Safari macOS, Firefox Linux). `pnpm test:e2e` (local) et `pnpm test:e2e:bs` (BrowserStack)
-- **Native HEVC detection**: les plugins dashjs/hlsjs détectent si le browser supporte HEVC nativement via `MediaSource.isTypeSupported` et skip le transcoding (Safari, Firefox). Option `forceTranscode: true` pour forcer
+- **E2E cross-browser tests** (Playwright + BrowserStack): tests DASH (page load, 720p/1080p/4K transcode pipeline) sur 5 browsers (Chrome/Edge/Firefox Windows, Chrome/Safari macOS). `pnpm test:e2e` (local) et `pnpm test:e2e:bs` (BrowserStack)
+- **Native HEVC detection**: le plugin dashjs détecte si le browser supporte HEVC nativement via `MediaSource.isTypeSupported` et skip le transcoding (Safari, Firefox). Option `forceTranscode: true` pour forcer
+
+### Removed
+- **`@hevcjs/hlsjs` plugin** : plugin hls.js abandonné — package, demo, tests E2E, streams HLS ABR, documentation supprimés
+- **`@hevcjs/videojs` plugin** : plugin Video.js abandonné — package, demo, tests E2E, documentation supprimés
+- **Tests E2E hls/videojs** : `hls.spec.ts`, `videojs.spec.ts`, `seek-long-stream.spec.ts` supprimés. Tests HLS retirés de `bugfix-validation.spec.ts`
 
 ### Fixed
+- **E2E base URL** : l'URL distante GitHub Pages corrigée (`/hevc.js/demo/` au lieu de `/hevc.js/`)
 - **Buffer gaps 78ms** (`segment-transcoder.ts`): auto-détection du fps depuis les durées des samples demuxés (24fps BBB au lieu du default 25fps). Timestamps calculés depuis les durées cumulées des samples source. Durées muxer prises directement des samples originaux (plus de double arrondi)
 - **Audio SourceBuffer jamais créé** (`mse-intercept.ts`): backpressure `fakeUpdating` relâchée immédiatement quand la queue est peu remplie. dash.js peut créer le SB audio pendant que le transcoding vidéo tourne en arrière-plan
 - **Artefacts ABR switch** (`segment-transcoder.ts`): l'encoder H.264 est recréé quand la résolution des frames change (ABR 480p→720p→1080p). Nouveau init segment H.264 généré et appendé au SourceBuffer
@@ -83,20 +89,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Audio passthrough (non-HEVC tracks untouched)
   - Demo page with dash.js playing HEVC DASH streams (1080p + 4K)
 
-- **`@hevcjs/hlsjs` — hls.js HEVC plugin**:
-  - `attachHevcSupport(hls)` — same API as dashjs
-  - Same MSE intercept pipeline (shared code in `@hevcjs/core`)
-
 - **Shared modules extracted to `@hevcjs/core`**:
   - `FMP4Demuxer` (mp4box.js wrapper), `FMP4Muxer`, `H264Encoder`, `FrameRenderer`, `MSEController`
   - `TranscodePipeline` (HEVC→H.264 orchestration)
-  - `installMSEIntercept` / `SegmentTranscoder` (shared by dashjs + hlsjs)
+  - `installMSEIntercept` / `SegmentTranscoder` (used by dashjs plugin)
   - Dynamic H.264 codec level selection (High 4.0/4.2/5.1 based on resolution)
   - `HEVCDecoder.create()` supports global `HEVCDecoderModule` from script tag
 
 - **hevc.js monorepo restructure**:
-  - pnpm workspace with `packages/core/`, `packages/videojs/`, `packages/dashjs/`, `packages/hlsjs/`
-  - npm subpath exports: `hevc.js`, `hevc.js/videojs`, `hevc.js/dashjs`, `hevc.js/hlsjs`
+  - pnpm workspace with `packages/core/`, `packages/dashjs/`
+  - npm subpath exports: `hevc.js`, `hevc.js/dashjs`
   - tsup build (ESM + .d.ts), TypeScript strict mode
   - esbuild demo bundling (`pnpm build:demo`)
   - C++ source and tests unchanged (128/128 tests pass)
