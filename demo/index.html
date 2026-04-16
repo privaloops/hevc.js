@@ -313,6 +313,10 @@ async function decodeFile(file) {
   document.getElementById('btn-play').textContent = 'Play';
   document.getElementById('stats').style.display = 'none';
 
+  if (file.size > 2 * 1024 * 1024) {
+    setStatus('File too large (max 2MB). For larger files, use the npm package directly.');
+    return;
+  }
   setStatus('Decoding ' + file.name + '...');
   const data = await file.arrayBuffer();
   decodeStartTime = performance.now();
