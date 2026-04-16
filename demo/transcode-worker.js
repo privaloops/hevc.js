@@ -11278,7 +11278,8 @@
           width: 640,
           height: 480,
           bitrate: 1e6,
-          framerate: 25
+          framerate: 25,
+          hardwareAcceleration: "prefer-software"
         });
         return result.supported === true;
       } catch {
