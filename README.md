@@ -4,9 +4,9 @@
 [![Tests](https://github.com/privaloops/hevc.js/actions/workflows/test.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Play HEVC/H.265 video in Chrome & Edge without native support. No plugin. No install. No server changes.**
+**Play HEVC/H.265 video in browsers without native support. No plugin. No install. No server changes.**
 
-A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a drop-in plugin for dash.js. Transcodes HEVC to H.264 in real-time, client-side, via WebCodecs inside a Web Worker. Firefox support (Canvas rendering fallback) is planned.
+A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a drop-in plugin for dash.js. Transcodes HEVC to H.264 in real-time, client-side, via WebCodecs inside a Web Worker. Works on Chrome, Edge, and Firefox where WebCodecs H.264 encoding is available.
 
 1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
