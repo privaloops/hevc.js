@@ -58,7 +58,7 @@ hevc.js transcodes HEVC to H.264 client-side. This requires two things from the 
 | **Safari 13+** | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS/iOS |
 | **Chrome/Edge 107+** (Win/Mac) | Yes (hardware) | No — native | — | GPU decode via platform APIs |
 | **Chrome/Edge 94–106** (Win/Mac) | No | **Yes** | **Yes** | WebCodecs H.264 encoder available (hardware or software) |
-| **Chrome/Edge < 94** | No | No | No | WebCodecs API does not exist |
+| **Chrome/Edge < 94** | No | No | No | No WebCodecs — serve AVC content directly |
 | **Firefox 133+** (Win) | Yes (Media Foundation) | No — native | — | Requires [HEVC Video Extension](https://apps.microsoft.com/detail/9nmzlz57r3t7) installed |
 | **Firefox 133+** (Win, no extension) | Reported but fake | **Yes** | **Yes** | SourceBuffer probe catches the false positive, falls back to transcoding |
 | **Firefox** (Mac) | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS |
