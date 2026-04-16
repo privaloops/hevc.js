@@ -4,9 +4,9 @@
 [![Tests](https://github.com/privaloops/hevc.js/actions/workflows/test.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Play HEVC/H.265 video in any browser. No plugin. No install. No server changes.**
+**Play HEVC/H.265 video in browsers without native support. No plugin. No install. No server changes.**
 
-A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a drop-in plugin for dash.js. The browser only supports H.264? We transcode HEVC to H.264 in real-time, client-side, inside a Web Worker.
+A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a drop-in plugin for dash.js. Transcodes HEVC to H.264 in real-time, client-side, via WebCodecs inside a Web Worker. Works on Chrome, Edge, and Firefox where WebCodecs H.264 encoding is available.
 
 1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
@@ -49,22 +49,26 @@ player.initialize(videoElement, 'https://example.com/manifest.mpd', true);
 
 ### Browser compatibility
 
-**~94% of browsers play HEVC natively** (hardware decode). hevc.js activates only for the ~6% that don't:
+hevc.js transcodes HEVC to H.264 client-side. This requires two things from the browser: **WebAssembly** (to run the HEVC decoder) and **WebCodecs VideoEncoder with H.264 support** (to re-encode the decoded frames). When native HEVC is available, the plugin detects it and does nothing — zero overhead.
 
-| Browser | Native HEVC | hevc.js needed? | Transcoding works? |
-|---|---|---|---|
-| **Safari** 13+ | Yes (hardware) | No — bypassed | — |
-| **Chrome/Edge 107+** (Win/Mac) | Yes (hardware GPU) | No — bypassed | — |
-| **Chrome 94-106** (all platforms) | No | **Yes** | Yes (WebCodecs H.264) |
-| **Chrome < 94** | No | **Yes** | No (no WebCodecs) — falls back to AVC |
-| **Firefox 137+** (Windows) | Partial (hardware) | No — bypassed | — |
-| **Firefox** (Linux, older) | No | **Yes** | No — Firefox H.264 encoding broken ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)), falls back to AVC |
-| **Linux** (Chrome, no VAAPI) | No | **Yes** | Yes (software encode) |
+**Detection strategy**: `MediaSource.isTypeSupported()` can lie (Firefox on Windows reports HEVC support even without the HEVC Video Extension installed). hevc.js verifies native support by actually creating a SourceBuffer — if that fails, it falls back to transcoding.
 
-Other requirements (supported by all modern browsers):
-- **WebAssembly**
-- **Web Workers**
-- **Secure Context** (HTTPS or localhost)
+| Browser | Native HEVC | hevc.js activates? | Transcoding works? | Why |
+|---|---|---|---|---|
+| **Safari 13+** | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS/iOS |
+| **Chrome/Edge 107+** (Win/Mac) | Yes (hardware) | No — native | — | GPU decode via platform APIs |
+| **Chrome/Edge 94–106** (Win/Mac) | No | **Yes** | **Yes** | WebCodecs H.264 encoder available (hardware or software) |
+| **Chrome/Edge < 94** | No | No | No | No WebCodecs — serve AVC content directly |
+| **Firefox 133+** (Win) | Yes (Media Foundation) | No — native | — | Requires [HEVC Video Extension](https://apps.microsoft.com/detail/9nmzlz57r3t7) installed |
+| **Firefox 133+** (Win, no extension) | Reported but fake | **Yes** | **Yes** | SourceBuffer probe catches the false positive, falls back to transcoding |
+| **Firefox** (Mac) | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS |
+| **Firefox** (Linux) | No | **Yes** | Depends | Requires a working H.264 encoder via WebCodecs — works if hardware encoder available, fails on headless/VM setups |
+| **Chrome** (Linux, no VAAPI) | No | **Yes** | **Yes** | Software H.264 encode via WebCodecs |
+
+**Requirements** (supported by all modern browsers):
+- **WebAssembly** + **Web Workers**
+- **Secure Context** (HTTPS or localhost) — WebCodecs is not available on plain HTTP
+- **WebCodecs VideoEncoder** with H.264 support — this is the main limiting factor
 
 No `Cross-Origin-Embedder-Policy` or `Cross-Origin-Opener-Policy` headers needed — the WASM decoder is single-threaded and doesn't use `SharedArrayBuffer`. Works on any static file server.
 

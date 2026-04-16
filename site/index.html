@@ -128,14 +128,14 @@
       </h1>
 
       <p class="text-xl md:text-2xl text-silver max-w-2xl mx-auto mb-4 leading-relaxed">
-        Play HEVC/H.265 in <span class="text-white font-semibold">every browser</span>.
+        Play HEVC/H.265 in <span class="text-white font-semibold">any browser</span> without native support.
         <br>No plugin. No server changes. No double-encoding.
       </p>
 
       <p class="text-lg text-silver/70 mb-12">
         A from-scratch HEVC decoder compiled to WebAssembly, with a drop-in plugin
-        for dash.js. Transcodes HEVC to H.264 client-side for the ~6% of browsers
-        that don't support it natively.
+        for dash.js. Transcodes HEVC to H.264 client-side via WebCodecs.
+        <br><span class="text-silver/50">Chrome, Edge, and Firefox with WebCodecs support.</span>
       </p>
 
       <nav class="flex flex-wrap gap-4 justify-center" aria-label="Primary actions">
@@ -159,9 +159,9 @@
         <h2 class="sr-only">Key numbers</h2>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div class="stat-card rounded-xl p-6 text-center transition-all">
-            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">~6<span class="text-accent text-2xl">%</span></div>
-            <div class="text-sm text-silver uppercase tracking-wider">browsers covered</div>
-            <div class="text-xs text-silver/50 mt-1">that can't play HEVC natively</div>
+            <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">0</div>
+            <div class="text-sm text-silver uppercase tracking-wider">server changes</div>
+            <div class="text-xs text-silver/50 mt-1">works on any static file server</div>
           </div>
           <div class="stat-card rounded-xl p-6 text-center transition-all">
             <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">128<span class="text-accent">/128</span></div>
@@ -306,7 +306,7 @@
           </p>
           <p>
             hevc.js takes a different approach. <span class="text-white">Keep your single HEVC pipeline.</span>
-            For the ~6% of browsers that need it, the transcoding happens client-side, in a Web Worker,
+            For Chrome and Edge without native HEVC, the transcoding happens client-side, in a Web Worker,
             invisible to your player and your infrastructure.
           </p>
           <p>

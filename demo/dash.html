@@ -100,6 +100,20 @@ async function loadMPD(presetUrl) {
   player.on(dashjs.MediaPlayer.events.PLAYBACK_STARTED, () => {
     document.getElementById('status').textContent = 'Playing via dash.js + hevc.js';
   });
+  // Warn if HEVC transcoding is unavailable (Firefox — VideoEncoder H.264 broken)
+  player.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, () => {
+    if (typeof VideoEncoder === 'undefined') {
+      document.getElementById('status').textContent =
+        'This browser does not support WebCodecs. HEVC transcoding is not available. Try Chrome or Edge 94+.';
+      return;
+    }
+    VideoEncoder.isConfigSupported({ codec: 'avc1.42001f', width: 320, height: 240 }).then(r => {
+      if (!r.supported) {
+        document.getElementById('status').textContent =
+          'This browser cannot encode H.264 via WebCodecs. HEVC transcoding is not available. Try Chrome or Edge 94+.';
+      }
+    }).catch(() => {});
+  });
   player.on(dashjs.MediaPlayer.events.ERROR, (e) => {
     document.getElementById('status').textContent = 'Error: ' + (e.error?.message || JSON.stringify(e.error));
   });

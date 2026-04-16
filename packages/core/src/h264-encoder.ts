@@ -151,6 +151,7 @@ export class H264Encoder {
         height: 480,
         bitrate: 1_000_000,
         framerate: 25,
+        hardwareAcceleration: "prefer-software",
       });
       return result.supported === true;
     } catch {

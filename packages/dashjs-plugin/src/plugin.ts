@@ -30,9 +30,36 @@ export interface HevcDashPluginConfig extends MSEInterceptConfig {
 type DashMediaPlayer = any;
 
 /** Check if the browser can play HEVC natively via MSE */
-function hasNativeHevcSupport(): boolean {
+async function hasNativeHevcSupport(): Promise<boolean> {
   try {
-    return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"');
+    if (typeof MediaSource === "undefined") return false;
+    if (!MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"')) return false;
+    // isTypeSupported can lie (e.g. Firefox Win without HEVC extension installed).
+    // Verify by actually creating a SourceBuffer.
+    return await new Promise<boolean>((resolve) => {
+      const ms = new MediaSource();
+      const url = URL.createObjectURL(ms);
+      const video = document.createElement("video");
+      const timeout = setTimeout(() => { cleanup(); resolve(false); }, 1000);
+      function cleanup() {
+        clearTimeout(timeout);
+        video.removeAttribute("src");
+        video.load();
+        URL.revokeObjectURL(url);
+      }
+      ms.addEventListener("sourceopen", () => {
+        try {
+          const sb = ms.addSourceBuffer('video/mp4; codecs="hev1.1.6.L93.B0"');
+          ms.removeSourceBuffer(sb);
+          cleanup();
+          resolve(true);
+        } catch {
+          cleanup();
+          resolve(false);
+        }
+      });
+      video.src = url;
+    });
   } catch {
     return false;
   }
@@ -54,7 +81,7 @@ export async function attachHevcSupport(
   config: HevcDashPluginConfig = {},
 ): Promise<() => void> {
   // Skip transcoding if browser has native HEVC support
-  if (!config.forceTranscode && hasNativeHevcSupport()) {
+  if (!config.forceTranscode && await hasNativeHevcSupport()) {
     console.log("[hevc.js/dash] Native HEVC support detected — transcoding not needed");
     // Register capabilities filter so dash.js accepts HEVC representations
     if (player?.registerCustomCapabilitiesFilter) {
