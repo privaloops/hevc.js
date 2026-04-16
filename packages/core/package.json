@@ -1,7 +1,7 @@
 {
   "name": "@hevcjs/core",
-  "version": "1.0.0",
-  "private": true,
+  "version": "1.0.1",
+  "description": "HEVC/H.265 video decoder for the browser using WebAssembly — decode HEVC streams directly in JavaScript with MSE support",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -13,8 +13,39 @@
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
+  "keywords": [
+    "hevc",
+    "h265",
+    "h.265",
+    "webassembly",
+    "wasm",
+    "codec",
+    "video",
+    "decoder",
+    "browser",
+    "streaming",
+    "transcoding",
+    "mse",
+    "mediasource",
+    "ott",
+    "mp4",
+    "hev1",
+    "media-source-extensions"
+  ],
+  "author": "privaloops",
+  "license": "MIT",
+  "homepage": "https://hevcjs.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/privaloops/hevc.js.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/privaloops/hevc.js/issues"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch"
