@@ -580,6 +580,10 @@
     dropZone.classList.remove('border-accent');
     const file = e.dataTransfer.files[0];
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      dropZone.innerHTML = '<div class="text-red-400 text-lg">File too large (max 2MB)</div><p class="text-silver/50 text-sm mt-2">The playground is for quick tests. For larger files, use the <a href="https://www.npmjs.com/package/@hevcjs/core" class="text-accent hover:text-accent-light underline">npm package</a> directly.</p>';
+      return;
+    }
     file.arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
   });
 
@@ -590,7 +594,13 @@
     input.type = 'file';
     input.accept = '.265,.h265,.hevc,.bin';
     input.onchange = () => {
-      if (input.files[0]) input.files[0].arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
+      if (input.files[0]) {
+        if (input.files[0].size > 2 * 1024 * 1024) {
+          dropZone.innerHTML = '<div class="text-red-400 text-lg">File too large (max 2MB)</div><p class="text-silver/50 text-sm mt-2">The playground is for quick tests. For larger files, use the <a href="https://www.npmjs.com/package/@hevcjs/core" class="text-accent hover:text-accent-light underline">npm package</a> directly.</p>';
+          return;
+        }
+        input.files[0].arrayBuffer().then(buf => decodeBitstream(new Uint8Array(buf)));
+      }
     };
     input.click();
   });
