@@ -5,14 +5,14 @@ HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/
 ## Install
 
 ```bash
-npm install hevc.js dashjs
+npm install @hevcjs/dashjs-plugin dashjs
 ```
 
 ## Usage
 
 ```js
 import dashjs from 'dashjs';
-import { attachHevcSupport } from 'hevc.js/dashjs-plugin';
+import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
 
 const video = document.querySelector('video');
 const player = dashjs.MediaPlayer().create();
@@ -43,7 +43,7 @@ Audio and subtitle tracks pass through untouched.
 ### `attachHevcSupport(player, config?)`
 
 ```ts
-import { attachHevcSupport } from 'hevc.js/dashjs-plugin';
+import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
 
 const cleanup = attachHevcSupport(player, {
   workerUrl: '/transcode-worker.js',   // Web Worker for off-main-thread transcoding
@@ -59,8 +59,8 @@ cleanup();
 ### Lower-level API
 
 ```ts
-import { installMSEIntercept, uninstallMSEIntercept } from 'hevc.js/dashjs-plugin';
-import { SegmentTranscoder } from 'hevc.js/dashjs-plugin';
+import { installMSEIntercept, uninstallMSEIntercept } from '@hevcjs/dashjs-plugin';
+import { SegmentTranscoder } from '@hevcjs/dashjs-plugin';
 
 // Manual MSE patching (without dash.js)
 installMSEIntercept({ wasmUrl: '/hevc-decode.js' });

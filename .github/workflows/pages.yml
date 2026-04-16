@@ -60,6 +60,8 @@ jobs:
           # Fix relative paths: site/ and demo/ are siblings locally,
           # but flattened on GH Pages (demo/ under root)
           sed -i 's|\.\./demo/|./demo/|g' _site/index.html
+          # docs/ pages are one level deeper: ../../demo/ becomes ../demo/
+          find _site/docs -name '*.html' -exec sed -i 's|\.\./\.\./demo/|\.\./demo/|g' {} +
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
