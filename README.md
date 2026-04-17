@@ -53,17 +53,28 @@ hevc.js transcodes HEVC to H.264 client-side. This requires two things from the 
 
 **Detection strategy**: `MediaSource.isTypeSupported()` can lie (Firefox on Windows reports HEVC support even without the HEVC Video Extension installed). hevc.js verifies native support by actually creating a SourceBuffer — if that fails, it falls back to transcoding.
 
-| Browser | Native HEVC | hevc.js activates? | Transcoding works? | Why |
+Each browser has its own decode path on Windows, with different dependencies:
+
+- **Chrome 107+ (Windows)** uses `D3D11VideoDecoder` → D3D11VA (DXVA) directly. **No Microsoft extension required.** Requires a GPU with HEVC hardware decoder (Intel Skylake 2015+, NVIDIA Maxwell 2nd gen / GTX 960 2015+, AMD Fiji / R9 Fury 2015+). No software fallback — if the GPU cannot decode HEVC, Chrome will not play it. Chrome < 130 also caps at 1920×1088 @ 30fps.
+- **Edge (Windows)** uses `VDAVideoDecoder` → MFT (Media Foundation). **Requires the Microsoft [HEVC Video Extension](https://apps.microsoft.com/detail/9nmzlz57r3t7)** (~$1 on the Store). Without it, no HEVC regardless of GPU.
+- **Firefox 133+ (Windows)** also uses MFT and has the same dependency on the Microsoft HEVC Video Extension.
+- **macOS (Safari / Chrome / Edge / Firefox)** decode HEVC natively via VideoToolbox. No extension.
+
+| Browser + OS + condition | Native HEVC | hevc.js activates? | Transcoding works? | Why |
 |---|---|---|---|---|
-| **Safari 13+** | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS/iOS |
-| **Chrome/Edge 107+** (Win/Mac) | Yes (hardware) | No — native | — | GPU decode via platform APIs |
-| **Chrome/Edge 94–106** (Win/Mac) | No | **Yes** | **Yes** | WebCodecs H.264 encoder available (hardware or software) |
-| **Chrome/Edge < 94** | No | No | No | No WebCodecs — serve AVC content directly |
-| **Firefox 133+** (Win) | Yes (Media Foundation) | No — native | — | Requires [HEVC Video Extension](https://apps.microsoft.com/detail/9nmzlz57r3t7) installed |
+| **Safari 13+** (macOS/iOS) | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS/iOS |
+| **Chrome/Edge/Firefox** (Mac) | Yes (VideoToolbox) | No — native | — | Native decode via macOS |
+| **Chrome 107+** (Win, HEVC-capable GPU) | Yes (D3D11VA) | No — native | — | Direct GPU decode, no extension needed |
+| **Chrome 107+** (Win, GPU without HEVC) | No | **Yes** | **Yes** | Chrome has no software HEVC fallback |
+| **Edge** (Win, with HEVC Video Extension) | Yes (MFT) | No — native | — | Requires Microsoft [HEVC Video Extension](https://apps.microsoft.com/detail/9nmzlz57r3t7) |
+| **Edge** (Win, no extension) | No | **Yes** | **Yes** | MFT without extension: no decoder |
+| **Firefox 133+** (Win, with HEVC Video Extension) | Yes (MFT) | No — native | — | Requires Microsoft extension |
 | **Firefox 133+** (Win, no extension) | Reported but fake | **Yes** | **Yes** | SourceBuffer probe catches the false positive, falls back to transcoding |
-| **Firefox** (Mac) | Yes (VideoToolbox) | No — native | — | Hardware decode via macOS |
-| **Firefox** (Linux) | No | **Yes** | Depends | Requires a working H.264 encoder via WebCodecs — works if hardware encoder available, fails on headless/VM setups |
+| **Chrome/Edge 94–106** | No | **Yes** | **Yes** | HEVC not yet shipped in browser, WebCodecs H.264 encoder available |
+| **Chrome/Edge < 94** | No | No | No | No WebCodecs — serve AVC content directly |
+| **Chrome** (Linux, VAAPI enabled) | Variable | Sometimes | **Yes** | Depends on driver and GPU |
 | **Chrome** (Linux, no VAAPI) | No | **Yes** | **Yes** | Software H.264 encode via WebCodecs |
+| **Firefox** (Linux) | No | **Yes** | Depends | Requires a working H.264 encoder via WebCodecs — fails on headless/VM setups |
 
 **Requirements** (supported by all modern browsers):
 - **WebAssembly** + **Web Workers**
