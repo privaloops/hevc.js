@@ -10,7 +10,7 @@ A from-scratch HEVC decoder written in C++17, compiled to WebAssembly, with a dr
 
 1080p @ 60fps. 236KB WASM. Zero dependencies. No special server headers required.
 
-Built in 8 days by one developer, assisted by AI — [read the story](https://hevcjs.dev).
+Built in 8 days by one developer, assisted by AI — [read the story](https://www.developpement.ai/blog/hevcjs-decodeur-h265-navigateur-wasm).
 
 ---
 
