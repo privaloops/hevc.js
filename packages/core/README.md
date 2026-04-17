@@ -1,6 +1,6 @@
 # @hevcjs/core
 
-HEVC/H.265 decoder compiled to WebAssembly, with a built-in HEVC-to-H.264 transcoding pipeline. 1080p @ 60fps, 236KB WASM, zero dependencies.
+HEVC/H.265 decoder compiled to WebAssembly, with a built-in HEVC-to-H.264 transcoding pipeline. 236KB WASM, zero dependencies.
 
 Implemented per **ITU-T H.265 v8** — 716 pages of spec, validated pixel-perfect against ffmpeg on 128 test bitstreams.
 
@@ -10,6 +10,24 @@ Implemented per **ITU-T H.265 v8** — 716 pages of spec, validated pixel-perfec
 npm install @hevcjs/core
 ```
 
+## Setup
+
+The package includes 3 static files that must be served by your web server:
+
+- `transcode-worker.js` — Web Worker (IIFE, standalone)
+- `wasm/hevc-decode.js` — Emscripten glue code
+- `wasm/hevc-decode.wasm` — WASM binary (236KB)
+
+Copy them from `node_modules/@hevcjs/core/dist/` to your public/static directory:
+
+```bash
+cp node_modules/@hevcjs/core/dist/transcode-worker.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.wasm public/
+```
+
+Adjust the destination to match your project structure (`public/`, `static/`, `dist/`, etc.).
+
 ## Usage
 
 ### MSE intercept (transparent HEVC playback)
@@ -17,8 +35,10 @@ npm install @hevcjs/core
 ```js
 import { installMSEIntercept } from '@hevcjs/core';
 
-// Patches MediaSource so HEVC segments are transcoded to H.264 on-the-fly
-installMSEIntercept({ workerUrl: '/transcode-worker.js' });
+installMSEIntercept({
+  workerUrl: '/transcode-worker.js',
+  wasmUrl: '/hevc-decode.js',
+});
 ```
 
 ### Segment transcoder (manual control)
@@ -54,7 +74,7 @@ Single-threaded, Apple Silicon:
 ## Requirements
 
 - WebAssembly + Web Workers
-- WebCodecs (Chrome/Edge 94+) for transcoding
+- WebCodecs (Chrome/Edge 94+, Firefox with H.264 encoding support) for transcoding
 - Secure Context (HTTPS or localhost)
 
 ## License
