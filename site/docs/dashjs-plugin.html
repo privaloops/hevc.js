@@ -61,7 +61,7 @@
         "name": "What happens when native HEVC is available?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Nothing. The plugin checks for native HEVC support at startup. If the browser can play HEVC natively (Safari, Chrome 107+ on Windows/Mac), the plugin does not patch anything and the WASM decoder is never loaded. Zero overhead."
+          "text": "Nothing. The plugin checks for native HEVC support at startup and stays dormant when the browser can play HEVC directly &mdash; Safari, any browser on macOS, Chrome 107+ on Windows with an HEVC-capable GPU (Intel Skylake 2015+, NVIDIA Maxwell 2nd gen 2015+, AMD Fiji 2015+), or Edge/Firefox on Windows with the Microsoft HEVC Video Extension installed. Zero overhead."
         }
       },
       {
@@ -393,46 +393,82 @@ player.initialize(video, <span class="text-green-400">'https://example.com/strea
             </thead>
             <tbody>
               <tr>
-                <td class="text-white font-medium">Safari 13+</td>
-                <td><span class="text-green-400">Yes</span> (hardware)</td>
+                <td class="text-white font-medium">Safari 13+ <span class="text-silver/50 text-xs">(macOS/iOS)</span></td>
+                <td><span class="text-green-400">Yes</span> (VideoToolbox)</td>
                 <td>No &mdash; bypassed</td>
                 <td class="text-silver/50">&mdash;</td>
               </tr>
               <tr>
-                <td class="text-white font-medium">Chrome/Edge 107+ <span class="text-silver/50 text-xs">(Win/Mac)</span></td>
-                <td><span class="text-green-400">Yes</span> (hardware GPU)</td>
+                <td class="text-white font-medium">Chrome/Edge/Firefox <span class="text-silver/50 text-xs">(Mac)</span></td>
+                <td><span class="text-green-400">Yes</span> (VideoToolbox)</td>
                 <td>No &mdash; bypassed</td>
                 <td class="text-silver/50">&mdash;</td>
               </tr>
               <tr>
-                <td class="text-white font-medium">Chrome 94-106 <span class="text-silver/50 text-xs">(all)</span></td>
+                <td class="text-white font-medium">Chrome 107+ <span class="text-silver/50 text-xs">(Win, HEVC-capable GPU)</span></td>
+                <td><span class="text-green-400">Yes</span> (D3D11VA)</td>
+                <td>No &mdash; bypassed</td>
+                <td class="text-silver/50">&mdash;</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Chrome 107+ <span class="text-silver/50 text-xs">(Win, GPU without HEVC)</span></td>
                 <td><span class="text-red-400">No</span></td>
                 <td class="text-accent font-medium">Yes</td>
                 <td><span class="text-green-400">Yes</span> (WebCodecs H.264)</td>
               </tr>
               <tr>
-                <td class="text-white font-medium">Chrome &lt; 94</td>
+                <td class="text-white font-medium">Edge <span class="text-silver/50 text-xs">(Win, with HEVC Video Extension)</span></td>
+                <td><span class="text-green-400">Yes</span> (MFT)</td>
+                <td>No &mdash; bypassed</td>
+                <td class="text-silver/50">&mdash;</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Edge <span class="text-silver/50 text-xs">(Win, no extension)</span></td>
+                <td><span class="text-red-400">No</span></td>
+                <td class="text-accent font-medium">Yes</td>
+                <td><span class="text-green-400">Yes</span> (WebCodecs H.264)</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Firefox 133+ <span class="text-silver/50 text-xs">(Win, with HEVC Video Extension)</span></td>
+                <td><span class="text-green-400">Yes</span> (MFT)</td>
+                <td>No &mdash; bypassed</td>
+                <td class="text-silver/50">&mdash;</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Firefox 133+ <span class="text-silver/50 text-xs">(Win, no extension)</span></td>
+                <td><span class="text-yellow-400">Reported but fake</span></td>
+                <td class="text-accent font-medium">Yes</td>
+                <td><span class="text-green-400">Yes</span> (SourceBuffer probe catches false positive)</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Chrome/Edge 94&ndash;106</td>
+                <td><span class="text-red-400">No</span></td>
+                <td class="text-accent font-medium">Yes</td>
+                <td><span class="text-green-400">Yes</span> (WebCodecs H.264)</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Chrome/Edge &lt; 94</td>
                 <td><span class="text-red-400">No</span></td>
                 <td class="text-accent font-medium">Yes</td>
                 <td><span class="text-red-400">No</span> (no WebCodecs) &mdash; falls back to AVC</td>
               </tr>
               <tr>
-                <td class="text-white font-medium">Firefox 137+ <span class="text-silver/50 text-xs">(Win)</span></td>
-                <td><span class="text-green-400">Partial</span> (hardware)</td>
-                <td>No &mdash; bypassed</td>
-                <td class="text-silver/50">&mdash;</td>
+                <td class="text-white font-medium">Chrome <span class="text-silver/50 text-xs">(Linux, VAAPI)</span></td>
+                <td><span class="text-yellow-400">Variable</span> (driver-dependent)</td>
+                <td>Sometimes</td>
+                <td><span class="text-green-400">Yes</span> (software encode)</td>
               </tr>
               <tr>
-                <td class="text-white font-medium">Firefox <span class="text-silver/50 text-xs">(Linux, older)</span></td>
-                <td><span class="text-red-400">No</span></td>
-                <td class="text-accent font-medium">Yes</td>
-                <td><span class="text-red-400">No</span> &mdash; H.264 encoding broken</td>
-              </tr>
-              <tr>
-                <td class="text-white font-medium">Linux Chrome <span class="text-silver/50 text-xs">(no VAAPI)</span></td>
+                <td class="text-white font-medium">Chrome <span class="text-silver/50 text-xs">(Linux, no VAAPI)</span></td>
                 <td><span class="text-red-400">No</span></td>
                 <td class="text-accent font-medium">Yes</td>
                 <td><span class="text-green-400">Yes</span> (software encode)</td>
+              </tr>
+              <tr>
+                <td class="text-white font-medium">Firefox <span class="text-silver/50 text-xs">(Linux)</span></td>
+                <td><span class="text-red-400">No</span></td>
+                <td class="text-accent font-medium">Yes</td>
+                <td><span class="text-yellow-400">Depends</span> &mdash; needs WebCodecs H.264 encoder</td>
               </tr>
             </tbody>
           </table>
@@ -593,7 +629,7 @@ installMSEIntercept({ wasmUrl: <span class="text-green-400">'/hevc-decode.js'</s
           <details>
             <summary>What happens when native HEVC is available?</summary>
             <div class="faq-answer">
-              <p>Nothing. The plugin checks for native HEVC support at startup. If the browser can play HEVC natively (Safari, Chrome 107+ on Windows/Mac), the plugin does not patch anything and the WASM decoder is never loaded. Zero overhead.</p>
+              <p>Nothing. The plugin checks for native HEVC support at startup and stays dormant when the browser can play HEVC directly &mdash; Safari, any browser on macOS, Chrome 107+ on Windows with an HEVC-capable GPU (Intel Skylake 2015+, NVIDIA Maxwell 2nd gen 2015+, AMD Fiji 2015+), or Edge/Firefox on Windows with the Microsoft HEVC Video Extension installed. Zero overhead.</p>
             </div>
           </details>
 
