@@ -1,12 +1,24 @@
 # @hevcjs/dashjs-plugin
 
-HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/dash.js). Software fallback for the ~6% of browsers without native HEVC support (Chrome < 107, Firefox Linux, old GPUs). Transparently transcodes HEVC segments to H.264 via WebAssembly. When native HEVC is available, the plugin detects it and does nothing.
+HEVC/H.265 playback plugin for [dash.js](https://github.com/Dash-Industry-Forum/dash.js). Transparently transcodes HEVC segments to H.264 via WebAssembly when native HEVC is unavailable. When native HEVC is available, the plugin detects it and does nothing.
 
 ## Install
 
 ```bash
 npm install @hevcjs/dashjs-plugin dashjs
 ```
+
+## Setup
+
+Copy the static assets from `@hevcjs/core` to your public directory:
+
+```bash
+cp node_modules/@hevcjs/core/dist/transcode-worker.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.wasm public/
+```
+
+Adjust `public/` to match your project structure.
 
 ## Usage
 
@@ -17,8 +29,10 @@ import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
 const video = document.querySelector('video');
 const player = dashjs.MediaPlayer().create();
 
-// One line — that's it
-attachHevcSupport(player);
+await attachHevcSupport(player, {
+  workerUrl: '/transcode-worker.js',
+  wasmUrl: '/hevc-decode.js',
+});
 
 player.initialize(video, 'https://example.com/stream/manifest.mpd', true);
 ```
@@ -27,14 +41,13 @@ player.initialize(video, 'https://example.com/stream/manifest.mpd', true);
 
 When `attachHevcSupport(player)` is called:
 
-1. **Patches `MediaSource.isTypeSupported()`** — returns `true` for HEVC codecs (hev1/hvc1)
-2. **Patches `navigator.mediaCapabilities.decodingInfo()`** — same, for dash.js 4.x+
-3. **Registers a custom capabilities filter** on the dash.js player — accepts HEVC representations
-4. **Intercepts `addSourceBuffer()`** — when dash.js creates an HEVC SourceBuffer, creates an H.264 one instead and returns a Proxy
-5. **The Proxy SourceBuffer** intercepts `appendBuffer()`:
+1. **Probes native HEVC support** — creates a real SourceBuffer (not just `isTypeSupported`, which can lie on Firefox)
+2. **If native HEVC works** — does nothing, zero overhead
+3. **If not** — patches `MediaSource.addSourceBuffer()` to intercept HEVC and return an H.264 proxy
+4. **The proxy SourceBuffer** intercepts `appendBuffer()`:
    - Init segments: extracts VPS/SPS/PPS from hvcC
    - Media segments: demux (mp4box.js) → decode HEVC (WASM) → encode H.264 (WebCodecs) → mux fMP4 → append to real H.264 SourceBuffer
-6. **Proper `updating` state management** — the proxy reports `updating = true` during transcoding, so dash.js waits between segments (no flooding)
+5. **Proper `updating` state management** — the proxy reports `updating = true` during transcoding, so dash.js waits between segments
 
 Audio and subtitle tracks pass through untouched.
 
@@ -43,41 +56,23 @@ Audio and subtitle tracks pass through untouched.
 ### `attachHevcSupport(player, config?)`
 
 ```ts
-import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
-
-const cleanup = attachHevcSupport(player, {
-  workerUrl: '/transcode-worker.js',   // Web Worker for off-main-thread transcoding
-  wasmUrl: '/path/to/hevc-decode.js',  // WASM glue location (optional)
-  fps: 25,                              // Target framerate (optional, default: 25)
-  bitrate: 4_000_000,                   // H.264 encode bitrate (optional)
+const cleanup = await attachHevcSupport(player, {
+  workerUrl: '/transcode-worker.js',
+  wasmUrl: '/hevc-decode.js',
+  fps: 25,              // Target framerate (optional, default: 25)
+  bitrate: 4_000_000,   // H.264 encode bitrate (optional)
+  forceTranscode: false, // Bypass native HEVC detection (optional)
 });
 
 // Remove patches when done
 cleanup();
 ```
 
-### Lower-level API
-
-```ts
-import { installMSEIntercept, uninstallMSEIntercept } from '@hevcjs/dashjs-plugin';
-import { SegmentTranscoder } from '@hevcjs/dashjs-plugin';
-
-// Manual MSE patching (without dash.js)
-installMSEIntercept({ wasmUrl: '/hevc-decode.js' });
-
-// Or use the transcoder directly
-const transcoder = new SegmentTranscoder({ fps: 25 });
-await transcoder.init();
-await transcoder.processInitSegment(initSegmentBytes);
-const h264Segment = await transcoder.processMediaSegment(mediaSegmentBytes);
-```
-
 ## Requirements
 
-- Chrome 94+ or Edge 94+ (WebCodecs VideoEncoder with H.264 encoding)
+- Chrome 94+, Edge 94+, or Firefox with WebCodecs H.264 encoding support
 - Secure Context (HTTPS or localhost)
-
-**Firefox**: not supported — `VideoEncoder` H.264 encoding is broken in all current versions ([Bug 1918769](https://bugzilla.mozilla.org/show_bug.cgi?id=1918769)). The plugin detects this and falls back to native playback.
+- dash.js >= 4.0.0
 
 ## License
 

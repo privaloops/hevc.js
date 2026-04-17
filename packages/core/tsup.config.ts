@@ -12,11 +12,11 @@ export default defineConfig([
   },
   {
     entry: ["src/transcode-worker.ts"],
-    format: ["esm"],
+    format: ["iife"],
     dts: false,
     clean: false,
     sourcemap: true,
     outDir: "dist",
-    external: ["mp4box"],
+    noExternal: [/.*/],
   },
 ]);
