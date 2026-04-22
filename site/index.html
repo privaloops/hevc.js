@@ -3,24 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>hevc.js — HEVC/H.265 Decoder in WebAssembly | Browser HEVC Decoding</title>
-  <meta name="description" content="hevc.js is an open-source HEVC/H.265 WASM decoder for the browser. 60fps at 1080p, drop-in plugin for dash.js. MIT license.">
+  <title>hevc.js — Play HEVC/H.265 in Any Browser | WebAssembly Decoder & dash.js Plugin</title>
+  <meta name="description" content="Play HEVC/H.265 in any browser without native support. Open-source WebAssembly decoder with drop-in dash.js plugin. Client-side HEVC to H.264 transcoding, 1080p realtime. MIT license.">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#0a0a0b">
-  <link rel="canonical" href="https://hevcjs.dev">
+  <link rel="canonical" href="https://www.hevcjs.dev">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
-  <meta property="og:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. Drop-in plugin for dash.js.">
+  <meta property="og:title" content="hevc.js — Play HEVC/H.265 in Any Browser via WebAssembly">
+  <meta property="og:description" content="Open-source HEVC decoder in WebAssembly with drop-in dash.js plugin. Client-side HEVC to H.264 transcoding, 1080p realtime. No server changes.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://hevcjs.dev">
+  <meta property="og:url" content="https://www.hevcjs.dev">
   <meta property="og:site_name" content="hevc.js">
-  <meta property="og:image" content="https://hevcjs.dev/og-image.png">
+  <meta property="og:image" content="https://www.hevcjs.dev/og-image.png">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="hevc.js — HEVC/H.265 WASM Decoder for the Browser">
-  <meta name="twitter:description" content="Open-source, spec-compliant HEVC decoder in WebAssembly. 60fps 1080p, 128/128 pixel-perfect tests. MIT license.">
+  <meta name="twitter:title" content="hevc.js — Play HEVC/H.265 in Any Browser via WebAssembly">
+  <meta name="twitter:description" content="Open-source HEVC decoder in WebAssembly with drop-in dash.js plugin. Client-side HEVC to H.264 transcoding. No server changes.">
+  <meta name="twitter:image" content="https://www.hevcjs.dev/og-image.png">
 
   <!-- Favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>">
@@ -40,10 +41,19 @@
       "price": "0",
       "priceCurrency": "USD"
     },
-    "description": "Open-source, spec-compliant HEVC/H.265 decoder in WebAssembly. 60fps at 1080p with drop-in plugin for dash.js.",
+    "description": "Play HEVC/H.265 in any browser without native support. Open-source WebAssembly decoder with drop-in dash.js plugin. Client-side HEVC to H.264 transcoding.",
     "license": "https://opensource.org/licenses/MIT",
-    "url": "https://hevcjs.dev",
-    "codeRepository": "https://github.com/privaloops/hevc.js"
+    "url": "https://www.hevcjs.dev",
+    "codeRepository": "https://github.com/privaloops/hevc.js",
+    "downloadUrl": "https://www.npmjs.com/package/@hevcjs/core",
+    "softwareVersion": "1.0.4",
+    "programmingLanguage": ["C++", "TypeScript", "WebAssembly"],
+    "author": {
+      "@type": "Organization",
+      "name": "developpement.ai",
+      "url": "https://www.developpement.ai"
+    },
+    "screenshot": "https://www.hevcjs.dev/og-image.png"
   }
   </script>
 
@@ -156,7 +166,7 @@
     <!-- Numbers -->
     <section class="px-6 py-20" aria-label="Key metrics">
       <div class="max-w-5xl mx-auto">
-        <h2 class="sr-only">Key numbers</h2>
+        <h2 class="sr-only">HEVC WebAssembly Decoder Performance</h2>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div class="stat-card rounded-xl p-6 text-center transition-all">
             <div class="text-4xl md:text-5xl font-extrabold text-white mb-2">0</div>
@@ -195,7 +205,7 @@
     <!-- Pipeline -->
     <section class="px-6 py-20" aria-label="How hevc.js works">
       <div class="max-w-5xl mx-auto">
-        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">How it works</h2>
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">How HEVC to H.264 client-side transcoding works</h2>
         <p class="text-silver text-center max-w-2xl mx-auto mb-12">
           When the browser can't play HEVC natively, hevc.js intercepts the media pipeline
           and transcodes to H.264 — transparent to the player.
@@ -293,7 +303,7 @@
     <!-- Why -->
     <article class="px-6 py-20" aria-label="Why hevc.js exists">
       <div class="max-w-2xl mx-auto">
-        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-8">Why this exists</h2>
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-8">Why you need an HEVC browser fallback</h2>
 
         <div class="text-silver leading-relaxed space-y-4">
           <p>
@@ -310,6 +320,11 @@
             invisible to your player and your infrastructure.
           </p>
           <p>
+            hevc.js is a <span class="text-white">browser compatibility solution for H.265/HEVC</span>.
+            Instead of maintaining a separate H.264 encoding pipeline as a fallback,
+            the decoder handles HEVC to H.264 transcoding client-side, directly in the browser via WebAssembly.
+          </p>
+          <p>
             The decoder is a direct implementation of the ITU-T H.265 spec — 716 pages of it,
             transcribed to C++17 and compiled to WebAssembly. Every frame is validated pixel-perfect against ffmpeg.
           </p>
@@ -320,7 +335,7 @@
     <!-- Plugins -->
     <section class="px-6 py-20" aria-label="Player plugins">
       <div class="max-w-5xl mx-auto">
-        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">Drop-in plugin</h2>
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-4">HEVC plugin for dash.js</h2>
         <p class="text-silver text-center max-w-2xl mx-auto mb-12">
           HEVC playback for dash.js. 3 lines of code.
           <br><span class="text-silver/50">Activates only when native HEVC is unavailable.</span>
@@ -350,6 +365,9 @@
         <div class="flex flex-wrap gap-4 justify-center mt-8">
           <a href="../demo/dash.html" class="inline-flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent-light text-sm font-medium rounded-lg border border-accent/20 hover:bg-accent/25 transition-colors">
             dash.js demo &rarr;
+          </a>
+          <a href="./docs/dashjs-plugin.html" class="inline-flex items-center gap-2 px-4 py-2 bg-smoke text-silver text-sm font-medium rounded-lg border border-ash hover:text-white transition-colors">
+            Full documentation &amp; API reference &rarr;
           </a>
         </div>
       </div>
