@@ -23,6 +23,24 @@ Built in 8 days by one developer, assisted by AI — [read the story](https://ww
 npm install @hevcjs/dashjs-plugin
 ```
 
+### Setup
+
+The plugin relies on 3 static files from `@hevcjs/core` (installed as a transitive dependency) that must be served by your web server:
+
+- `transcode-worker.js` — Web Worker (IIFE, standalone)
+- `wasm/hevc-decode.js` — Emscripten glue code
+- `wasm/hevc-decode.wasm` — WASM binary (236KB)
+
+Copy them from `node_modules/@hevcjs/core/dist/` to your public directory:
+
+```bash
+cp node_modules/@hevcjs/core/dist/transcode-worker.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.js public/
+cp node_modules/@hevcjs/core/dist/wasm/hevc-decode.wasm public/
+```
+
+Pass the path to the copied worker via `workerUrl` in the example below. The worker loads `hevc-decode.js` / `.wasm` from the same directory automatically.
+
 ### dash.js
 
 ```js
