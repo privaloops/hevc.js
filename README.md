@@ -3,7 +3,8 @@
 [![Build](https://github.com/privaloops/hevc.js/actions/workflows/build.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/build.yml)
 [![Tests](https://github.com/privaloops/hevc.js/actions/workflows/test.yml/badge.svg)](https://github.com/privaloops/hevc.js/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![npm downloads](https://img.shields.io/npm/dw/@hevcjs/dashjs-plugin)](https://www.npmjs.com/package/@hevcjs/dashjs-plugin)
+[![npm downloads core](https://img.shields.io/npm/dw/@hevcjs/core?label=core)](https://www.npmjs.com/package/@hevcjs/core)
+[![npm downloads plugin](https://img.shields.io/npm/dw/@hevcjs/dashjs-plugin?label=dashjs-plugin)](https://www.npmjs.com/package/@hevcjs/dashjs-plugin)
 
 **Play HEVC/H.265 video in browsers without native support. No plugin. No install. No server changes.**
 
