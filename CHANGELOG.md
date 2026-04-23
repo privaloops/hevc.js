@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Security hardening CI**: CodeQL static analysis (C++ + JS/TS) on push/PR/weekly schedule, Dependabot for npm deps + GitHub Actions versions, `pnpm audit --prod` in test pipeline
+- **SECURITY.md**: vulnerability reporting policy via GitHub Security Advisories
+- **CI hardening**: all GitHub Actions pinned by SHA (supply chain protection), github-script injection fix (env vars instead of inline `${{ }}`), permissions scoped per-job
 - **E2E bug fix validation tests** (Playwright + BrowserStack): tests couvrant gaps buffer, audio, seek DASH, détection HEVC natif. Validé sur Chrome/Edge Windows, Chrome/Safari macOS, Firefox (skip)
 - **BrowserStack Local tunnel support**: `LOCAL_DEMO=1` pour tester contre localhost via tunnel. Script `tools/run-e2e-bs-local.sh`
 - **E2E cross-browser tests** (Playwright + BrowserStack): tests DASH (page load, 720p/1080p/4K transcode pipeline) sur 5 browsers (Chrome/Edge/Firefox Windows, Chrome/Safari macOS). `pnpm test:e2e` (local) et `pnpm test:e2e:bs` (BrowserStack)
